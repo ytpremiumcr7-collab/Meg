@@ -71,14 +71,18 @@ jobs:
                       os.chmod(dest, mode)
           PY
 
+          # The Actions token may write normal repository content, but GitHub
+          # blocks it from creating/updating workflow files. Publish that one
+          # workflow separately after this import succeeds.
           rm -f "$ZIP"
-          rm -f ".github/workflows/import-megalodon.yml"
+          rm -f ".github/workflows/security-hardening.yml"
 
           git add -A
 
           EXTRACTED="$(git diff --cached --name-only --diff-filter=AM | wc -l | tr -d ' ')"
           echo "Staged extracted files: $EXTRACTED"
-          test "$EXTRACTED" -ge 878
+          test "$EXTRACTED" -eq 877
+          git diff --cached --name-only | grep -Fx "MEGALODON_CHECKPOINT_c30866f.zip"
 
       - name: Commit extracted project
         shell: bash
