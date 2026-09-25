@@ -1,0 +1,90 @@
+name: Import Megalodon checkpoint
+
+on:
+  push:
+    paths:
+      - ".github/workflows/import-megalodon.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  import-checkpoint:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify and extract checkpoint into repository root
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ZIP="MEGALODON_CHECKPOINT_c30866f.zip"
+          EXPECTED_SHA256="73a26ec576bc4237fe12dc3524dd4758a265e2412879e55e6a493f232ac12dbc"
+
+          test -f "$ZIP"
+          ACTUAL_SHA256="$(sha256sum "$ZIP" | awk '{print $1}')"
+          test "$ACTUAL_SHA256" = "$EXPECTED_SHA256"
+
+          python3 - <<'PY'
+          import os
+          import pathlib
+          import shutil
+          import stat
+          import zipfile
+
+          archive = pathlib.Path("MEGALODON_CHECKPOINT_c30866f.zip")
+          root = pathlib.Path(".").resolve()
+
+          with zipfile.ZipFile(archive) as zf:
+              members = [m for m in zf.infolist() if not m.is_dir()]
+              if len(members) != 878:
+                  raise SystemExit(f"Expected 878 files, found {len(members)}")
+
+              for member in members:
+                  src = pathlib.PurePosixPath(member.filename)
+                  parts = src.parts
+                  if not parts or parts[0] != "Meg":
+                      raise SystemExit(f"Unexpected archive path: {member.filename}")
+
+                  rel = pathlib.PurePosixPath(*parts[1:])
+                  if not rel.parts:
+                      continue
+                  if rel.is_absolute() or ".." in rel.parts or ".git" in rel.parts:
+                      raise SystemExit(f"Unsafe archive path: {member.filename}")
+
+                  unix_mode = (member.external_attr >> 16) & 0xFFFF
+                  if stat.S_ISLNK(unix_mode):
+                      raise SystemExit(f"Symlink not allowed: {member.filename}")
+
+                  dest = root.joinpath(*rel.parts)
+                  dest.parent.mkdir(parents=True, exist_ok=True)
+                  with zf.open(member, "r") as source, open(dest, "wb") as target:
+                      shutil.copyfileobj(source, target)
+
+                  mode = unix_mode & 0o777
+                  if mode:
+                      os.chmod(dest, mode)
+          PY
+
+          rm -f "$ZIP"
+          rm -f ".github/workflows/import-megalodon.yml"
+
+          git add -A
+
+          EXTRACTED="$(git diff --cached --name-only --diff-filter=AM | wc -l | tr -d ' ')"
+          echo "Staged extracted files: $EXTRACTED"
+          test "$EXTRACTED" -ge 878
+
+      - name: Commit extracted project
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Import MEGALODON checkpoint c30866f"
+          git push origin HEAD:main
