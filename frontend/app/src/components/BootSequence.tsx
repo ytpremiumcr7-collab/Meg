@@ -11,7 +11,7 @@ export default function BootSequence() {
   const apps = useAppRegistry(s => s.apps);
   const [checks, setChecks] = useState<Check[]>([
     { name: 'API / health', state: 'pending' },
-    { name: 'API / ready · DB/Redis/Tezcatlipoca', state: 'pending' },
+    { name: 'API / ready · DB/Redis', state: 'pending' },
     { name: 'Entitlements / tenant', state: 'pending' },
     { name: 'Tezcatlipoca telemetry', state: 'pending' },
     { name: `App registry (${apps.length} apps)`, state: 'pending' },
@@ -35,7 +35,7 @@ export default function BootSequence() {
         if (cancelled) return;
         if (ready?.status !== 'ready') {
           update(1, 'failed', JSON.stringify(ready));
-          throw new Error('El backend todavía no está listo. Revisa DB, Redis y Tezcatlipoca.');
+          throw new Error('El backend todavía no está listo. Revisa DB y Redis.');
         }
         update(1, 'ok');
 
@@ -43,9 +43,15 @@ export default function BootSequence() {
         if (cancelled) return;
         update(2, 'ok');
 
-        await megalodonClient.tezcatlipoca.telemetry();
-        if (cancelled) return;
-        update(3, 'ok');
+        try {
+          await megalodonClient.tezcatlipoca.telemetry();
+          if (cancelled) return;
+          update(3, 'ok');
+        } catch (exc) {
+          if (cancelled) return;
+          const detail = exc instanceof Error ? exc.message : 'Servicio opcional no disponible';
+          update(3, 'failed', detail);
+        }
         update(4, 'ok');
         setTimeout(() => { if (!cancelled) { setFadeOut(true); setBootComplete(true); } }, 300);
       } catch (exc) {

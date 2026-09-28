@@ -9,8 +9,8 @@
 import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Scale, Send, BookOpen, Search, MessageSquare, X, Sparkles,
-  Loader2, Mic, Wand2, PanelLeft, PanelRight, ChevronLeft,
+  Scale, Send, MessageSquare, Sparkles,
+  Loader2, PanelLeft, PanelRight,
   GitCompare, Calculator, ListChecks
 } from 'lucide-react';
 import { megalodonClient } from '@/lib/api-client';

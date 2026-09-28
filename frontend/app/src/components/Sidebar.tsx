@@ -14,8 +14,8 @@ interface SidebarProps {
   onSelect: (id: string) => void;
 }
 
-function resolveIcon(name: string): React.ComponentType<{ className?: string }> {
-  const map = Icons as unknown as Record<string, React.ComponentType<{ className?: string }>>;
+function resolveIcon(name: string): Icons.LucideIcon {
+  const map = Icons as unknown as Record<string, Icons.LucideIcon>;
   return map[name] || Icons.AppWindow;
 }
 
@@ -81,7 +81,7 @@ function SidebarItem({
   isActive,
   onClick,
 }: {
-  icon: React.ComponentType<{ className?: string }>;
+  icon: Icons.LucideIcon;
   label: string;
   isActive: boolean;
   onClick: () => void;

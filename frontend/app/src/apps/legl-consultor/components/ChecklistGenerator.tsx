@@ -2,8 +2,8 @@
  * Generador de Checklist según Procedimiento Detectado
  */
 import { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { CheckSquare, ListChecks, DollarSign, RefreshCw, Copy, CheckCircle2, Circle, AlertTriangle } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { ListChecks, RefreshCw, CheckCircle2, Circle, AlertTriangle } from 'lucide-react';
 import { megalodonClient } from '@/lib/api-client';
 import { claveProcedimiento, nombreProcedimiento, advertenciaConfiabilidad } from '../lib/procedimiento';
 

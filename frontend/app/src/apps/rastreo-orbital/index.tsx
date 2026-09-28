@@ -92,7 +92,7 @@ export default function Home() {
     (index: number, simMs: number, past: Float32Array, future: Float32Array) => {
       const rec = getRec(index)
       if (!rec) return
-      const periodMs = ((2 * Math.PI) / rec.no) * 60 * 1000
+      const periodMs = ((2 * Math.PI) / rec.meanMotionRad) * 1000
       const n = past.length / 3
       const fill = (out: Float32Array, startMs: number, endMs: number) => {
         let lx = 0
@@ -259,8 +259,8 @@ export default function Home() {
           lon: satellite.degreesLong(geo.longitude),
           alt: geo.height,
           speed: Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z),
-          period: (2 * Math.PI) / rec.no,
-          incl: (rec.inclo * 180) / Math.PI,
+          period: (2 * Math.PI) / rec.meanMotionRad / 60,
+          incl: (rec.inclination * 180) / Math.PI,
         })
       } catch {
         /* decayed */

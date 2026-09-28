@@ -55,6 +55,21 @@ export interface DashboardResponse {
   recent_activity: DashboardActivityItem[];
 }
 
+export interface HealthResponse {
+  status: string;
+  version: string;
+  environment: string;
+}
+
+export interface ReadinessResponse {
+  status: "ready" | "not_ready";
+  database: boolean;
+  redis: boolean;
+  tezcatlipoca: boolean;
+  ready: boolean;
+  optional_dependencies: Record<string, string>;
+}
+
 export interface Expediente {
   id: string;
   identificador: string;
@@ -1087,6 +1102,21 @@ export class MegalodonClient {
     this.token = token;
   }
 
+  private async requestRoot<T>(path: string): Promise<T> {
+    const headers: Record<string, string> = {};
+    if (this.token) headers.Authorization = `Bearer ${this.token}`;
+    const response = await fetch(`${this.baseUrl}${path}`, {
+      method: "GET",
+      headers,
+      credentials: "include",
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ message: `HTTP ${response.status}: ${response.statusText}` }));
+      throw new Error(error.detail || error.message || `HTTP ${response.status}`);
+    }
+    return response.json() as Promise<T>;
+  }
+
   private async requestTez<T>(
     method: string,
     path: string,
@@ -1168,6 +1198,11 @@ export class MegalodonClient {
 
     return response.json();
   }
+
+  health = {
+    live: async (): Promise<HealthResponse> => this.requestRoot<HealthResponse>("/health"),
+    ready: async (): Promise<ReadinessResponse> => this.requestRoot<ReadinessResponse>("/ready"),
+  };
 
   auth = {
     login: async (username: string, password: string): Promise<Token> => {
@@ -2618,7 +2653,12 @@ export class MegalodonClient {
     // vía app/core/calendar.py) -- ver legal_consultor.py::calcular_fechas_procedimiento.
     // Corrige que CalculadoraPlazos.tsx calculaba estas fechas en el
     // navegador con días calendario.
-    calcularFechas: async (fechaInicio: string, procedimiento: string) => {
+    calcularFechas: async (fechaInicio: string, procedimiento: string): Promise<{
+      fecha_inicio: string;
+      fecha_cierre_estimada: string;
+      fecha_fallo_estimada: string;
+      plazos: Record<string, number>;
+    }> => {
       const params = new URLSearchParams({ fecha_inicio: fechaInicio, procedimiento });
       return this.request("POST", `/legal/calcular-fechas?${params.toString()}`);
     },
@@ -2630,7 +2670,11 @@ export class MegalodonClient {
       const params = new URLSearchParams({ max_resultados: String(maxResultados) });
       return this.request("POST", `/legal/categoria/${categoriaId}?${params.toString()}`);
     },
-    chat: async (mensaje: string) => {
+    chat: async (mensaje: string): Promise<{
+      respuesta: string;
+      intencion_detectada: string;
+      parametros: Record<string, unknown>;
+    }> => {
       const params = new URLSearchParams({ mensaje });
       return this.request("POST", `/legal/chat?${params.toString()}`);
     },
