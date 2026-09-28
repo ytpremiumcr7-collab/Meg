@@ -19,6 +19,8 @@ class ProcurementConsistencyEngine:
         economic = model.get("economic", {})
         partidas = economic.get("partidas") or []
         computed_total = sum((money(p.get("importe", money(p.get("cantidad")) * money(p.get("precio_unitario")))) for p in partidas), Decimal("0"))
+        if not partidas and economic.get("budget_total") is not None and economic.get("catalog_total") is not None and money(economic["budget_total"]) != money(economic["catalog_total"]):
+            findings.append(self._blocker("ECON-CATALOG-TOTAL", f"El total del presupuesto ({economic['budget_total']}) no coincide con el total declarado del catálogo ({economic['catalog_total']})."))
         if partidas and economic.get("budget_total") is not None and money(economic["budget_total"]) != computed_total:
             findings.append(self._blocker("ECON-CATALOG-TOTAL", f"El total del presupuesto ({economic['budget_total']}) no coincide con la suma de partidas ({computed_total})."))
 

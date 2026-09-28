@@ -39,6 +39,7 @@ from app.core.errors import MegalodonException, ErrorCode
 from app.engines.costos.parametros import ParametrosCosteoSnapshot
 
 if TYPE_CHECKING:
+    from app.models.bim import GeneracionBIM4D5D
     from app.models.programacion import ProgramaObra
 
 # Tipos cuyo insumo relevante es área (m2) en vez de volumen (m3).

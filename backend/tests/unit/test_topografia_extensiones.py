@@ -70,7 +70,12 @@ def test_planeacion_avanzada_integra_volumen_drenaje_y_terrazas() -> None:
         (10.0, 10.0, 100.5),
     ]
 
-    plan = motor.generar_plan(puntos, cota_objetivo=100.0, salto_terrazas=0.5)
+    plan = motor.generar_plan(
+        puntos,
+        cota_objetivo=100.0,
+        salto_terrazas=0.5,
+        tarifas={"corte_m3": 120.0, "relleno_m3": 90.0, "drenaje_m2": 15.0},
+    )
     assert plan["volumen"]["area_analizada_m2"] > 0
     assert isinstance(plan["terrazas"], list)
     assert plan["drenaje"]["caudal_m3s"] > 0

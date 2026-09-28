@@ -131,6 +131,17 @@ class MotorJuridico:
                 decision=decision,
                 motivo=decision.notes or "Sin umbral aplicable en DB.",
             )
+        if not decision.datos_verificados:
+            return self._sin_determinar(
+                tipo_contratacion=tipo_contratacion,
+                jurisdiction_code=jurisdiction_code,
+                ejercicio_fiscal=ejercicio_fiscal,
+                decision=decision,
+                motivo=(
+                    "El umbral existe pero no está VERIFICADO contra una fuente primaria; "
+                    "la determinación automática queda bloqueada."
+                ),
+            )
 
         umbral_ad = decision.adjudicacion_directa_pesos
         umbral_inv = decision.invitacion_restringida_pesos

@@ -49,6 +49,8 @@ def test_production_settings_accept_postgres_and_external_origins():
         CELERY_RESULT_BACKEND="redis://redis.example.com:6379/2",
         SECRET_KEY="x" * 32,
         CORS_ALLOWED_ORIGINS=["https://app.example.com"],
+        SUPABASE_URL="https://storage.example.com",
+        SUPABASE_SERVICE_KEY="production-service-key",
     )
     assert s.is_production is True
     assert s.database_async_url.startswith("postgresql+asyncpg://")

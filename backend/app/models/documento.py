@@ -9,12 +9,16 @@ openCDE compliant.
 """
 from enum import Enum
 from uuid import uuid4
+from typing import TYPE_CHECKING
 
 from sqlalchemy import String, Text, ForeignKey, Index, DateTime, UniqueConstraint
 from app.db.types import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, UUIDMixin, TenantMixin, AuditMixin
+
+if TYPE_CHECKING:
+    from app.models.expediente import ExpedienteObra
 
 
 class EstadoDocumento(str, Enum):

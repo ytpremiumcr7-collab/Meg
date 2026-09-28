@@ -67,15 +67,20 @@ class TestCPMNoSilence:
 
 
 class TestFeodoNoSilence:
-    def test_feodo_propagates_exception(self):
-        """Verificar que Feodo Tracker propaga excepciones."""
-        import ast
-        with open("tezcatlipoca/services/malware/feodo_tracker.py", "r") as f:
-            content = f.read()
+    def test_feodo_marks_unavailable_instead_of_reporting_clean_feed(self):
+        """Una caída sin respaldo debe distinguirse de un feed vivo vacío."""
+        from tezcatlipoca.services.malware.feodo_tracker import FeodoTrackerClient
 
-        assert "InteropException" in content, "Feodo debe lanzar InteropException"
-        assert "from exc" in content, "Feodo debe usar 'from exc' para chain"
-        assert "logger.error" in content, "Feodo debe loguear el error antes de propagar"
+        client = FeodoTrackerClient()
+        client._feed_cache = MagicMock()
+        client._feed_cache.load.return_value = None
+        with patch(
+            "tezcatlipoca.services.malware.feodo_tracker.sync_get",
+            side_effect=RuntimeError("network down"),
+        ):
+            assert client.fetch() == []
+        assert client.last_status == "unavailable"
+        client._feed_cache.load.assert_called_once_with("feodo_tracker_raw")
 
     def test_no_silent_pass_comment(self):
         """Verificar que no queda el comentario de silencio."""

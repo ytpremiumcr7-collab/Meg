@@ -9,12 +9,16 @@ Modelos de programación de obra (CPM, PERT, EVM).
 from datetime import datetime
 from enum import Enum
 from uuid import uuid4
+from typing import TYPE_CHECKING
 
 from sqlalchemy import String, Text, Numeric, ForeignKey, ForeignKeyConstraint, Index, DateTime, Integer, Boolean, UniqueConstraint
 from app.db.types import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, UUIDMixin, AuditMixin, TenantMixin
+
+if TYPE_CHECKING:
+    from app.models.expediente import ExpedienteObra
 
 
 class TipoDependencia(str, Enum):
@@ -73,8 +77,14 @@ class ProgramaObra(Base, UUIDMixin, TenantMixin, AuditMixin):
     expediente_id: Mapped[UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("expedientes_obra.id", ondelete="CASCADE"), nullable=False
     )
+    expediente: Mapped["ExpedienteObra"] = relationship(
+        "ExpedienteObra", foreign_keys=[expediente_id]
+    )
     actividades: Mapped[list["ActividadPrograma"]] = relationship(
-        "ActividadPrograma", back_populates="programa", cascade="all, delete-orphan"
+        "ActividadPrograma",
+        back_populates="programa",
+        cascade="all, delete-orphan",
+        foreign_keys="ActividadPrograma.programa_id",
     )
 
     __table_args__ = (
@@ -141,7 +151,9 @@ class ActividadPrograma(Base, UUIDMixin, TenantMixin):
     programa_id: Mapped[UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("programas_obra.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    programa: Mapped["ProgramaObra"] = relationship("ProgramaObra", back_populates="actividades")
+    programa: Mapped["ProgramaObra"] = relationship(
+        "ProgramaObra", back_populates="actividades", foreign_keys=[programa_id]
+    )
 
     __table_args__ = (
         Index("idx_actividad_tenant", "tenant_id"),

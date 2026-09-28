@@ -56,6 +56,40 @@ class ProcurementArtifactCompiler:
     def _money(value: Any) -> float:
         return float(value or 0)
 
+    @staticmethod
+    def _xlsx_from_rows(
+        title: str,
+        headers: list[str],
+        rows: list[list[Any]],
+        widths: dict[str, float] | None = None,
+    ) -> bytes:
+        """Build a deterministic workbook for the code-owned compilers."""
+        if not headers:
+            raise ValueError("El artefacto XLSX requiere encabezados.")
+        wb = Workbook()
+        wb.properties.creator = "Megalodon"
+        wb.properties.lastModifiedBy = "Megalodon"
+        wb.properties.created = datetime(2000, 1, 1)
+        wb.properties.modified = datetime(2000, 1, 1)
+        ws = wb.active
+        ws.title = (title or "Artefacto")[:31]
+        ws.append(headers)
+        for cell in ws[1]:
+            cell.font = Font(bold=True)
+            cell.alignment = Alignment(horizontal="center")
+        for row in rows:
+            if len(row) != len(headers):
+                raise ValueError(
+                    f"Fila XLSX con {len(row)} columnas; se esperaban {len(headers)}."
+                )
+            ws.append(row)
+        for column, width in (widths or {}).items():
+            ws.column_dimensions[column].width = width
+        ws.freeze_panes = "A2"
+        out = io.BytesIO()
+        wb.save(out)
+        return out.getvalue()
+
     def compile_proposal_letter_xlsx(self, model: dict[str, Any]) -> bytes:
         facts=model.get("facts", {})
         economic=model.get("economic", {})

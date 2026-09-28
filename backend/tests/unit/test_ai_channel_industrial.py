@@ -83,7 +83,7 @@ class TestAICommand:
         mock_user.username = "test"
         monkeypatch.setattr("tezcatlipoca.routers.ai_channel.require_role", lambda roles: lambda: mock_user)
         result = await ai_command(req, current_user=mock_user, _rate_limit=True)
-        assert result["status"] == "queued"
+        assert result["status"] == "FAILED"
         assert "unknown_command_xyz" in result["result"]
 
     @pytest.mark.asyncio
@@ -93,7 +93,8 @@ class TestAICommand:
         mock_user.username = "test"
         monkeypatch.setattr("tezcatlipoca.routers.ai_channel.require_role", lambda roles: lambda: mock_user)
         result = await ai_command(req, current_user=mock_user, _rate_limit=True)
-        assert result["status"] == "queued"
+        assert result["status"] == "REJECTED"
+        assert result["result"] is None
 
 
 class TestAIBatch:
