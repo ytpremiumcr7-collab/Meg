@@ -20,6 +20,7 @@ import { useMegalodonStore } from '@/stores/useMegalodonStore';
 import { useExpedienteStore } from '@/stores/useExpedienteStore';
 import { megalodonClient } from '@/lib/api-client';
 import type { Presupuesto, PropuestaLicitacionData, ValidacionResultado } from '@/lib/megalodon-client';
+import { CatalogoLibroPicker } from './CatalogoLibroPicker';
 import { FSR_CONST } from './data/legales';
 import { computeComplianceScore, getOverallStatus } from './engines/validador';
 import { formatMXN, getDefaultSimulationVariables } from './engines/montecarlo';
@@ -30,6 +31,8 @@ import type { SimulationResult } from './engines/montecarlo';
 type TabId = 'resumen' | 'presupuesto' | 'analisis' | 'validacion' | 'reporte';
 
 interface BudgetLine {
+  catalogoLibroId?: string;
+  sourceLabel?: string;
   id: string;
   conceptKey: string;
   description: string;
@@ -189,6 +192,7 @@ function BudgetGrid() {
   const [lines, setLines] = useState<BudgetLine[]>([]);
   const [search, setSearch] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
+  const [showCatalog, setShowCatalog] = useState(false);
   const [newLine, setNewLine] = useState({ conceptKey: '', description: '', unit: '', quantity: 0, unitPrice: 0 });
 
   // Presupuestos ya guardados en el backend para este expediente (solo
@@ -243,7 +247,7 @@ function BudgetGrid() {
 
   const addLine = () => {
     if (!newLine.description || newLine.quantity <= 0 || newLine.unitPrice <= 0) return;
-    const id = `BL-${String(lines.length + 1).padStart(3, '0')}`;
+    const id = crypto.randomUUID();
     setLines([...lines, {
       id,
       conceptKey: newLine.conceptKey || id,
@@ -287,6 +291,7 @@ function BudgetGrid() {
         nombre: `Presupuesto ${new Date().toLocaleDateString('es-MX')}`,
         partidas: lines.map((l, i) => ({
           numero: i + 1,
+          catalogo_libro_id: l.catalogoLibroId,
           descripcion: l.description,
           unidad: l.unit,
           cantidad: l.quantity,
@@ -339,6 +344,7 @@ function BudgetGrid() {
           <button onClick={() => setShowAddForm(!showAddForm)} className="flex items-center gap-1.5 px-3 py-1.5 bg-[#C9A84C] text-[#030305] text-xs font-semibold rounded hover:bg-[#D4B85A] transition-colors">
             <Plus className="w-3.5 h-3.5" /> Concepto
           </button>
+          <button onClick={() => setShowCatalog(!showCatalog)} className="px-3 py-1.5 border border-[#C9A84C] text-[#C9A84C] text-xs rounded">Catálogo del libro</button>
           <button onClick={exportJSON} className="flex items-center gap-1.5 px-3 py-1.5 border border-[#2A2A3E] text-[#8A8578] text-xs rounded hover:border-[#C9A84C] hover:text-[#C9A84C] transition-colors">
             <FileJson className="w-3.5 h-3.5" /> Exportar JSON
           </button>
@@ -387,6 +393,18 @@ function BudgetGrid() {
         </div>
       )}
 
+      {showCatalog && <CatalogoLibroPicker onSelect={(item, quantity) => {
+        const unitPrice = Number(item.precio_unitario);
+        setLines(previous => [...previous, {
+          id: crypto.randomUUID(), catalogoLibroId: item.id,
+          sourceLabel: `CSV · modelo ${item.modelo_id} · página ${item.pagina}`,
+          conceptKey: `LIBRO-${item.modelo_id}-${item.fila_csv}`,
+          description: item.descripcion, unit: item.unidad, quantity, unitPrice,
+          amount: Math.round((quantity * unitPrice + Number.EPSILON) * 100) / 100,
+          status: 'pending',
+        }]);
+      }} />}
+
       {/* Add form */}
       {showAddForm && (
         <div className="p-3 bg-[#1A1A26] border-b border-[#2A2A3E] grid grid-cols-6 gap-2">
@@ -422,7 +440,7 @@ function BudgetGrid() {
               <tr key={line.id} className="border-b border-[#2A2A3E]/50 hover:bg-[#222235]/50 transition-colors">
                 <td className="p-2 text-[#4D4A42]">{i + 1}</td>
                 <td className="p-2 font-mono text-[#C9A84C]">{line.conceptKey}</td>
-                <td className="p-2 text-[#E8E4DC]">{line.description}</td>
+                <td className="p-2 text-[#E8E4DC]">{line.description}{line.sourceLabel && <div className="text-[10px] text-[#8A8578]">{line.sourceLabel}</div>}</td>
                 <td className="p-2 text-[#8A8578]">{line.unit}</td>
                 <td className="p-2 text-right font-mono text-[#E8E4DC]">{line.quantity.toLocaleString('es-MX', { maximumFractionDigits: 2 })}</td>
                 <td className="p-2 text-right font-mono text-[#8A8578]">{formatMXN(line.unitPrice)}</td>
@@ -464,7 +482,7 @@ function BudgetGrid() {
           <div className="font-mono text-[#E8E4DC]">{formatMXN(montoImpuesto)}</div>
         </div>
         <div className="text-right">
-          <div className="text-[#C9A84C]">Total</div>
+          <div className="text-[#C9A84C]">Total estimado</div>
           <div className="font-mono text-[#C9A84C] text-base font-bold">{formatMXN(total)}</div>
         </div>
       </div>
@@ -1395,7 +1413,7 @@ export default function MegalodonCostos() {
       {/* Content */}
       <div className="flex-1 overflow-hidden">
         {activeTab === 'resumen' && <ResumenTab />}
-        {activeTab === 'presupuesto' && <BudgetGrid />}
+        {activeTab === 'presupuesto' && <BudgetGrid key={expedienteActivo?.id} />}
         {activeTab === 'analisis' && <AnalysisPanel />}
         {activeTab === 'validacion' && <ValidationPanel />}
         {activeTab === 'reporte' && <ReportPanel />}

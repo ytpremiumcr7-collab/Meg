@@ -587,6 +587,21 @@ export interface GeneracionBIM4D5D {
   num_actividades_generadas?: number;
 }
 
+export interface ConceptoLibro {
+  id: string;
+  descripcion: string;
+  unidad: string;
+  precio_unitario: string | null;
+  modelo_id: string;
+  pagina: string;
+  supuesto: string;
+  utilizable: boolean;
+  bloqueo: string | null;
+  fuente: string;
+  sha256: string;
+  fila_csv: number;
+}
+
 export interface CatalogoAPUOut {
   id: string;
   clave: string;
@@ -1102,10 +1117,26 @@ export class MegalodonClient {
     this.token = token;
   }
 
+  private sessionRefresh: Promise<void> | null = null;
+
+  private async fetchWithSession(url: string, config: RequestInit): Promise<Response> {
+    const response = await fetch(url, config);
+    const path = url.slice(this.baseUrl.length);
+    const sessionRoute = path.startsWith('/api/v1/auth/') && path !== '/api/v1/auth/me';
+    if (response.status !== 401 || this.token || sessionRoute) return response;
+    if (!this.sessionRefresh) {
+      this.sessionRefresh = this.auth.refresh().then(() => undefined).finally(() => {
+        this.sessionRefresh = null;
+      });
+    }
+    try { await this.sessionRefresh; } catch { return response; }
+    return fetch(url, config);
+  }
+
   private async requestRoot<T>(path: string): Promise<T> {
     const headers: Record<string, string> = {};
     if (this.token) headers.Authorization = `Bearer ${this.token}`;
-    const response = await fetch(`${this.baseUrl}${path}`, {
+    const response = await this.fetchWithSession(`${this.baseUrl}${path}`, {
       method: "GET",
       headers,
       credentials: "include",
@@ -1136,7 +1167,7 @@ export class MegalodonClient {
       config.body = body;
       if (!(body instanceof URLSearchParams)) delete headers["Content-Type"];
     }
-    const response = await fetch(url, config);
+    const response = await this.fetchWithSession(url, config);
     if (!response.ok) {
       const error = await response.json().catch(() => ({ message: `HTTP ${response.status}: ${response.statusText}` }));
       throw new Error(error.detail || error.message || `HTTP ${response.status}`);
@@ -1183,7 +1214,7 @@ export class MegalodonClient {
       }
     }
 
-    const response = await fetch(url, config);
+    const response = await this.fetchWithSession(url, config);
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({
@@ -1205,17 +1236,12 @@ export class MegalodonClient {
   };
 
   auth = {
-    login: async (username: string, password: string): Promise<Token> => {
-      const formData = new URLSearchParams();
-      formData.append("username", username);
-      formData.append("password", password);
-
-      const token = await this.request<Token>("POST", "/auth/login", formData, {
+    login: async (username: string, password: string): Promise<{ expires_in: number }> => {
+      this.setToken("");
+      const formData = new URLSearchParams({ username, password });
+      return this.request("POST", "/auth/session/login", formData, {
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
       });
-
-      this.setToken(token.access_token);
-      return token;
     },
 
     register: async (data: {
@@ -1229,12 +1255,12 @@ export class MegalodonClient {
       return this.request<User>("POST", "/auth/register", data);
     },
 
-    refresh: async (refreshToken?: string): Promise<Token> => {
-      const body = refreshToken ? { refresh_token: refreshToken } : undefined;
-      return this.request<Token>("POST", "/auth/refresh", body);
+    refresh: async (): Promise<{ expires_in: number }> => {
+      return this.request("POST", "/auth/session/refresh");
     },
 
     logout: async (): Promise<void> => {
+      if (this.sessionRefresh) await this.sessionRefresh.catch(() => undefined);
       await this.request<void>("POST", "/auth/logout");
       this.setToken("");
     },
@@ -1314,11 +1340,17 @@ export class MegalodonClient {
     },
   };
 
+  catalogoLibro = {
+    buscar: (q: string, skip = 0): Promise<{total: number; items: ConceptoLibro[]}> =>
+      this.request("GET", `/catalogo-libro?${new URLSearchParams({q, skip: String(skip), limit: '50'})}`),
+  };
+
   presupuestos = {
     create: async (expedienteId: string, data: {
       nombre: string;
       descripcion?: string;
       partidas: Array<{
+        catalogo_libro_id?: string;
         numero: number;
         descripcion: string;
         unidad: string;

@@ -8,11 +8,12 @@ API de presupuestos programables conectada a PresupuestoService.
 """
 from app.core.rate_limit import rate_limit_standard, rate_limit_strict
 from datetime import datetime
+from decimal import Decimal
 from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db, verificar_expediente_tenant
@@ -27,17 +28,25 @@ router = APIRouter(dependencies=[Depends(verificar_expediente_tenant)])
 
 
 class PartidaCreate(BaseModel):
+    catalogo_libro_id: Optional[str] = Field(None, min_length=64, max_length=64)
     numero: int
     descripcion: str
     unidad: str
-    cantidad: float = Field(..., gt=0)
+    cantidad: Decimal = Field(..., gt=0, max_digits=18, decimal_places=4)
     # BUG ORIGINAL: era requerido (Field(..., gt=0)) SIEMPRE, incluso para
     # partidas con APU (conceptos/insumos) donde el precio se calcula solo.
     # Ahora solo es obligatorio para partidas tipo tabulador (sin
     # conceptos), donde el precio ya viene resuelto de un catálogo oficial.
-    precio_unitario: Optional[float] = Field(None, gt=0)
+    precio_unitario: Optional[Decimal] = Field(None, gt=0, max_digits=18, decimal_places=2)
     insumos: Optional[List[dict]] = Field(default_factory=list)
     conceptos: Optional[List[dict]] = Field(default_factory=list)
+
+
+    @model_validator(mode="after")
+    def validar_origen_precio(self):
+        if not self.catalogo_libro_id and not self.conceptos and not self.insumos and self.precio_unitario is None:
+            raise ValueError("La partida requiere precio, catálogo o análisis de insumos")
+        return self
 
 
 class PresupuestoCreate(BaseModel):
@@ -148,6 +157,7 @@ async def crear_presupuesto(
     partidas_data = []
     for p in data.partidas:
         partidas_data.append({
+            "catalogo_libro_id": p.catalogo_libro_id,
             "numero": p.numero,
             "descripcion": p.descripcion,
             "unidad": p.unidad,

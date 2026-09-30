@@ -77,6 +77,7 @@ class PresupuestoService(BaseService[Presupuesto]):
            sumando el costo de todos los conceptos.
         """
 
+        self._effective_tenant(None)
         # Validar expediente existe
         result = await self.db.execute(
             select(ExpedienteObra).where(ExpedienteObra.id == expediente_id, ExpedienteObra.tenant_id == self.tenant_id)
@@ -88,13 +89,22 @@ class PresupuestoService(BaseService[Presupuesto]):
                 f"Expediente {expediente_id} no encontrado",
             )
 
-        # Generar identificador
-        from datetime import datetime
-        count_result = await self.db.execute(
-            select(Presupuesto).join(ExpedienteObra, ExpedienteObra.id == Presupuesto.expediente_id).where(Presupuesto.expediente_id == expediente_id, ExpedienteObra.tenant_id == self.tenant_id)
-        )
-        count = len(count_result.scalars().all()) + 1
-        identificador = f"PRE-{expediente.identificador}-{count:03d}"
+        # Resolve catalogue prices on the server; client amounts are not evidence.
+        from app.services.catalogo_libro import resolver
+        referencias = {}
+        partidas_data = [dict(p) for p in partidas_data]
+        for index, data in enumerate(partidas_data, 1):
+            if data.get("catalogo_libro_id"):
+                item = resolver(data["catalogo_libro_id"])
+                if data.get("conceptos") or data.get("insumos"):
+                    raise MegalodonException(ErrorCode.BAD_REQUEST, "No mezclar catálogo con APU")
+                data.update(descripcion=item["descripcion"], unidad=item["unidad"],
+                            precio_unitario=Decimal(item["precio_unitario"]))
+                referencias[str(index)] = item
+
+        # Independent of concurrent creations and deletions; fits String(100).
+        presupuesto_id = uuid4()
+        identificador = f"PRE-{expediente.identificador[:62]}-{presupuesto_id.hex}"
 
         # Construir modelo de costeo
         partidas_costeo = []
@@ -178,8 +188,8 @@ class PresupuestoService(BaseService[Presupuesto]):
         presupuesto_costeo = self.motor_costeo.calcular_presupuesto(presupuesto_costeo)
 
         # Crear en DB
-        presupuesto = await self.create({
-            "id": uuid4(),
+        presupuesto = Presupuesto(**{
+            "id": presupuesto_id,
             "identificador": identificador,
             "nombre": nombre,
             "descripcion": descripcion,
@@ -195,9 +205,14 @@ class PresupuestoService(BaseService[Presupuesto]):
             "factor_impuesto": float(parametros_costeo.factor_impuesto),
             "factor_riesgo": float(parametros_costeo.factor_riesgo),
             "zona_economica": zona_economica,
-            "metadatos": {"parametros_costeo": parametros_costeo.to_dict()},
+            "metadatos": {"parametros_costeo": parametros_costeo.to_dict(), "catalogo_libro": referencias},
             "estado": EstadoPresupuesto.CALCULADO.value,
-        }, creado_por_id=creado_por_id)
+            "tenant_id": self.tenant_id,
+            "creado_por_id": creado_por_id,
+            "actualizado_por_id": creado_por_id,
+        })
+        self.db.add(presupuesto)
+        await self.db.flush()
 
         # Crear partidas, conceptos e insumos
         for p_costeo in presupuesto_costeo.partidas:

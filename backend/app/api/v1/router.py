@@ -13,7 +13,7 @@ from app.api.v1 import (
     auth, expedientes, presupuestos, bim, juridico,
     montecarlo, validadores, ocr, firma, programacion, topografia,
     dashboard, catalogo_apu, licitaciones, contratos,
-    compliance, transparencia, catalogo_conceptos,
+    compliance, transparencia, catalogo_conceptos, catalogo_libro,
     audit, documentos, search, expedientes_advanced,
     presupuestos_advanced,
     # ═══ INTEGRACIÓN ZIP 2 y 3 ═══
@@ -79,3 +79,5 @@ api_router.include_router(pagos.router, prefix="/pagos", tags=["Pagos"])
 
 # Tender Automation Domain
 api_router.include_router(procurement.router, prefix="/procurement", tags=["Tender Automation"])
+
+api_router.include_router(catalogo_libro.router, prefix="/catalogo-libro", tags=["Catálogo del libro"])

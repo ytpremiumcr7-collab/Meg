@@ -17,20 +17,7 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 export const megalodonClient = new MegalodonClient(API_URL);
 
-// Si ya había un token guardado (ver useAuthStore), se re-aplica al
-// recargar la página -- si no se hace esto, tras un refresh el usuario
-// se ve "autenticado" en el store pero el cliente HTTP no manda el
-// header Authorization en ninguna request.
-const STORAGE_KEY = 'megalodon-auth';
-try {
-  const stored = localStorage.getItem(STORAGE_KEY);
-  if (stored) {
-    const parsed = JSON.parse(stored);
-    const token = parsed?.state?.accessToken;
-    if (token) megalodonClient.setToken(token);
-  }
-} catch {
-  // localStorage puede no estar disponible (SSR, modo privado, etc.) --
-  // no es crítico, el usuario simplemente tendría que volver a iniciar
-  // sesión.
+// Retirar credenciales persistidas por versiones anteriores.
+try { localStorage.removeItem('megalodon-auth'); } catch {
+  // El almacenamiento puede estar deshabilitado; no se utiliza para autenticar.
 }

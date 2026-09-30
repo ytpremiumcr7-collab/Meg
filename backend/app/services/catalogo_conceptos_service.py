@@ -1,6 +1,7 @@
 # Copyright © 2026 Cristian Rodriguez
 """Servicio de catálogos de conceptos reales (CFE, CMIC, CONAGA, SCT, PEMEX, CUSTOM)."""
 from typing import Optional, List
+from decimal import Decimal
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_
@@ -38,7 +39,7 @@ class CatalogoConceptosService:
 
     # ─── CONCEPTOS ───
     async def crear_concepto(self, db: AsyncSession, data: ConceptoCatalogoCreate, current_user: User) -> ConceptoCatalogo:
-        await self.obtener_fuente(db, UUID(data.fuente_id))
+        await self.obtener_fuente(db, data.fuente_id)
         stmt = select(ConceptoCatalogo).where(and_(
             ConceptoCatalogo.clave == data.clave,
             ConceptoCatalogo.fuente_id == data.fuente_id,
@@ -53,6 +54,24 @@ class CatalogoConceptosService:
             estado=data.estado, region=data.region, incluye_iva=data.incluye_iva,
             desglose=data.desglose, creado_por_id=current_user.id)
         db.add(c); await db.commit(); await db.refresh(c); return c
+
+    async def actualizar_concepto(self, db, concepto_id, data, current_user):
+        c = await self.obtener_concepto(db, concepto_id)
+        await self.obtener_fuente(db, data.fuente_id)
+        duplicate = await db.scalar(select(ConceptoCatalogo.id).where(
+            ConceptoCatalogo.id != concepto_id,
+            ConceptoCatalogo.fuente_id == data.fuente_id,
+            ConceptoCatalogo.clave == data.clave,
+            ConceptoCatalogo.zona_economica == data.zona_economica,
+        ))
+        if duplicate:
+            raise MegalodonException(ErrorCode.CONFLICT, "Concepto duplicado en la fuente y zona")
+        for key, value in data.model_dump().items():
+            setattr(c, key, value)
+        c.actualizado_por_id = current_user.id
+        await db.commit()
+        await db.refresh(c)
+        return c
 
     async def listar_conceptos(self, db: AsyncSession, skip=0, limit=100,
                                fuente_id=None, zona=None, estado=None, q=None) -> ConceptoCatalogoList:
@@ -78,7 +97,7 @@ class CatalogoConceptosService:
 
     # ─── INSUMOS ───
     async def crear_insumo(self, db: AsyncSession, data: InsumoCatalogoCreate, current_user: User) -> InsumoCatalogo:
-        await self.obtener_fuente(db, UUID(data.fuente_id))
+        await self.obtener_fuente(db, data.fuente_id)
         stmt = select(InsumoCatalogo).where(and_(
             InsumoCatalogo.clave == data.clave,
             InsumoCatalogo.fuente_id == data.fuente_id,
@@ -106,19 +125,28 @@ class CatalogoConceptosService:
     async def calcular_costo_desglosado(self, db: AsyncSession, concepto_id: UUID,
                                         cantidad=1.0, tasa_iva=0.16) -> dict:
         c = await self.obtener_concepto(db, concepto_id)
+        cantidad, tasa_iva = Decimal(str(cantidad)), Decimal(str(tasa_iva))
+        if (not cantidad.is_finite() or cantidad <= 0 or not tasa_iva.is_finite()
+                or not 0 <= tasa_iva <= 1):
+            raise MegalodonException(ErrorCode.BAD_REQUEST, "Cantidad o impuesto inválido")
+        if not c.activo or c.unidad.strip().lower() in {"%", "iva"}:
+            raise MegalodonException(ErrorCode.BAD_REQUEST, "Concepto inactivo o porcentual")
         d = c.desglose or {}
-        mats = sum(m.get("cantidad",0)*m.get("precio",0) for m in d.get("materiales",[]))
-        mo = sum(m.get("cantidad",0)*m.get("precio",0) for m in d.get("mano_obra",[]))
-        maq = sum(m.get("cantidad",0)*m.get("precio",0) for m in d.get("maquinaria",[]))
-        ind = sum(m.get("cantidad",0)*m.get("precio",0) for m in d.get("indirectos",[]))
-        sub = mats + mo + maq + ind
+        def subtotal(group):
+            return sum((Decimal(str(m.get("cantidad", 0))) * Decimal(str(m.get("precio", 0)))
+                        for m in d.get(group, [])), Decimal(0))
+        mats, mo, maq, ind = (subtotal(group) for group in
+                              ("materiales", "mano_obra", "maquinaria", "indirectos"))
+        tiene_desglose = any(d.get(group) for group in
+                            ("materiales", "mano_obra", "maquinaria", "indirectos"))
+        sub = mats + mo + maq + ind if tiene_desglose else Decimal(str(c.precio_unitario))
         if c.incluye_iva:
             sin_iva = sub/(1+tasa_iva); iva = sub - sin_iva; total = sub
         else:
             iva = sub*tasa_iva; total = sub+iva; sin_iva = sub
         return {
             "concepto_id": str(c.id), "clave": c.clave, "descripcion": c.descripcion,
-            "cantidad": cantidad,
+            "cantidad": cantidad, "origen_calculo": "DESGLOSE" if tiene_desglose else "PRECIO_CATALOGO",
             "desglose": {
                 "materiales":{"items":len(d.get("materiales",[])),"subtotal":round(mats,4)},
                 "mano_obra":{"items":len(d.get("mano_obra",[])),"subtotal":round(mo,4)},

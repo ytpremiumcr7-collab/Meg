@@ -21,7 +21,9 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install --upgrade pip
-      - run: pip install -e '.[dev]'
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --frozen --extra dev
+      - run: echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
       - run: pip check
       - run: pip install pip-audit
       - run: pip-audit --strict
@@ -50,6 +52,7 @@ jobs:
           cache-dependency-path: frontend/app/package-lock.json
       - run: npm ci
       - run: npm audit --audit-level=high
+      - run: node --experimental-strip-types --test tests/session-client.test.mjs
       - run: npm run build
 
   backend-integration:
@@ -95,6 +98,8 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install --upgrade pip
-      - run: pip install -e '.[dev]'
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --frozen --extra dev
+      - run: echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
       - run: alembic upgrade head
-      - run: pytest -q tests/unit tests/procurement
+      - run: pytest -q tests/unit tests/procurement tests/integration tests/e2e

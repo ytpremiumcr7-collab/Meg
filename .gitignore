@@ -17,3 +17,8 @@ coverage/
 htmlcov/
 .coverage
 
+
+.pytest_megalodon_test.db*
+
+# Private datasets are mounted at runtime, never committed.
+backend/data/private/
