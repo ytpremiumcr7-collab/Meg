@@ -54,7 +54,7 @@ def upgrade():
         ("RLAASSP", RLAASSP_URL, "RLAASSP", "2026-03-27", "MX-FED-ADQ"),
     ]:
         sid = str(uuid4()); sources[citation] = sid
-        op.execute(sa.text("INSERT INTO legal_sources (id, created_at, updated_at, tenant_id, authority, title, citation, source_uri, version, jurisdiction_code, status) VALUES (:id, now(), now(), NULL, :authority, :title, :citation, :uri, :version, :jurisdiction, 'ACTIVE') ON CONFLICT DO NOTHING"), dict(id=sid, authority="Cámara de Diputados / DOF", title=title, citation=citation, uri=uri, version=version, jurisdiction=jurisdiction))
+        op.get_bind().execute(sa.text("INSERT INTO legal_sources (id, created_at, updated_at, tenant_id, authority, title, citation, source_uri, version, jurisdiction_code, status) VALUES (:id, now(), now(), NULL, :authority, :title, :citation, :uri, :version, :jurisdiction, 'ACTIVE') ON CONFLICT DO NOTHING"), dict(id=sid, authority="Cámara de Diputados / DOF", title=title, citation=citation, uri=uri, version=version, jurisdiction=jurisdiction))
 
     articles = [
         ("LOPSRM", "1-4", "Ámbito y definiciones", "Clasificación inicial del objeto: obra pública, servicios relacionados y ámbito de aplicación."),
@@ -80,7 +80,7 @@ def upgrade():
     article_ids={}
     for src, code, title, summary in articles:
         aid=str(uuid4()); article_ids[(src,code)] = aid
-        op.execute(sa.text("INSERT INTO legal_articles (id, created_at, updated_at, source_id, article_code, title, summary, status) VALUES (:id, now(), now(), :sid, :code, :title, :summary, 'ACTIVE')"), dict(id=aid, sid=sources[src], code=code, title=title, summary=summary))
+        op.get_bind().execute(sa.text("INSERT INTO legal_articles (id, created_at, updated_at, source_id, article_code, title, summary, status) VALUES (:id, now(), now(), :sid, :code, :title, :summary, 'ACTIVE')"), dict(id=aid, sid=sources[src], code=code, title=title, summary=summary))
 
     profiles = [
         ("MX-FED-OBRA", "Gobierno Federal — Obra Pública", "FEDERAL", "PUBLIC_WORKS", {
@@ -163,7 +163,7 @@ def upgrade():
     ]
     for code, authority, level, matter, ruleset in profiles:
         pid=str(uuid4())
-        op.execute(sa.text("INSERT INTO jurisdiction_profiles (id, created_at, updated_at, tenant_id, code, authority, government_level, matter, portal_code, profile_version, ruleset, templates, active) VALUES (:id, now(), now(), NULL, :code, :authority, :level, :matter, :portal, 1, CAST(:ruleset AS jsonb), '{}'::jsonb, true) ON CONFLICT DO NOTHING"), dict(id=pid, code=code, authority=authority, level=level, matter=matter, portal="COMPRAS_MX", ruleset=__import__('json').dumps(ruleset)))
+        op.get_bind().execute(sa.text("INSERT INTO jurisdiction_profiles (id, created_at, updated_at, tenant_id, code, authority, government_level, matter, portal_code, profile_version, ruleset, templates, active) VALUES (:id, now(), now(), NULL, :code, :authority, :level, :matter, :portal, 1, CAST(:ruleset AS jsonb), '{}'::jsonb, true) ON CONFLICT DO NOTHING"), dict(id=pid, code=code, authority=authority, level=level, matter=matter, portal="COMPRAS_MX", ruleset=__import__('json').dumps(ruleset)))
 
     rules=[
         ("LOPSRM-PROC-24", "MX-FED-OBRA", None, "PUBLIC_WORKS", {"conditions":[{"field":"procedure_type","op":"in","val":["LICITACION_PUBLICA","INVITACION","ADJUDICACION"]}]}, {"code":"PROC_MODALITY","category":"LEGAL","description":"El procedimiento debe corresponder a una modalidad reconocida por el régimen aplicable.","mandatory":True,"evidence_required":[{"kind":"SOURCE_DOCUMENT","subject":"convocatoria"}],"artifact_required":[],"citation":"LOPSRM Art. 24"}, {"type":"enum","field":"procedure_type","values":["LICITACION_PUBLICA","INVITACION","ADJUDICACION"]}, "24"),
@@ -177,7 +177,7 @@ def upgrade():
         rid_uuid=str(uuid4())
         sid=sources["LOPSRM" if rid.startswith("LOPSRM") else "RLOPSRM"]
         aid=article_ids[("LOPSRM" if rid.startswith("LOPSRM") else "RLOPSRM", article_code)]
-        op.execute(sa.text("INSERT INTO legal_rules (id, created_at, updated_at, tenant_id, rule_id, jurisdiction_code, domain, procedure_type, source_id, article_id, source_version, condition, requirement, validation, severity, rule_version, active) VALUES (:id, now(), now(), NULL, :rid, :juris, :domain, :proc, :sid, :aid, 'guide-2026-08-11', CAST(:cond AS jsonb), CAST(:req AS jsonb), CAST(:val AS jsonb), 'BLOCKER', 1, true) ON CONFLICT DO NOTHING"), dict(id=rid_uuid, rid=rid, juris=juris, domain=domain, proc=proc, sid=sid, aid=aid, cond=__import__('json').dumps(condition), req=__import__('json').dumps(req), val=__import__('json').dumps(validation)))
+        op.get_bind().execute(sa.text("INSERT INTO legal_rules (id, created_at, updated_at, tenant_id, rule_id, jurisdiction_code, domain, procedure_type, source_id, article_id, source_version, condition, requirement, validation, severity, rule_version, active) VALUES (:id, now(), now(), NULL, :rid, :juris, :domain, :proc, :sid, :aid, 'guide-2026-08-11', CAST(:cond AS jsonb), CAST(:req AS jsonb), CAST(:val AS jsonb), 'BLOCKER', 1, true) ON CONFLICT DO NOTHING"), dict(id=rid_uuid, rid=rid, juris=juris, domain=domain, proc=proc, sid=sid, aid=aid, cond=__import__('json').dumps(condition), req=__import__('json').dumps(req), val=__import__('json').dumps(validation)))
 
     # Reference case requirements from the project guide. They are activated only when the explicit case pack is selected.
     case_rules = []
@@ -200,7 +200,7 @@ def upgrade():
         source_key = "LOPSRM" if article_code in {"31-35"} else "RLOPSRM"
         sid = sources[source_key]
         aid = article_ids[(source_key, article_code)]
-        op.execute(sa.text("INSERT INTO legal_rules (id, created_at, updated_at, tenant_id, rule_id, jurisdiction_code, domain, procedure_type, source_id, article_id, source_version, condition, requirement, validation, severity, rule_version, active) VALUES (:id, now(), now(), NULL, :rid, :juris, :domain, :proc, :sid, :aid, 'guide-2026-08-11', CAST(:cond AS jsonb), CAST(:req AS jsonb), CAST(:val AS jsonb), 'BLOCKER', 1, true) ON CONFLICT DO NOTHING"), dict(id=rid_uuid, rid=rid, juris=juris, domain=domain, proc=proc, sid=sid, aid=aid, cond=__import__('json').dumps(condition), req=__import__('json').dumps(req), val=__import__('json').dumps(validation)))
+        op.get_bind().execute(sa.text("INSERT INTO legal_rules (id, created_at, updated_at, tenant_id, rule_id, jurisdiction_code, domain, procedure_type, source_id, article_id, source_version, condition, requirement, validation, severity, rule_version, active) VALUES (:id, now(), now(), NULL, :rid, :juris, :domain, :proc, :sid, :aid, 'guide-2026-08-11', CAST(:cond AS jsonb), CAST(:req AS jsonb), CAST(:val AS jsonb), 'BLOCKER', 1, true) ON CONFLICT DO NOTHING"), dict(id=rid_uuid, rid=rid, juris=juris, domain=domain, proc=proc, sid=sid, aid=aid, cond=__import__('json').dumps(condition), req=__import__('json').dumps(req), val=__import__('json').dumps(validation)))
 
     # Entity profiles inherit the federal source/rules at runtime; entity-specific overrides must be loaded from the tender's own bases.
 
