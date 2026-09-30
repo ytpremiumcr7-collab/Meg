@@ -10,7 +10,7 @@ Incluye routers existentes + nuevos módulos Fase 2 + Integración ZIP 2 y 3.
 from fastapi import APIRouter
 
 from app.api.v1 import (
-    auth, expedientes, presupuestos, bim, juridico,
+    auth, users, expedientes, presupuestos, bim, juridico,
     montecarlo, validadores, ocr, firma, programacion, topografia,
     dashboard, catalogo_apu, licitaciones, contratos,
     compliance, transparencia, catalogo_conceptos, catalogo_libro,
@@ -81,3 +81,5 @@ api_router.include_router(pagos.router, prefix="/pagos", tags=["Pagos"])
 api_router.include_router(procurement.router, prefix="/procurement", tags=["Tender Automation"])
 
 api_router.include_router(catalogo_libro.router, prefix="/catalogo-libro", tags=["Catálogo del libro"])
+
+api_router.include_router(users.router, prefix="/users", tags=["Usuarios"])

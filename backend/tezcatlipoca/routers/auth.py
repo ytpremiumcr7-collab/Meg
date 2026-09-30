@@ -9,6 +9,8 @@ from pydantic import BaseModel
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import get_db as megalodon_get_db
+from app.api.v1.users import require_tenant_admin
+from app.models.user import User as MegalodonUser
 from core.rate_limit import rate_limit_standard
 from core.megalodon_bridge import attach_identity, load_megalodon_user, sync_shadow_user
 from db.models import get_async_db, User
@@ -78,10 +80,11 @@ async def me(current_user: User = Depends(get_current_user), db: AsyncSession = 
 
 @router.get("/users/count")
 async def get_user_count(
-    current_user: User = Depends(require_role(["admin"])),
-    db: AsyncSession = Depends(get_async_db), _rate_limit: bool = Depends(rate_limit_standard)
+    current_user: MegalodonUser = Depends(require_tenant_admin),
+    db: AsyncSession = Depends(megalodon_get_db),
+    _rate_limit: bool = Depends(rate_limit_standard),
 ):
-    """Get total user count (admin only)."""
-    result = await db.execute(select(func.count()).select_from(User).where(User.tenant_id == current_user.tenant_id))
-    count = result.scalar()
+    """Count authoritative tenant identities, including users without a mirror."""
+    count = await db.scalar(select(func.count()).select_from(MegalodonUser).where(
+        MegalodonUser.tenant_id == current_user.tenant_id))
     return {"total_users": count}

@@ -1,0 +1,37 @@
+# Administración de identidades
+
+MEGALODON administra los usuarios por UUID en `/api/v1/users`. Tezcatlipoca mantiene
+solo el espejo necesario para sus relaciones locales. Se eliminaron las rutas que
+escribían usuarios espejo (`/api/admin/users`); los consumidores deben usar la API IAM.
+
+GET lista únicamente el tenant del administrador autenticado, con paginación validada.
+PATCH acepta `role`, `is_active` y `reason` obligatorio. Campos desconocidos, null,
+estados convertidos desde texto y peticiones sin cambio se rechazan.
+Los roles de plataforma no pueden concederse ni modificarse desde esta API.
+Otro administrador debe modificar el rol o estado del propio administrador.
+La organización conserva al menos un administrador de tenant activo.
+
+Un bloqueo de la organización serializa cambios concurrentes. Actor y objetivo se
+vuelven a consultar después del bloqueo, evitando autorizar con una identidad que
+otra transacción acaba de deshabilitar. Usuario, versión de sesión y auditoría se
+confirman en una sola transacción; un fallo de auditoría revierte todo.
+
+Access y refresh JWT incluyen `auth_version`. Cualquier cambio efectivo de rol o
+estado incrementa la versión persistida e invalida ambos tipos de token.
+Rehabilitar un usuario no reactiva sus sesiones anteriores. Los tokens anteriores
+a esta migración tampoco se aceptan: todos los usuarios deben iniciar sesión de nuevo.
+
+Despliegue: aplicar `alembic upgrade head` antes de arrancar la nueva API y renovar
+las sesiones. No desplegar la nueva API contra una base sin `users.auth_version`.
+El dashboard y contador consultan los usuarios reales, aunque nunca hayan usado
+Tezcatlipoca. Se retiró la cifra global de blacklist SQL: la revocación real usa Redis.
+
+Referencias consultadas:
+- PostgreSQL 16, Explicit Locking: https://www.postgresql.org/docs/16/explicit-locking.html
+- SQLAlchemy, populate_existing: https://docs.sqlalchemy.org/en/20/orm/queryguide/api.html#populate-existing
+- OWASP, Authorization: https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html
+- Keycloak, UserResource: https://github.com/keycloak/keycloak/blob/main/services/src/main/java/org/keycloak/services/resources/admin/UserResource.java
+
+Límites pendientes para GO del producto: migración de datos históricos y rollback
+del conjunto de migraciones, catálogo privado revisado/activado, documentos/BIM y
+smoke de API desplegada. Las pruebas HTTP ASGI no ejercitan el lifespan del servidor.
