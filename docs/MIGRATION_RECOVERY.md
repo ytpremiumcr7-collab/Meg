@@ -82,8 +82,14 @@ El intervalo revisado del comando es `20260914_workspace_bridge_tenant` a
 Una revisión diferente falla explícitamente y conserva la copia para investigación.
 Compara todas las tablas públicas del respaldo, incluyendo tablas adicionales y
 filas duplicadas, por hashes de sus columnas históricas en transacciones de lectura
-REPEATABLE READ. Solo proyecta los dos cambios de nombre de autoría y la interpretación
-UTC explícita de los timestamps históricos de Tezcatlipoca. No publica los valores.
+REPEATABLE READ. Proyecta los dos cambios de nombre de autoría y la interpretación
+UTC explícita de los timestamps históricos de Tezcatlipoca. Para la revisión antigua,
+calcula la configuración documental esperada a partir de los contratos congelados
+de las migraciones y exige igualdad exacta después del upgrade. Comprueba también
+la tabla nueva `bridge_field_contracts` y la inserción condicional del perfil privado;
+las demás columnas y filas históricas participan en la comparación, sin excepciones
+generales para tablas de configuración. El informe conserva hashes del estado fuente
+y de su transformación esperada. No publica los valores.
 Después ejecuta la verificación de esquema del backend. No certifica vistas, rutinas
 personalizadas o esquemas fuera de `public`, ni sustituye la comprobación de flujos.
 

@@ -7,6 +7,7 @@ for a database rehearsal, not certification of a deployed recovery or its RPO.
 """
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -39,6 +40,36 @@ UTC_COLUMNS = {
     "system_settings": ("created_at", "updated_at"),
 }
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def migration_contract(filename):
+    """Read trusted, frozen configuration; never invoke migration DDL here."""
+    path = ROOT / "alembic" / "versions" / filename
+    spec = importlib.util.spec_from_file_location(path.stem, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def expected_templates_expression():
+    first = migration_contract("20260914_requirement_source_extraction.py")
+    profiles = migration_contract("20260914_dependency_extraction_profiles.py")
+    structure = migration_contract("20260914_structural_source_tables_relations.py")
+    cases = []
+    for code, dependency in profiles.DEPENDENCY.items():
+        payload = profiles.build(dependency)
+        payload.update(table_rules=structure.TABLE_RULES, relations=structure.RELATIONS, structural_trace=True)
+        cases.append(sql.SQL("WHEN tenant_id IS NULL AND active=true AND code={} THEN "
+                             "jsonb_set(COALESCE(templates, '{{}}'::jsonb), '{{requirement_extraction}}', {}::jsonb, true)")
+                     .format(sql.Literal(code), sql.Literal(json.dumps(payload))))
+    # The first migration also initializes empty extraction config on active
+    # tenant profiles. Later migrations only overwrite the global profiles.
+    cases.append(sql.SQL("WHEN active=true AND code IN ('MX-FED-OBRA','MX-FED-CONAGUA-OBRA',"
+                         "'MX-FED-SICT-OBRA','MX-LOCAL-STATE-OBRA','MX-FED-ADQ') AND "
+                         "COALESCE(templates->'requirement_extraction', '{{}}'::jsonb) IN ('{{}}'::jsonb,'null'::jsonb) "
+                         "THEN jsonb_set(COALESCE(templates, '{{}}'::jsonb), '{{requirement_extraction}}', {}::jsonb, true)")
+                 .format(sql.Literal(json.dumps({"source_roles": first.CONFIG["source_roles"]}))))
+    return sql.SQL("(CASE {} ELSE templates END)").format(sql.SQL(" ").join(cases))
 
 
 def require(condition, message):
@@ -89,24 +120,29 @@ def inventory(conn):
         return result, versions[0][0]
 
 
-def projection_query(table, columns, migrated=False):
+def projection_query(table, columns, migrated=False, source_transforms=False, historical_profile_ids=None):
     expressions = []
     for original, kind in columns:
         name = RENAMES.get(table, {}).get(original, original) if migrated else original
         expression = sql.Identifier(name)
+        if source_transforms and table == "jurisdiction_profiles" and original == "templates":
+            expression = expected_templates_expression()
         if (not migrated and original in UTC_COLUMNS.get(table, ())
                 and kind == "timestamp without time zone"):
             expression = sql.SQL("({} AT TIME ZONE 'UTC')").format(expression)
         # PostgreSQL text preserves decimal scale and EWKB geometry. JSON is
         # only the unambiguous row envelope; the report receives hashes alone.
         expressions.append(sql.SQL("{}::text AS {}").format(expression, sql.Identifier(original)))
+    where = sql.SQL("")
+    if historical_profile_ids is not None and table == "jurisdiction_profiles":
+        where = sql.SQL("WHERE id=ANY({}::uuid[])").format(sql.Literal(historical_profile_ids))
     return sql.SQL("""
-        SELECT row_to_json(p)::text FROM (SELECT {} FROM {}) p
+        SELECT row_to_json(p)::text FROM (SELECT {} FROM {} {}) p
         ORDER BY row_to_json(p)::text COLLATE "C"
-    """).format(sql.SQL(", ").join(expressions), sql.Identifier("public", table))
+    """).format(sql.SQL(", ").join(expressions), sql.Identifier("public", table), where)
 
 
-def fingerprints(conn, tables, migrated=False):
+def fingerprints(conn, tables, migrated=False, source_transforms=False, historical_profile_ids=None):
     result = {}
     for number, (table, columns) in enumerate(tables.items()):
         h, count = hashlib.sha256(), 0
@@ -114,7 +150,7 @@ def fingerprints(conn, tables, migrated=False):
         # real historical database. Duplicate rows participate in the digest.
         with conn.cursor(name=f"rehearsal_rows_{number}") as cursor:
             cursor.itersize = 1000
-            cursor.execute(projection_query(table, columns, migrated))
+            cursor.execute(projection_query(table, columns, migrated, source_transforms, historical_profile_ids))
             for (row,) in cursor:
                 h.update(row.encode("utf-8") + b"\n")
                 count += 1
@@ -124,6 +160,30 @@ def fingerprints(conn, tables, migrated=False):
 
 def compare(before, after):
     require(before == after, "Historical row preservation failed; keep target isolated for investigation")
+
+
+def verify_new_configuration(conn, profile_ids, private_profile_existed):
+    """Check every deterministic field of the two documented migration seeds."""
+    bridge = migration_contract("20260914_bridge_field_contracts.py")
+    with conn.cursor() as cursor:
+        cursor.execute("SELECT tenant_id, version, is_active, fields, creado_por_id, actualizado_por_id, "
+                       "created_at=updated_at AND created_at IS NOT NULL FROM public.bridge_field_contracts")
+        rows = cursor.fetchall()
+        require(len(rows) == 1 and rows[0] == (None, 1, True, bridge._DEFAULT_FIELDS, None, None, True),
+                "Unexpected seeded bridge configuration")
+        cursor.execute("SELECT tenant_id, code, authority, government_level, matter, portal_code, "
+                       "profile_version, ruleset, active, templates FROM public.jurisdiction_profiles "
+                       "WHERE NOT(id=ANY(%s::uuid[]))", (profile_ids,))
+        rows = cursor.fetchall()
+        require(len(rows) == (0 if private_profile_existed else 1), "Unexpected inserted jurisdiction profiles")
+        if rows:
+            profiles = migration_contract("20260914_dependency_extraction_profiles.py")
+            structure = migration_contract("20260914_structural_source_tables_relations.py")
+            payload = profiles.build(profiles.DEPENDENCY["MX-PRIVATE-OBRA"])
+            payload.update(table_rules=structure.TABLE_RULES, relations=structure.RELATIONS, structural_trace=True)
+            require(rows[0] == (None, "MX-PRIVATE-OBRA", "PRIVADA", "PRIVATE", "PRIVATE_WORKS", "INTERNAL",
+                                1, {}, True, {"requirement_extraction": payload}),
+                    "Unexpected seeded private profile")
 
 
 def checked_command(command, env, label):
@@ -142,20 +202,33 @@ def run_rehearsal(backup, uri, env):
         tables, revision = inventory(conn)
         require(revision in {HISTORICAL, HEAD}, "Backup revision outside the reviewed migration interval")
         before = fingerprints(conn, tables)
+        expected = fingerprints(conn, tables, source_transforms=True) if revision == HISTORICAL else before
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT id::text FROM public.jurisdiction_profiles ORDER BY id")
+            profile_ids = [row[0] for row in cursor]
+            cursor.execute("SELECT EXISTS(SELECT 1 FROM public.jurisdiction_profiles "
+                           "WHERE tenant_id IS NULL AND code='MX-PRIVATE-OBRA')")
+            private_profile_existed = cursor.fetchone()[0]
     upgrade_started = time.monotonic()
     checked_command([sys.executable, "-m", "alembic", "upgrade", HEAD], os.environ.copy(), "Historical upgrade")
     upgrade_seconds = time.monotonic() - upgrade_started
     with read_snapshot(uri, env) as conn:
         current, target = inventory(conn)
-        require(target == HEAD and set(current) == set(tables), "Unexpected revision or historical table changes")
-        after = fingerprints(conn, tables, migrated=revision != HEAD)
-        compare(before, after)
+        expected_tables = set(tables) | ({"bridge_field_contracts"} if revision == HISTORICAL else set())
+        require(target == HEAD and set(current) == expected_tables, "Unexpected revision or historical table changes")
+        after = fingerprints(conn, tables, migrated=revision != HEAD,
+                             historical_profile_ids=profile_ids if revision == HISTORICAL else None)
+        compare(expected, after)
+        if revision == HISTORICAL:
+            verify_new_configuration(conn, profile_ids, private_profile_existed)
     checked_command([sys.executable, "-m", "scripts.verify_migrated_schema"], os.environ.copy(), "Migrated schema check")
     return {"status": "database_rehearsal_passed", "source_revision": revision,
             "target_revision": target, "backup_sha256": digest(backup),
-            "tables": before, "tables_verified": len(before),
+            "tables": before, "expected_migrated_historical_columns": expected,
+            "tables_verified": len(before),
             "rows_verified": sum(t["rows"] for t in before.values()),
             "historical_values_preserved": True,
+            "documented_configuration_transforms_verified": revision == HISTORICAL,
             "timings_seconds": {"restore": round(restore_seconds, 3),
                                 "upgrade": round(upgrade_seconds, 3),
                                 "database_rehearsal_total": round(time.monotonic() - started, 3)},
