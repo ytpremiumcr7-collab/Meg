@@ -11,6 +11,7 @@ import asyncio
 import os
 from pathlib import Path
 from uuid import uuid4
+from decimal import Decimal
 
 import pytest
 from sqlalchemy import delete, select
@@ -82,6 +83,11 @@ async def test_inbal_stage_trace_postgres_tenant_a_b():
             {"id": "A4", "name": "Sanitarios", "duration_days": 10, "budget": 800000, "predecessors": ["A2", "A3"]},
             {"id": "A5", "name": "Complementarios", "duration_days": 13, "budget": 500000, "predecessors": ["A4"]},
         ]
+        # The four priced concepts define the direct schedule allocation.
+        # Closing documents are a separate zero-cost activity in this fixture.
+        for activity, concept in zip(activities, concepts, strict=False):
+            activity['budget'] = float(Decimal(str(concept['cantidad'])) * Decimal(str(concept['pu'])))
+        activities[-1].update(name='Cierre documental', budget=0)
         return {
             "identifier": synthetic["expediente"]["identificador"],
             "title": synthetic["expediente"]["titulo"],
@@ -207,6 +213,17 @@ async def test_inbal_stage_trace_postgres_tenant_a_b():
                 requirement_id=req.id, relation="SUPPORTS",
             ))
             await db.commit()
+            # Use the production activation gate; a raw condition is not an
+            # approved executable rule. Test both sides of its boundary.
+            activation = await ProcurementService(db, user).create_requirement_rule_version(
+                tender.id, req.id,
+                {'id': req.code, 'conditions': [{'field': 'bidder.capital', 'op': 'gte', 'val': 1000000}]},
+                test_cases=[
+                    {'facts': {'bidder': {'capital': 1000000}}, 'expected': True},
+                    {'facts': {'bidder': {'capital': 999999}}, 'expected': False},
+                ],
+            )
+            assert activation['status'] == 'ACTIVE'
             tenants.append((tenant.id, user.id))
             tenders.append((tender.id, tenant.id, user.id))
 
