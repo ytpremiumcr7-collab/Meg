@@ -2092,6 +2092,8 @@ class ProcurementService:
             result = await self.orchestrator.run(self.db, tender, tracker=tracker)
             if result["findings"]:
                 tender.review_state = TenderState.BLOCKED.value
+                result['state'] = tender.state
+                result['review_state'] = tender.review_state
                 await self._commit()
                 await tracker.finish(
                     PreparationRunStatus.BLOCKED.value,

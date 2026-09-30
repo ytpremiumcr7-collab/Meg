@@ -231,7 +231,7 @@ async def test_inbal_stage_trace_postgres_tenant_a_b():
             ))).scalars().all()
             names = {s.stage for s in stages}
             assert {"CONTRACT_POLICY", "LOAD_RULE_INPUTS", "REQUIREMENT_EVALUATION", "MATERIALIZATION", "RISK_ANALYSIS", "CROSS_CONSISTENCY", "VALIDATION_EVIDENCE", "LIFECYCLE_GATE"}.issubset(names)
-            assert result["review_state"] == TenderState.READY_FOR_HUMAN_REVIEW.value
+            assert result["review_state"] == TenderState.READY_FOR_HUMAN_REVIEW.value, result['findings']
 
         # Cross-tenant lookup must fail at the service boundary.
         user_a = await db.get(User, tenders[0][2])

@@ -21,8 +21,15 @@ class ProcurementConsistencyEngine:
         computed_total = sum((money(p.get("importe", money(p.get("cantidad")) * money(p.get("precio_unitario")))) for p in partidas), Decimal("0"))
         if not partidas and economic.get("budget_total") is not None and economic.get("catalog_total") is not None and money(economic["budget_total"]) != money(economic["catalog_total"]):
             findings.append(self._blocker("ECON-CATALOG-TOTAL", f"El total del presupuesto ({economic['budget_total']}) no coincide con el total declarado del catálogo ({economic['catalog_total']})."))
-        if partidas and economic.get("budget_total") is not None and money(economic["budget_total"]) != computed_total:
-            findings.append(self._blocker("ECON-CATALOG-TOTAL", f"El total del presupuesto ({economic['budget_total']}) no coincide con la suma de partidas ({computed_total})."))
+        direct_cost = economic.get('direct_cost')
+        line_target = direct_cost if direct_cost is not None else economic.get('budget_total')
+        if partidas and line_target is not None and money(line_target) != computed_total:
+            findings.append(self._blocker("ECON-CATALOG-TOTAL", f"El costo directo ({line_target}) no coincide con la suma de partidas ({computed_total})."))
+        components = ('direct_cost', 'indirect_cost', 'profit', 'risk', 'tax')
+        if economic.get('budget_total') is not None and all(economic.get(k) is not None for k in components):
+            total = sum((money(economic[k]) for k in components), Decimal('0'))
+            if money(economic['budget_total']) != total:
+                findings.append(self._blocker('ECON-BUDGET-COMPONENTS', 'El total presupuestado no cierra con costo directo, indirectos, utilidad, riesgo e impuestos.'))
 
         if economic.get("catalog_total") is not None and money(economic["catalog_total"]) != computed_total:
             findings.append(self._blocker("ECON-CATALOG-DECLARED", f"El total declarado del catálogo ({economic['catalog_total']}) no coincide con la suma calculada ({computed_total})."))
@@ -40,7 +47,8 @@ class ProcurementConsistencyEngine:
                 findings.append(self._blocker("ECON-PROGRAM-IMPLICT", f"Las actividades programadas ({activity_total}) no coinciden con el presupuesto ({computed_total})."))
 
         letter_total = economic.get("letter_total")
-        if letter_total is not None and money(letter_total) != computed_total:
+        proposal_total = money(economic['budget_total']) if economic.get('budget_total') is not None else computed_total
+        if letter_total is not None and money(letter_total) != proposal_total:
             findings.append(self._blocker("ECON-LETTER-TOTAL", f"La carta económica ({letter_total}) no coincide con el presupuesto ({computed_total})."))
 
         technical = model.get("technical", {})
