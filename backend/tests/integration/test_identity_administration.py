@@ -219,3 +219,23 @@ async def test_tokens_without_identity_version_require_new_login(
         else:
             response = await async_client.post("/api/v1/auth/refresh", json={"refresh_token": old})
         assert response.status_code == 401, response.text
+
+
+@pytest.mark.asyncio
+async def test_cookie_admin_changes_require_exact_browser_origin(
+        async_client, db_session, tenant_a_user):
+    tenant, admin = await make_admin(db_session, tenant_a_user)
+    member = await add_user(db_session, tenant, "example.mx")
+    response = await async_client.post("/api/v1/auth/session/login",
+                                      data={"username": admin.email, "password": "testpass123"})
+    assert response.status_code == 200
+    path = f"/api/v1/users/{member.id}"
+    body = {"role": "lector", "reason": "Cambio de navegador"}
+    for headers in [{}, {"Origin": "null"}, {"Origin": "http://test.attacker.com"},
+                    {"Origin": "http://evil.test"}, {"Origin": "https://attacker.invalid",
+                     "X-Forwarded-Host": "attacker.invalid"},
+                    [("Origin", "http://test"), ("Origin", "http://attacker.invalid")]]:
+        response = await async_client.patch(path, json=body, headers=headers)
+        assert response.status_code == 403, response.text
+    response = await async_client.patch(path, json=body, headers={"Origin": "http://test"})
+    assert response.status_code == 200, response.text

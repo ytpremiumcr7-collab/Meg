@@ -6,7 +6,8 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_user, get_db
+from app.core.deps import get_current_user, get_db, oauth2_scheme
+from app.config import settings
 from app.core.rate_limit import rate_limit_standard, rate_limit_strict
 from app.models.user import User, UserRole, Tenant
 from app.services.identity_service import IdentityService, ADMIN_ROLES, role_value, user_view
@@ -53,7 +54,18 @@ async def list_users(
     return [user_view(user) for user in rows]
 
 
-@router.patch("/{user_id}")
+async def verify_browser_origin(request: Request, token: str | None = Depends(oauth2_scheme)):
+    # Explicit credentials are not automatically attached by a hostile page.
+    if token:
+        return
+    origins = list(request.headers.getlist("origin"))
+    trusted = set(settings.CORS_ALLOWED_ORIGINS)
+    trusted.add(f"{request.url.scheme}://{request.url.netloc}")
+    if len(origins) != 1 or origins[0] == "null" or origins[0] not in trusted:
+        raise HTTPException(403, "Origen de la operación no autorizado")
+
+
+@router.patch("/{user_id}", dependencies=[Depends(verify_browser_origin)])
 async def update_user(
     user_id: UUID, req: UserUpdateRequest, request: Request,
     admin: User = Depends(require_tenant_admin), db: AsyncSession = Depends(get_db),

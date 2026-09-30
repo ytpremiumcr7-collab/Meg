@@ -4,6 +4,11 @@ MEGALODON administra los usuarios por UUID en `/api/v1/users`. Tezcatlipoca mant
 solo el espejo necesario para sus relaciones locales. Se eliminaron las rutas que
 escribían usuarios espejo (`/api/admin/users`); los consumidores deben usar la API IAM.
 
+PATCH autenticado por cookie exige un único Origin exacto del servidor o de la lista
+CORS configurada; se rechazan origen ausente, null, subdominios ajenos y encabezados
+duplicados. Bearer explícito conserva el flujo de SDK. Esto cubre la API IAM;
+la revisión de CSRF en los demás módulos sigue pendiente.
+
 GET lista únicamente el tenant del administrador autenticado, con paginación validada.
 PATCH acepta `role`, `is_active` y `reason` obligatorio. Campos desconocidos, null,
 estados convertidos desde texto y peticiones sin cambio se rechazan.
@@ -29,6 +34,7 @@ Tezcatlipoca. Se retiró la cifra global de blacklist SQL: la revocación real u
 Referencias consultadas:
 - PostgreSQL 16, Explicit Locking: https://www.postgresql.org/docs/16/explicit-locking.html
 - SQLAlchemy, populate_existing: https://docs.sqlalchemy.org/en/20/orm/queryguide/api.html#populate-existing
+- OWASP, CSRF: https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html
 - OWASP, Authorization: https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html
 - Keycloak, UserResource: https://github.com/keycloak/keycloak/blob/main/services/src/main/java/org/keycloak/services/resources/admin/UserResource.java
 
