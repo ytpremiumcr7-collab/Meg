@@ -188,12 +188,14 @@ def _ttl_seconds(expires_at: datetime) -> int:
     return max(1, ttl)
 
 
-def _failure_details(control: str, reason: str, *, jti: Optional[str] = None, family_id: Optional[str] = None):
+def _failure_details(control: str, reason: str, *, jti: Optional[str] = None, family_id: Optional[str] = None, token_kind: Optional[str] = None):
     details = {"control": control, "reason": reason}
     if jti:
         details["jti"] = jti
     if family_id:
         details["family_id"] = family_id
+    if token_kind:
+        details["token_kind"] = token_kind
     return details
 
 

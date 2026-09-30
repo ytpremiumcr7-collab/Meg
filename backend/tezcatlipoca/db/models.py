@@ -83,8 +83,8 @@ class User(Base):
     username = Column(String(50), unique=True, index=True, nullable=False)
     password_hash = Column(String(255), nullable=False)
     tier = Column(String(20), default="restricted")
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    last_login = Column(DateTime, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    last_login = Column(DateTime(timezone=True), nullable=True)
     is_active = Column(Boolean, default=True)
     api_calls_today = Column(Integer, default=0)
     api_calls_total = Column(Integer, default=0)
@@ -102,9 +102,9 @@ class UserSession(Base):
     jti = Column(String(255), nullable=False)
     ip_address = Column(String(45), nullable=True)
     user_agent = Column(String(500), nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    expires_at = Column(DateTime, nullable=False)
-    last_active = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    last_active = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     is_active = Column(Boolean, default=True)
 
 
@@ -119,7 +119,7 @@ class Snapshot(Base):
     tenant_id = Column(String(36), index=True, nullable=True)
     layers = Column(JSON, default=list)
     viewport = Column(JSON, nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
 class Tunnel(Base):
@@ -136,9 +136,9 @@ class Tunnel(Base):
     bytes_transferred = Column(Integer, default=0)
     packets = Column(Integer, default=0)
     latency_ms = Column(Float, nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    expires_at = Column(DateTime, nullable=False)
-    closed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    closed_at = Column(DateTime(timezone=True), nullable=True)
 
 
 class DeadDrop(Base):
@@ -150,8 +150,8 @@ class DeadDrop(Base):
     owner_user_id = Column(Integer, nullable=False)
     owner_username = Column(String(255), nullable=True)
     encrypted_payload = Column(LargeBinary, nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    expires_at = Column(DateTime(timezone=True), nullable=False)
     max_reads = Column(Integer, default=1)
     reads = Column(Integer, default=0)
     status = Column(String(20), default="active")
@@ -170,7 +170,7 @@ class ApiLog(Base):
     response_time_ms = Column(Float, nullable=True)
     ip_address = Column(String(45), nullable=True)
     user_agent = Column(String(500), nullable=True)
-    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    timestamp = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
 class TokenBlacklist(Base):
@@ -179,8 +179,8 @@ class TokenBlacklist(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     token_jti = Column(String(255), unique=True, nullable=False, index=True)
-    expires_at = Column(DateTime, nullable=False)
-    revoked_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    revoked_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
 class SystemSetting(Base):
@@ -191,8 +191,8 @@ class SystemSetting(Base):
     tenant_id = Column(String(36), index=True, nullable=True)
     key = Column(String(255), nullable=False, index=True)
     value = Column(JSON, nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
 
 # ─── Async DB helpers ────────────────────────────────────────────────

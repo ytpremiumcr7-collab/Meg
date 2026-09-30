@@ -231,6 +231,7 @@ class ProcurementMaterializer:
                 factor_impuesto=model.factor_impuesto,
                 factor_riesgo=model.factor_riesgo,
                 metadatos={"parametros_costeo": model.parametros.to_dict()},
+                partidas=[],
             )
             db.add(budget)
             await db.flush()
@@ -302,6 +303,7 @@ class ProcurementMaterializer:
                 expediente_id=expediente.id,
                 fecha_inicio_plan=start,
                 estado="PLANIFICADO",
+                actividades=[],
             )
             db.add(program)
             await db.flush()
