@@ -109,7 +109,9 @@ async def async_client():
     # embedded Tezcatlipoca subsystem ready explicitly for router tests.
     app.state.tezcatlipoca_ready = True
     app.state.tezcatlipoca_status = {"state": "READY", "components": {}}
-    transport = ASGITransport(app=app)
+    # Each test models an independent client while requests within a test
+    # share an identity and exercise the real Redis limits.
+    transport = ASGITransport(app=app, client=(f'test-{uuid4().hex}', 123))
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
 
