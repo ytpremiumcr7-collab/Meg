@@ -4,6 +4,11 @@ Run with: python -m scripts.verify_migrated_schema
 Never creates missing tables; a migration gap must fail installation checks.
 """
 import asyncio
+from pathlib import Path
+
+from alembic.config import Config
+from alembic.runtime.migration import MigrationContext
+from alembic.script import ScriptDirectory
 
 from sqlalchemy import inspect
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -14,11 +19,18 @@ from app.models.base import Base
 from tezcatlipoca.db.models import Base as TezBase
 
 
-def verify(connection):
+def verify(connection, metadata_collection=None):
+    backend_root = Path(__file__).resolve().parents[1]
+    config = Config(str(backend_root / "alembic.ini"))
+    config.set_main_option("script_location", str(backend_root / "alembic"))
+    expected = set(ScriptDirectory.from_config(config).get_heads())
+    current = set(MigrationContext.configure(connection).get_current_heads())
+    if current != expected:
+        raise RuntimeError("Database migrations are not at application head; apply alembic upgrade head before startup")
     inspector = inspect(connection)
     gaps = []
     count = 0
-    for metadata in (Base.metadata, TezBase.metadata):
+    for metadata in metadata_collection if metadata_collection is not None else (Base.metadata, TezBase.metadata):
         for table in metadata.tables.values():
             count += 1
             if not inspector.has_table(table.name, schema=table.schema):

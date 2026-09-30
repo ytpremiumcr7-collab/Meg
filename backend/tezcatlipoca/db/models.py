@@ -11,17 +11,13 @@
 #     directamente (o se fuerza +asyncpg si viene con +psycopg2).
 
 import os
-import asyncio
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Optional, List, AsyncGenerator
 
 from sqlalchemy import (
     Column, Integer, String, Float, DateTime, Text, Boolean, JSON, LargeBinary,
     select, delete,
 )
-from alembic import command
-from alembic.config import Config
 from sqlalchemy.ext.asyncio import (
     create_async_engine,
     async_sessionmaker,
@@ -206,41 +202,8 @@ async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
-def _build_alembic_config() -> Config:
-    backend_root = Path(__file__).resolve().parents[2]
-    config = Config(str(backend_root / "alembic.ini"))
-    config.set_main_option("script_location", str(backend_root / "alembic"))
-    config.set_main_option("sqlalchemy.url", DATABASE_URL)
-    return config
-
-
-def _upgrade_database_sync() -> None:
-    """Aplica migraciones de Alembic hasta head.
-
-    La versión anterior hacía `Base.metadata.create_all()` en runtime, lo
-    que convertía el arranque en un bootstrap implícito de esquema. Aquí
-    la verdad operativa pasa a ser Alembic: si el esquema está atrasado,
-    se corrige con migraciones; si la base no existe o no responde, el
-    arranque falla de forma explícita en vez de fabricar tablas por su
-    cuenta.
-    """
-    command.upgrade(_build_alembic_config(), "head")
-
-
 async def init_db_async():
-    """Inicializa la base de datos ejecutando migraciones de Alembic.
-
-    Se mantiene el nombre por compatibilidad con los puntos de arranque
-    existentes, pero el comportamiento ya no crea tablas a mano.
-    """
-    await asyncio.to_thread(_upgrade_database_sync)
-
-
-def init_db():
-    """Compatibilidad síncrona para scripts y documentación legacy.
-
-    El runtime principal debe usar `await init_db_async()` desde un
-    contexto async; este wrapper existe para no romper comandos antiguos
-    que ejecutan fuera de event loop.
-    """
-    asyncio.run(init_db_async())
+    """Verify the migrated schema; runtime never owns migration privileges."""
+    from scripts.verify_migrated_schema import verify
+    async with engine.connect() as connection:
+        await connection.run_sync(verify)

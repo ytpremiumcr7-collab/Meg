@@ -26,6 +26,11 @@ estado incrementa la versión persistida e invalida ambos tipos de token.
 Rehabilitar un usuario no reactiva sus sesiones anteriores. Los tokens anteriores
 a esta migración tampoco se aceptan: todos los usuarios deben iniciar sesión de nuevo.
 
+El servidor comprueba la revisión Alembic y las columnas requeridas antes de
+recibir peticiones. No aplica migraciones al arrancar. Tezcatlipoca también verifica
+su esquema sin modificarlo. La ausencia de su esquema lo degrada como servicio
+opcional; una falta de esquema del núcleo impide iniciar la API.
+
 Despliegue: aplicar `alembic upgrade head` antes de arrancar la nueva API y renovar
 las sesiones. No desplegar la nueva API contra una base sin `users.auth_version`.
 El dashboard y contador consultan los usuarios reales, aunque nunca hayan usado
@@ -40,4 +45,6 @@ Referencias consultadas:
 
 Límites pendientes para GO del producto: migración de datos históricos y rollback
 del conjunto de migraciones, catálogo privado revisado/activado, documentos/BIM y
-smoke de API desplegada. Las pruebas HTTP ASGI no ejercitan el lifespan del servidor.
+smoke de API desplegada. La suite HTTP ASGI se complementa con un proceso Uvicorn real en CI: arranque con
+lifespan, TCP HTTP, health/ready, login, cookies, cambio IAM y cierre ordenado.
+Las identidades de ese smoke son fixtures de CI; no certifican un despliegue real.

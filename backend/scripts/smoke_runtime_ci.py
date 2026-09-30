@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import socket
+import signal
 import subprocess
 import sys
 import time
@@ -64,7 +65,7 @@ def main():
             process = subprocess.Popen(
                 [sys.executable, "-m", "uvicorn", "app.main:app",
                  "--fd", str(listener.fileno()), "--lifespan", "on",
-                 "--no-access-log", "--log-level", "warning"],
+                 "--no-access-log", "--log-level", "info"],
                 env=env, pass_fds=(listener.fileno(),),
                 stdout=log, stderr=subprocess.STDOUT,
             )
@@ -125,8 +126,14 @@ def main():
                     process.kill()
                     process.wait(timeout=5)
                     raise RuntimeError("Uvicorn shutdown exceeded 20 seconds")
-            if process.returncode != 0:
-                raise RuntimeError(f"Uvicorn did not shut down cleanly: {process.returncode}")
+            shutdown_log = log_path.read_text(errors="replace")
+            # Uvicorn 0.50.1 re-raises the captured SIGTERM after graceful exit.
+            # Exit status alone cannot establish whether lifespan cleanup ran.
+            if process.returncode not in (0, -signal.SIGTERM) or (
+                "Application shutdown complete" not in shutdown_log
+                or "megalodon_shutdown" not in shutdown_log
+            ):
+                raise RuntimeError(f"Uvicorn lifecycle cleanup did not complete: {process.returncode}")
     checks.append("Graceful Uvicorn shutdown")
     Path("runtime-smoke-report.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report, indent=2))

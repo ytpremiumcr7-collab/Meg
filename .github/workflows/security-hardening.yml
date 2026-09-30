@@ -110,3 +110,13 @@ jobs:
       - run: python -m scripts.verify_migrated_schema
       - run: timeout 120s python -m scripts.smoke_runtime_ci
       - run: timeout 10m pytest -vv --maxfail=5 --durations=10
+      - name: Preserve runtime smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-smoke-${{ github.run_id }}
+          path: |
+            backend/runtime-smoke-report.json
+            backend/runtime-smoke-server.log
+          if-no-files-found: ignore
+          retention-days: 14
