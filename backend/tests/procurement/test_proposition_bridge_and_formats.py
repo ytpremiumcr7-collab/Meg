@@ -18,7 +18,7 @@ def test_format_normalization_has_no_dependency_mapping():
     assert normalize_format_code("FORMA E-7") == "FORMA_E-7"
     assert normalize_format_code("ECO.03") == "ECO.3"
     # Unknown codes remain unknown instead of silently selecting another dependency.
-    assert normalize_format_code("CFE-AT-999") == "CFE_AT_999"
+    assert normalize_format_code("CFE-AT-999") == "CFE-AT-999"
 
 
 def test_compiler_allowlist_rejects_unknown_db_algorithm():

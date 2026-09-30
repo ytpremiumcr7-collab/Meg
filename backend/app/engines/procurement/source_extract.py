@@ -93,8 +93,15 @@ class TenderSourceExtractor:
             # Backward-compatible compact config, still deterministic.
             headings = fmt.get("headings") or []
             if headings:
-                sections = [{"name": str(h), "headings": [str(h)], "item_pattern": fmt.get("item_pattern"), "category": fmt.get("category", "ADMINISTRATIVO")} for h in headings]
-        blocks = list(extracted.metadata.get("blocks") or [])
+                sections = [{
+                    "name": str(h),
+                    "headings": [str(h)],
+                    "stop_headings": fmt.get("stop_headings") or [],
+                    "item_pattern": fmt.get("item_pattern"),
+                    "category": fmt.get("category", "ADMINISTRATIVO"),
+                    "mandatory_field": fmt.get("mandatory_field"),
+                } for h in headings]
+        blocks = list(extracted.metadata.get("blocks") or self._text_blocks(extracted.text or ""))
         candidates: list[dict[str, Any]] = []
         for section_cfg in sections:
             if not isinstance(section_cfg, dict):

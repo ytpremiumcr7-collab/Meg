@@ -8,7 +8,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   CalendarDays, Loader2, AlertCircle, RefreshCw, X, Save, Trash2, FolderKanban,
-  GanttChartSquare, Sigma, Gauge, TrendingUp, GitBranch,
+  GanttChartSquare, Sigma, Gauge, TrendingUp, GitBranch, type LucideIcon,
 } from 'lucide-react';
 import { megalodonClient } from '@/lib/api-client';
 import { useExpedienteStore } from '@/stores/useExpedienteStore';
@@ -20,7 +20,7 @@ import CurvaSPanel from './components/CurvaSPanel';
 import RutaCriticaPanel from './components/RutaCriticaPanel';
 
 type Tab = 'gantt' | 'pert' | 'evm' | 'curva-s' | 'ruta-critica';
-const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
+const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
   { id: 'gantt', label: 'Gantt', icon: GanttChartSquare },
   { id: 'pert', label: 'PERT', icon: Sigma },
   { id: 'evm', label: 'EVM', icon: Gauge },

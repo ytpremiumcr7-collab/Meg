@@ -16,5 +16,5 @@ def test_frontend_idempotency_key_is_stable_per_revision():
     assert ':${Date.now()}' not in FRONT
 
 def test_frontend_surfaces_business_readiness_gates():
-    assert '/readiness' in FRONT
+    assert '.procurement.readiness(' in FRONT
     assert 'Gates de negocio pendientes' in FRONT

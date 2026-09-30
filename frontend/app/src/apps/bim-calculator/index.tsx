@@ -94,7 +94,6 @@ const COLOR_POR_TIPO: Record<string, string> = {
   IfcRailing: '#c98e6c',
 };
 const COLOR_DEFAULT = '#8899aa';
-const COLOR_SELECCIONADO = '#ffd166';
 
 function ElementoMesh({
   elemento, seleccionado, wireframe, onSelect, enClash = false,

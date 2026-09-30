@@ -15,9 +15,12 @@ from enum import Enum
 from decimal import Decimal
 
 import numpy as np
+import structlog
 
 from app.core.errors import MegalodonException, ErrorCode
 from app.core.calendar import CalendarioLaboral
+
+logger = structlog.get_logger(__name__)
 
 
 class TipoDependencia(str, Enum):
@@ -974,4 +977,3 @@ class MotorCPM:
 
         xer_content = "\n".join(lines)
         return xer_content.encode('utf-8')
-

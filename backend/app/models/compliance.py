@@ -9,13 +9,20 @@ Evaluación automática por estado del procedimiento.
 """
 from enum import Enum
 from uuid import uuid4
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import String, Text, Numeric, ForeignKey, Index, DateTime, Boolean, false
 from app.db.types import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, UUIDMixin, TenantMixin, AuditMixin
+
+if TYPE_CHECKING:
+    from app.models.contrato import Contrato
+    from app.models.expediente import ExpedienteObra
+    from app.models.licitacion import Licitacion
+    from app.models.proveedor import Proveedor
+    from app.models.user import User
 
 
 class EstadoInconformidad(str, Enum):

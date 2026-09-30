@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Globe2, Radio, Search, ShieldAlert, Satellite, RefreshCw, Activity } from 'lucide-react';
+import { Globe2, Search, ShieldAlert, Satellite, RefreshCw, Activity } from 'lucide-react';
 import { megalodonClient } from '@/lib/api-client';
 
 type Tab = 'geo' | 'osint' | 'cyber' | 'sar' | 'telemetry';

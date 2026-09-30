@@ -52,6 +52,8 @@ class ErrorCode(str, Enum):
     # que el código pretendía devolver. Encontrado al conectar
     # MotorEvaluacion a licitacion_service.py.
     BAD_REQUEST = "GEN-0001"
+    CONFLICT = "GEN-0002"
+    PERMISO_DENEGADO = "GEN-0003"
 
     # Códigos 1000-1999: Normativos
     NORMATIVO_GENERICO = "NOR-1000"

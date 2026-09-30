@@ -14,7 +14,7 @@ import type { CSSProperties } from 'react';
 import {
   DollarSign, CheckCircle, AlertTriangle, Clock, Plus, Search,
   Trash2, FileJson, Activity, ShieldCheck,
-  Download, Zap, Calculator, X, Save, Loader2, FolderKanban, RefreshCw
+  Download, Calculator, X, Save, Loader2, FolderKanban, RefreshCw
 } from 'lucide-react';
 import { useMegalodonStore } from '@/stores/useMegalodonStore';
 import { useExpedienteStore } from '@/stores/useExpedienteStore';
@@ -199,7 +199,6 @@ function BudgetGrid() {
   const [cargandoLista, setCargandoLista] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [mensaje, setMensaje] = useState<{ tipo: 'ok' | 'error'; texto: string } | null>(null);
-  const [ultimoGuardado, setUltimoGuardado] = useState<Presupuesto | null>(null);
 
   const [factorIndirecto, setFactorIndirecto] = useState(0);
   const [factorUtilidad, setFactorUtilidad] = useState(0);
@@ -302,7 +301,6 @@ function BudgetGrid() {
           referencia: referenciaParametros.trim(),
         },
       });
-      setUltimoGuardado(presupuesto);
       setMensaje({ tipo: 'ok', texto: `Guardado como ${presupuesto.identificador} -- total confirmado por el backend: ${formatMXN(presupuesto.monto_total)}` });
       cargarPresupuestos();
     } catch (e) {
@@ -757,7 +755,7 @@ function AnalysisPanel() {
       const task = await megalodonClient.riesgo.simular({
         presupuesto_base: presupuestoBase,
         presupuesto_maximo: presupuestoBase * 1.15,
-        iteraciones,
+        iteraciones: iterations,
         confidence_level: confidence / 100,
         variables: vars.map((v) => ({
           nombre: v.name,
@@ -873,7 +871,7 @@ function AnalysisPanel() {
                 { label: 'P50', value: formatMXN(result.p50) },
                 { label: 'Desv. estándar', value: formatMXN(result.stdDev) },
                 { label: 'P5 / P95', value: `${formatMXN(result.p5)} / ${formatMXN(result.p95)}` },
-                { label: `IC ${(result.confidenceLevel ?? confidence / 100) * 100}%`, value: `${formatMXN(result.confidenceInterval?.[0])} - ${formatMXN(result.confidenceInterval?.[1])}` },
+                { label: `IC ${(result.confidenceLevel ?? confidence / 100) * 100}%`, value: result.confidenceInterval ? `${formatMXN(result.confidenceInterval[0])} - ${formatMXN(result.confidenceInterval[1])}` : 'No disponible' },
                 { label: 'CV', value: `${result.cv.toFixed(2)}%` },
               ].map((s) => <div key={s.label} className="bg-[#0A0A0F] rounded p-2"><div className="text-[10px] text-[#8A8578]">{s.label}</div><div className="font-mono text-[#5A9E6F] font-semibold">{s.value}</div></div>)}
             </div>
