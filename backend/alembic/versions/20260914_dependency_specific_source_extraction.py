@@ -89,9 +89,9 @@ def upgrade() -> None:
                 INSERT INTO jurisdiction_profiles
                 (id, created_at, updated_at, tenant_id, code, authority, government_level, matter,
                  portal_code, profile_version, ruleset, templates, active)
-                SELECT gen_random_uuid(), now(), now(), NULL, :code, 'PRIVADA', 'PRIVATE', 'PRIVATE_WORKS',
+                SELECT gen_random_uuid(), now(), now(), NULL, CAST(:code AS varchar(120)), 'PRIVADA', 'PRIVATE', 'PRIVATE_WORKS',
                        'INTERNAL', 1, '{}'::jsonb, '{}'::jsonb, true
-                WHERE NOT EXISTS (SELECT 1 FROM jurisdiction_profiles WHERE tenant_id IS NULL AND code=:code)
+                WHERE NOT EXISTS (SELECT 1 FROM jurisdiction_profiles WHERE tenant_id IS NULL AND code=CAST(:code AS varchar(120)))
             """), {"code": code})
         conn.execute(sa.text("""
             UPDATE jurisdiction_profiles

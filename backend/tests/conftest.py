@@ -80,15 +80,26 @@ app.dependency_overrides[get_db] = override_get_db
 
 @pytest_asyncio.fixture(scope="session", autouse=True)
 async def setup_database():
-    async with engine_test.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        await conn.run_sync(TezBase.metadata.create_all)
+    if TEST_DATABASE_URL.startswith('sqlite'):
+        async with engine_test.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            await conn.run_sync(TezBase.metadata.create_all)
+    else:
+        # PostgreSQL tests exercise the migrated schema. ORM create_all must
+        # not repair a broken installation or replace migration authority.
+        from scripts.verify_migrated_schema import verify
+        async with engine_test.connect() as conn:
+            await conn.run_sync(verify)
 
     yield
 
-    async with engine_test.begin() as conn:
-        await conn.run_sync(TezBase.metadata.drop_all)
-        await conn.run_sync(Base.metadata.drop_all)
+    if TEST_DATABASE_URL.startswith('sqlite'):
+        async with engine_test.begin() as conn:
+            await conn.run_sync(TezBase.metadata.drop_all)
+            await conn.run_sync(Base.metadata.drop_all)
+    # CI owns a disposable PostgreSQL container; tests never drop its migrated
+    # schema using an ORM graph with unnamed cyclic foreign keys.
+    await engine_test.dispose()
 
 
 @pytest_asyncio.fixture

@@ -103,4 +103,4 @@ jobs:
       - run: echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
       - run: alembic upgrade head
       - run: python -m scripts.verify_migrated_schema
-      - run: pytest -q tests/unit tests/procurement tests/integration tests/e2e
+      - run: pytest -q
