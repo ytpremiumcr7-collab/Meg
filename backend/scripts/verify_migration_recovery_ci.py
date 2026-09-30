@@ -213,6 +213,28 @@ def main():
             conn.execute(sa.text("UPDATE catalog_terms SET created_by_id=:author WHERE id=:id"),
                          {"author": graph[0]["user"], "id": graph[0]["term"]})
         historical = snapshot(engine)
+        # Exercise the operator command with an actual custom-format dump of
+        # the populated historical schema. It must inspect every public table,
+        # not merely the selected fixture graph compared below.
+        with tempfile.TemporaryDirectory(prefix="meg-historical-rehearsal-") as directory:
+            backup_env = dict(os.environ, BACKUP_DIR=directory)
+            result = subprocess.run(["bash", "scripts/backup_postgres.sh"], env=backup_env,
+                                    capture_output=True, text=True, timeout=120, check=True)
+            historical_backup = Path(result.stdout.strip())
+            subprocess.run(["docker", "exec", container, "createdb", "-U", url.username,
+                            "-T", "template0", "megalodon_rehearsal_ci"], check=True, timeout=30)
+            rehearsal_env = dict(os.environ, DATABASE_URL=url.set(database="megalodon_rehearsal_ci").render_as_string(hide_password=False))
+            report_path = Path(directory) / "historical-report.json"
+            subprocess.run([sys.executable, "-m", "scripts.rehearse_historical_backup",
+                            "--backup", str(historical_backup), "--report", str(report_path)],
+                           env=rehearsal_env, check=True, timeout=180)
+            rehearsal_report = json.loads(report_path.read_text())
+            require(rehearsal_report["historical_values_preserved"] and
+                    rehearsal_report["tables_verified"] > len(TABLES),
+                    "Operator rehearsal did not compare all public historical tables")
+            require(report_path.stat().st_mode & 0o077 == 0, "Rehearsal report is not private")
+            require(snapshot(engine) == historical, "Rehearsal modified the source database")
+        checks.append("Operator rehearsal restores an historical dump, upgrades its isolated copy and fingerprints all public tables")
         migrate("head")
         verify_upgrade(historical, snapshot(engine), graph)
         with engine.connect() as conn:
@@ -260,6 +282,24 @@ def main():
             checksum.write_text("0" * 64 + "  " + backup.name + "\n")
             restore(expected_failure="checksum mismatch")
             checksum.write_text(original_checksum)
+            # A routine/domain alone used to pass the relations-only empty
+            # database check. Neither may survive a supposedly clean recovery.
+            empty_target = sa.create_engine(engine.url.set(database="migration_restore_ci"))
+            try:
+                for create, drop in (
+                    ("CREATE FUNCTION public.recovery_foreign_function() RETURNS int LANGUAGE sql AS 'SELECT 1'",
+                     "DROP FUNCTION public.recovery_foreign_function()"),
+                    ("CREATE DOMAIN public.recovery_foreign_domain AS text",
+                     "DROP DOMAIN public.recovery_foreign_domain"),
+                    ("CREATE SCHEMA recovery_foreign_schema", "DROP SCHEMA recovery_foreign_schema"),
+                ):
+                    with empty_target.begin() as conn:
+                        conn.execute(sa.text(create))
+                    restore(expected_failure="empty isolated database")
+                    with empty_target.begin() as conn:
+                        conn.execute(sa.text(drop))
+            finally:
+                empty_target.dispose()
             restore()
             restored = sa.create_engine(engine.url.set(database="migration_restore_ci"))
             try:

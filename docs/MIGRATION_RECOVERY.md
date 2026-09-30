@@ -62,6 +62,44 @@ Para declarar GO faltan un ensayo con una copia representativa de datos reales,
 RPO/RTO medidos, recuperación de roles y artefactos externos, y validación del
 despliegue final. Este ensayo sintético no certifica todas las instalaciones históricas.
 
+## Ensayo de un respaldo histórico controlado
+
+`python -m scripts.rehearse_historical_backup --backup /ruta/privada/respaldo.dump
+--report /ruta/privada/ensayo.json` se ejecuta desde `backend`, con las dependencias
+del lock y clientes PostgreSQL instalados. `DATABASE_URL` debe apuntar a una **base
+nueva y aislada**, cuyo nombre comience por `megalodon_rehearsal_`, creada con
+`template0`. No conectar API ni workers a esa base durante el ensayo. El comando
+no toma una URL de origen, no crea fixtures y no modifica la instalación original.
+El respaldo debe ser propio, controlado y contar con su `.sha256` obligatorio.
+
+La restauración rechaza destinos con relaciones, rutinas, tipos, esquemas,
+extensiones distintas de `plpgsql`, operadores, collations, objetos externos,
+publicaciones, event triggers o large objects. No limpia objetos ajenos. Esta
+comprobación no sustituye el aislamiento ni detener los escritores.
+
+El intervalo revisado del comando es `20260914_workspace_bridge_tenant` a
+`20260930_identity_authority`; también admite un respaldo en esta última revisión.
+Una revisión diferente falla explícitamente y conserva la copia para investigación.
+Compara todas las tablas públicas del respaldo, incluyendo tablas adicionales y
+filas duplicadas, por hashes de sus columnas históricas en transacciones de lectura
+REPEATABLE READ. Solo proyecta los dos cambios de nombre de autoría y la interpretación
+UTC explícita de los timestamps históricos de Tezcatlipoca. No publica los valores.
+Después ejecuta la verificación de esquema del backend. No certifica vistas, rutinas
+personalizadas o esquemas fuera de `public`, ni sustituye la comprobación de flujos.
+
+El informe se crea con permisos privados, no sobrescribe archivos y registra hash
+del respaldo, revisión, conteos, hashes de datos y tiempos reales de restauración,
+upgrade y verificación. Estos tiempos corresponden al ensayo de la base: **no son
+RTO del despliegue**, y RPO queda sin acreditar. Roles/grants, artefactos externos,
+rotación de claves y pruebas de la aplicación siguen siendo obligatorios. Ante un
+fallo, el destino permanece aislado; no se continúa hacia GO ni se borra evidencia.
+
+CI ejecuta este mismo comando sobre un dump de la revisión histórica poblada,
+comprueba que inspeccione más tablas que el subconjunto del fixture y que el origen
+no haya cambiado. También verifica rechazo de destinos con solo una función,
+un dominio o un esquema ajeno. Esto acredita el mecanismo con datos controlados,
+no la representatividad de un respaldo de cliente.
+
 Referencias contrastadas:
 
 - PostgreSQL 16, pg_dump: https://www.postgresql.org/docs/16/app-pgdump.html
@@ -75,3 +113,5 @@ Referencias contrastadas:
   https://www.postgresql.org/docs/16/libpq-pgpass.html
 - pgBackRest, recuperación aislada y verificación de respaldos (referencia operativa;
   no es una dependencia añadida): https://pgbackrest.org/user-guide.html
+- Alembic, migraciones de datos: https://alembic.sqlalchemy.org/en/latest/cookbook.html#data-migrations-general-techniques
+- PostgreSQL, rutinas y namespaces: https://www.postgresql.org/docs/16/catalog-pg-proc.html

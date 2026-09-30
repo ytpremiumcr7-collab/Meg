@@ -19,6 +19,34 @@ class BackupInputError(ValueError):
     """A deliberately sanitized, actionable input error."""
 
 
+# template0 has public plus system namespaces and the built-in plpgsql extension.
+# Relations alone do not identify an empty database: routines, standalone types,
+# extensions and schemas could otherwise survive an apparently clean restore.
+EMPTY_DATABASE_SQL = """
+WITH user_namespaces AS (
+    SELECT oid, nspname FROM pg_namespace
+    WHERE nspname !~ '^pg_' AND nspname <> 'information_schema'
+)
+SELECT
+    (SELECT count(*) FROM pg_class WHERE relnamespace IN (SELECT oid FROM user_namespaces))
+  + (SELECT count(*) FROM pg_proc WHERE pronamespace IN (SELECT oid FROM user_namespaces))
+  + (SELECT count(*) FROM pg_type WHERE typnamespace IN (SELECT oid FROM user_namespaces))
+  + (SELECT count(*) FROM pg_namespace WHERE nspname !~ '^pg_'
+       AND nspname NOT IN ('public', 'information_schema'))
+  + (SELECT count(*) FROM pg_extension WHERE extname <> 'plpgsql')
+  + (SELECT count(*) FROM pg_collation WHERE collnamespace IN (SELECT oid FROM user_namespaces))
+  + (SELECT count(*) FROM pg_conversion WHERE connamespace IN (SELECT oid FROM user_namespaces))
+  + (SELECT count(*) FROM pg_operator WHERE oprnamespace IN (SELECT oid FROM user_namespaces))
+  + (SELECT count(*) FROM pg_opclass WHERE opcnamespace IN (SELECT oid FROM user_namespaces))
+  + (SELECT count(*) FROM pg_opfamily WHERE opfnamespace IN (SELECT oid FROM user_namespaces))
+  + (SELECT count(*) FROM pg_event_trigger)
+  + (SELECT count(*) FROM pg_foreign_server)
+  + (SELECT count(*) FROM pg_foreign_data_wrapper)
+  + (SELECT count(*) FROM pg_publication)
+  + (SELECT count(*) FROM pg_largeobject_metadata)
+"""
+
+
 def digest(path):
     with path.open("rb") as source:
         return hashlib.file_digest(source, "sha256").hexdigest()
@@ -91,8 +119,8 @@ def backup(uri, env):
     print(destination.resolve())
 
 
-def restore(uri, env):
-    source = Path(os.environ["BACKUP_FILE"])
+def restore(uri, env, source=None):
+    source = Path(source if source is not None else os.environ["BACKUP_FILE"])
     if not source.is_file():
         raise BackupInputError("Backup file missing")
     checksum = Path(str(source) + ".sha256")
@@ -104,9 +132,7 @@ def restore(uri, env):
     # Never clean a live installation. Recovery is a separate deployment step.
     objects = run(["psql", "--no-password", "--dbname", uri, "-X", "-qAt",
                    "-v", "ON_ERROR_STOP=1", "-c",
-                   "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
-                   "WHERE n.nspname NOT LIKE 'pg_%' AND n.nspname <> 'information_schema' "
-                   "AND c.relkind IN ('r','p','v','m','S','f')"], env, capture=True).stdout.strip()
+                   EMPTY_DATABASE_SQL], env, capture=True).stdout.strip()
     if objects != "0":
         raise BackupInputError("Restore requires an empty isolated database; existing objects must not be overwritten")
     run(["pg_restore", "--no-password", "--dbname", uri, "--single-transaction",
