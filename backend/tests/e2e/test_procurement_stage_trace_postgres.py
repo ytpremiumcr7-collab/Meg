@@ -7,6 +7,7 @@ Run explicitly with:
 from __future__ import annotations
 
 import json
+import asyncio
 import os
 from pathlib import Path
 from uuid import uuid4
@@ -213,7 +214,9 @@ async def test_inbal_stage_trace_postgres_tenant_a_b():
         results = []
         for tender_id, tenant_id, user_id in tenders:
             user = await db.get(User, user_id)
-            result = await ProcurementService(db, user).run(tender_id)
+            # Regression: a parent FOR UPDATE lock must not deadlock the
+            # independent transaction that persists the preparation trace.
+            result = await asyncio.wait_for(ProcurementService(db, user).run(tender_id), timeout=60)
             results.append((tender_id, tenant_id, result))
 
         for tender_id, tenant_id, result in results:

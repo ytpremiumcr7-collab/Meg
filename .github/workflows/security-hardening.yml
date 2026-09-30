@@ -108,4 +108,4 @@ jobs:
       - run: echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
       - run: alembic upgrade head
       - run: python -m scripts.verify_migrated_schema
-      - run: timeout 10m pytest -q --maxfail=5
+      - run: timeout 10m pytest -vv --maxfail=5 --durations=10

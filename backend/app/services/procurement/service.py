@@ -531,7 +531,11 @@ class ProcurementService:
             TenderPackage.tenant_id == self.user.tenant_id,
         )
         if for_update:
-            stmt = stmt.with_for_update()
+            # IDs/tenant ownership remain immutable. Serialize writers with
+            # NO KEY UPDATE so the independently committed preparation trace
+            # can acquire its FK KEY SHARE lock on this same tender. FOR UPDATE
+            # caused run() to wait forever on its own trace transaction.
+            stmt = stmt.with_for_update(key_share=True)
         tender = await self.db.scalar(stmt)
         if tender is None:
             raise MegalodonException(ErrorCode.DOCUMENTO_NO_ENCONTRADO, "TenderPackage no encontrado.", 404)
