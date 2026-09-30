@@ -323,6 +323,10 @@ def main():
         checks.append("Operational backup/restore preserves data, schema, 3D PostGIS geometry, sequences and revocation epochs")
         checks.append("Operational restore rejects missing/bad checksums and nonempty targets without overwriting data")
         report = {"passed": checks, "source_revision": HISTORICAL, "target_revision": HEAD,
+                  "operator_rehearsal": {key: rehearsal_report[key] for key in (
+                      "source_revision", "target_revision", "tables_verified", "rows_verified",
+                      "historical_values_preserved", "documented_configuration_transforms_verified",
+                      "timings_seconds", "production_deployment_certified")},
                   "fixtures": "synthetic populated historical data in two tenants",
                   "owned_rows": sum(len(current[t]) for t in OWNED),
                   "data_sha256": hashlib.sha256(json.dumps(current, sort_keys=True).encode()).hexdigest(),
