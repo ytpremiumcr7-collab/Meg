@@ -23,6 +23,7 @@ async def seed_identities():
     from app.models.base import AsyncSessionLocal, engine
     from app.models.user import Tenant, User, UserRole
     from app.services.auth_service import AuthService
+    from sqlalchemy import text
     password = uuid4().hex
     async with AsyncSessionLocal() as db:
         tenant = Tenant(name="CI runtime smoke", slug=f"ci-smoke-{uuid4().hex}", is_active=True)
@@ -39,6 +40,14 @@ async def seed_identities():
         await db.commit()
         result = {"admin_email": admin.email, "member_email": member.email,
                   "member_id": str(member.id), "password": password}
+    # Separate runtime credentials have DML permissions but cannot alter tables.
+    role, role_password = f"ci_runtime_{uuid4().hex}", uuid4().hex
+    async with engine.begin() as connection:
+        await connection.execute(text(f'CREATE ROLE "{role}" LOGIN PASSWORD \'{role_password}\''))
+        await connection.execute(text(f'GRANT USAGE ON SCHEMA public TO "{role}"'))
+        await connection.execute(text(f'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO "{role}"'))
+        await connection.execute(text(f'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO "{role}"'))
+    result["runtime_database_url"] = engine.url.set(username=role, password=role_password).render_as_string(hide_password=False)
     await engine.dispose()
     return result
 
@@ -60,6 +69,8 @@ def main():
         listener.listen(128)
         origin = f"http://127.0.0.1:{listener.getsockname()[1]}"
         env = dict(os.environ)
+        env["DATABASE_URL"] = identities["runtime_database_url"]
+        env["TEZCATLIPOCA_DATABASE_URL"] = identities["runtime_database_url"]
         env["OTEL_EXPORTER_OTLP_ENDPOINT"] = ""
         with log_path.open("wb") as log:
             process = subprocess.Popen(
@@ -115,7 +126,7 @@ def main():
                         "refresh_token": member_login["refresh_token"]}), 401, "Invalidated refresh")
                     checks.append("Tenant IAM change, origin protection and access/refresh invalidation")
                     report = {"passed": checks, "transport": "real TCP HTTP",
-                              "lifespan": "on", "fixtures": "synthetic CI identities",
+                              "lifespan": "on", "database_role": "runtime DML without schema ownership", "fixtures": "synthetic CI identities",
                               "optional_tezcatlipoca": ready["optional_dependencies"]["tezcatlipoca"],
                               "production_deployment_certified": False}
             finally:
