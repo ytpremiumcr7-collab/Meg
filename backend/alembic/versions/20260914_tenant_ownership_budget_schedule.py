@@ -3,7 +3,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision = "20260914_tenant_ownership_budget_schedule"
-down_revision = "20260914_workspace_bridge_versioning"
+down_revision = "20260914_workspace_bridge_tenant"
 branch_labels = None
 depends_on = None
 

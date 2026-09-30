@@ -2,7 +2,7 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 revision = "20260914_workspace_bridge_versioning"
-down_revision = "20260914_workspace_bridge_tenant"
+down_revision = "20260914_db_driven_formats_structure"
 branch_labels = None
 depends_on = None
 
