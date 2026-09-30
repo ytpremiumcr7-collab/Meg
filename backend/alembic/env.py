@@ -9,11 +9,12 @@ Configuración de Alembic para migraciones.
 import asyncio
 from logging.config import fileConfig
 
-from sqlalchemy import pool
+from sqlalchemy import pool, String, inspect, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
+from alembic.ddl.postgresql import PostgresqlImpl
 from app.config import settings
 from app.models.base import Base
 
@@ -29,13 +30,24 @@ from app.models.base import Base
 # modelo que app/models/__init__.py registre, Alembic lo ve, sin volver
 # a tener que acordarse de actualizar esta lista.
 import app.models  # noqa: F401  (el import por su efecto secundario: registra todo en Base.metadata)
+from tezcatlipoca.db.models import Base as TezBase
+
+
+class MegalodonPostgresqlImpl(PostgresqlImpl):
+    """The historical descriptive revision IDs exceed Alembic's 32 chars."""
+    __dialect__ = "postgresql"
+
+    def version_table_impl(self, **kwargs):
+        table = super().version_table_impl(**kwargs)
+        table.c.version_num.type = String(128)
+        return table
 
 config = context.config
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-target_metadata = Base.metadata
+target_metadata = [Base.metadata, TezBase.metadata]
 
 
 def get_url():
@@ -57,6 +69,12 @@ def run_migrations_offline() -> None:
 def do_run_migrations(connection: Connection) -> None:
     context.configure(connection=connection, target_metadata=target_metadata)
     with context.begin_transaction():
+        # Widen existing installation metadata too; preserve the recorded ID.
+        inspector = inspect(connection)
+        if connection.dialect.name == "postgresql" and inspector.has_table("alembic_version"):
+            version = next(c for c in inspector.get_columns("alembic_version") if c["name"] == "version_num")
+            if getattr(version["type"], "length", None) and version["type"].length < 128:
+                connection.execute(text("ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(128)"))
         context.run_migrations()
 
 
