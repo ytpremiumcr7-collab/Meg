@@ -143,7 +143,6 @@ jobs:
         working-directory: backend
     env:
       DATABASE_URL: postgresql+asyncpg://megalodon:megalodon_ci_password@localhost:5432/migration_history_ci
-      MIGRATION_CI_CONTAINER: ${{ job.services.postgres.id }}
       REDIS_URL: redis://localhost:6379/0
       CELERY_BROKER_URL: redis://localhost:6379/1
       CELERY_RESULT_BACKEND: redis://localhost:6379/2
@@ -160,6 +159,8 @@ jobs:
       - run: uv sync --frozen --extra dev
       - run: echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
       - run: timeout 10m python -m scripts.verify_migration_recovery_ci
+        env:
+          MIGRATION_CI_CONTAINER: ${{ job.services.postgres.id }}
       - name: Preserve migration and recovery evidence
         if: always()
         uses: actions/upload-artifact@v4
