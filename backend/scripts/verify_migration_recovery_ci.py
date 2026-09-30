@@ -92,8 +92,8 @@ def migrate(target, expected_failure=None, downgrade=False):
 def seed(engine):
     graph = []
     with engine.begin() as conn:
-        def insert(name, **values):
-            table = sa.Table(name, sa.MetaData(), autoload_with=conn)
+        def insert(table_name, **values):
+            table = sa.Table(table_name, sa.MetaData(), autoload_with=conn)
             return conn.execute(table.insert().values(**values).returning(table.c.id)).scalar_one()
 
         for number in (1, 2):
