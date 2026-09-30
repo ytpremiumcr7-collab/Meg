@@ -99,7 +99,7 @@ async def test_inbal_stage_trace_postgres_tenant_a_b():
                 "procedure_type": "PUBLIC_TENDER",
                 "contract_type": "UNIT_PRICES",
                 "evaluation_criterion": "BEST_VALUE",
-                "bidder": synthetic["proposicion"]["licitante"],
+                "bidder": {**synthetic["proposicion"]["licitante"], "capital": 5000000},
             },
             "technical": {"concepts": [{"code": x["codigo"]} for x in concepts]},
             "economic": {
