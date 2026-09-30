@@ -13,4 +13,11 @@ def upgrade():
 
 
 def downgrade():
-    op.drop_column("users", "auth_version")
+    # Resetting these counters on a later upgrade can resurrect revoked JWTs.
+    # Reject before any DDL: recovery must preserve authority or rotate signing
+    # keys after restoring a verified backup in an isolated environment.
+    raise RuntimeError(
+        "Identity authority migration is forward-only: auth_version must not be "
+        "discarded. Restore a verified backup offline and rotate JWT signing "
+        "keys before reopening traffic, or deploy a forward repair."
+    )

@@ -33,6 +33,10 @@ opcional; una falta de esquema del núcleo impide iniciar la API.
 
 Despliegue: aplicar `alembic upgrade head` antes de arrancar la nueva API y renovar
 las sesiones. No desplegar la nueva API contra una base sin `users.auth_version`.
+La migración de autoridad es irreversible mediante `alembic downgrade`: eliminar
+el contador y recrearlo en cero puede rehabilitar JWT revocados. La reversión se
+rechaza antes de modificar el esquema. Consultar `MIGRATION_RECOVERY.md` para
+recuperación aislada, rotación de claves y límites de la evidencia de CI.
 El dashboard y contador consultan los usuarios reales, aunque nunca hayan usado
 Tezcatlipoca. Se retiró la cifra global de blacklist SQL: la revocación real usa Redis.
 
@@ -43,8 +47,8 @@ Referencias consultadas:
 - OWASP, Authorization: https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html
 - Keycloak, UserResource: https://github.com/keycloak/keycloak/blob/main/services/src/main/java/org/keycloak/services/resources/admin/UserResource.java
 
-Límites pendientes para GO del producto: migración de datos históricos y rollback
-del conjunto de migraciones, catálogo privado revisado/activado, documentos/BIM y
+Límites pendientes para GO del producto: ensayo sobre una copia de los datos reales,
+recuperación completa de infraestructura y artefactos, catálogo privado revisado/activado, documentos/BIM y
 smoke de API desplegada. La suite HTTP ASGI se complementa con un proceso Uvicorn real en CI: arranque con
 lifespan, TCP HTTP, health/ready, login, cookies, cambio IAM y cierre ordenado.
 Las identidades de ese smoke son fixtures de CI; no certifican un despliegue real.
