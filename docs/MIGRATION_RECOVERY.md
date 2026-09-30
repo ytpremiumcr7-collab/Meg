@@ -22,11 +22,24 @@ Se intentan escrituras cruzadas entre organizaciones en las seis tablas y se exi
 rechazo por claves foráneas de PostgreSQL. También se exige que un downgrade
 inseguro conserve datos, esquema, revisión Alembic y versiones de revocación.
 
-Finalmente se ejecutan `pg_dump -Fc` y `pg_restore --single-transaction
+Finalmente se ejecutan los scripts operativos `backup_postgres.sh` y
+`restore_postgres.sh`: `pg_dump -Fc` y `pg_restore --single-transaction
 --exit-on-error --no-owner --no-privileges` sobre una segunda base vacía. Se comparan
 los datos del ensayo, columnas, claves foráneas, unicidad y checks del esquema, y se
-verifican PostGIS y las secuencias. Solo el informe sanitizado se publica como artefacto
+verifican geometrías PostGIS 3D y las secuencias. Se rechazan checksums ausentes o
+incorrectos y una segunda restauración sobre la base ya poblada. Solo el informe sanitizado se publica como artefacto
 de CI; el respaldo temporal se elimina. La prueba no valida roles/grants de despliegue.
+
+Los scripts requieren el Python del backend con dependencias instaladas, y clientes
+`pg_dump`, `pg_restore` y `psql` de una versión compatible con el servidor y el archivo.
+En CI se fijan clientes de PostgreSQL 16. Las URL `postgresql+asyncpg` de la aplicación
+se traducen al contrato libpq; la contraseña se entrega en un archivo efímero 0600,
+sin incluirla en argumentos del proceso. El dump es privado, se publica solo al terminar
+y lleva un SHA-256 obligatorio con nombre relativo para permitir mover el respaldo.
+La restauración exige una base vacía creada con `template0`, no elimina objetos
+existentes y aborta en una única transacción. Mantener los escritores detenidos durante
+la verificación y restauración. El checksum detecta corrupción, no acredita la confianza
+del origen: restaurar únicamente respaldos propios y controlados.
 
 Para recuperar un despliegue real:
 
@@ -57,3 +70,8 @@ Referencias contrastadas:
   https://github.com/sqlalchemy/alembic/discussions/972
 - Implementación de restauración de PostgreSQL:
   https://github.com/postgres/postgres/blob/REL_16_STABLE/src/bin/pg_dump/pg_restore.c
+- PostgreSQL, contrato de conexión y archivos de contraseña:
+  https://www.postgresql.org/docs/16/libpq-connect.html
+  https://www.postgresql.org/docs/16/libpq-pgpass.html
+- pgBackRest, recuperación aislada y verificación de respaldos (referencia operativa;
+  no es una dependencia añadida): https://pgbackrest.org/user-guide.html

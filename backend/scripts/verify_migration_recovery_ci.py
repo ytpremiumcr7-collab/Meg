@@ -235,20 +235,39 @@ def main():
         with engine.connect() as conn:
             verify(conn)
         with tempfile.TemporaryDirectory(prefix="meg-recovery-") as directory:
-            backup = Path(directory) / "fixture.dump"
-            with backup.open("wb") as output:
-                subprocess.run(["docker", "exec", container, "pg_dump", "-U", url.username,
-                                "-d", url.database, "-Fc"], stdout=output, check=True, timeout=120)
+            backup_env = dict(os.environ, BACKUP_DIR=directory)
+            result = subprocess.run(["bash", "scripts/backup_postgres.sh"], env=backup_env,
+                                    capture_output=True, text=True, timeout=120, check=True)
+            backup = Path(result.stdout.strip())
+            require(backup.stat().st_mode & 0o077 == 0, "Backup is not private")
             subprocess.run(["docker", "exec", container, "createdb", "-U", url.username,
                             "-T", "template0", "migration_restore_ci"], check=True, timeout=30)
-            with backup.open("rb") as source:
-                subprocess.run(["docker", "exec", "-i", container, "pg_restore", "-U", url.username,
-                                "-d", "migration_restore_ci", "--single-transaction", "--exit-on-error",
-                                "--no-owner", "--no-privileges"], stdin=source, check=True, timeout=120)
+            restore_env = dict(os.environ, BACKUP_FILE=str(backup), DATABASE_URL=
+                               url.set(database="migration_restore_ci").render_as_string(hide_password=False))
+            def restore(expected_failure=None):
+                result = subprocess.run(["bash", "scripts/restore_postgres.sh"], env=restore_env,
+                                        capture_output=True, text=True, timeout=120)
+                if expected_failure:
+                    require(result.returncode != 0 and expected_failure in result.stderr,
+                            "Operational restore did not reject the expected unsafe input")
+                elif result.returncode:
+                    sys.stderr.write(result.stderr)
+                    raise RuntimeError("Operational restore failed")
+            checksum = Path(str(backup) + ".sha256")
+            original_checksum = checksum.read_text()
+            checksum.unlink()
+            restore(expected_failure="checksum file required")
+            checksum.write_text("0" * 64 + "  " + backup.name + "\n")
+            restore(expected_failure="checksum mismatch")
+            checksum.write_text(original_checksum)
+            restore()
             restored = sa.create_engine(engine.url.set(database="migration_restore_ci"))
             try:
                 require(snapshot(restored) == current and schema_signature(restored) == schema,
                         "Backup restore changed data, schema, constraints or revocation epochs")
+                restore(expected_failure="empty isolated database")
+                require(snapshot(restored) == current and schema_signature(restored) == schema,
+                        "Rejected overwrite changed the recovered installation")
                 verify_constraints(restored, graph)
                 with restored.connect() as conn:
                     verify(conn)
@@ -261,7 +280,8 @@ def main():
                         require(next_id > maximum, f"Restored sequence collides in {table}")
             finally:
                 restored.dispose()
-        checks.append("Actual pg_dump/pg_restore preserves data, schema, PostGIS, sequences and revocation epochs")
+        checks.append("Operational backup/restore preserves data, schema, 3D PostGIS geometry, sequences and revocation epochs")
+        checks.append("Operational restore rejects missing/bad checksums and nonempty targets without overwriting data")
         report = {"passed": checks, "source_revision": HISTORICAL, "target_revision": HEAD,
                   "fixtures": "synthetic populated historical data in two tenants",
                   "owned_rows": sum(len(current[t]) for t in OWNED),
