@@ -9,6 +9,7 @@ PresupuestoService - Gestión de presupuestos programables con costeo.
 from typing import List, Optional, Dict, Any
 from uuid import UUID, uuid4
 from decimal import Decimal
+from copy import deepcopy
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -92,7 +93,7 @@ class PresupuestoService(BaseService[Presupuesto]):
         # Resolve catalogue prices on the server; client amounts are not evidence.
         from app.services.catalogo_libro import resolver
         referencias = {}
-        partidas_data = [dict(p) for p in partidas_data]
+        partidas_data = deepcopy(partidas_data)
         for index, data in enumerate(partidas_data, 1):
             if data.get("catalogo_libro_id"):
                 item = resolver(data["catalogo_libro_id"])
@@ -101,6 +102,43 @@ class PresupuestoService(BaseService[Presupuesto]):
                 data.update(descripcion=item["descripcion"], unidad=item["unidad"],
                             precio_unitario=Decimal(item["precio_unitario"]))
                 referencias[str(index)] = item
+
+        # Resolve every requested update before any budget row is inserted.
+        # Prices, identity and units come from the reviewed source snapshot.
+        from app.models.user import User
+        from app.schemas.indices_costos import ActualizacionPrecioInput
+        from app.schemas.apu_costeo import InsumoCosteoInput
+        from app.services.indices_costos_service import IndicesCostosService
+        from pydantic import ValidationError
+        actor = None
+        for partida_data in partidas_data:
+            for concepto_data in [partida_data, *(partida_data.get('conceptos') or [])]:
+                for insumo_data in concepto_data.get('insumos') or []:
+                    if '_snapshot_indice' in insumo_data:
+                        raise MegalodonException(ErrorCode.BAD_REQUEST, 'No se admite evidencia calculada por el cliente')
+                    try:
+                        validado = InsumoCosteoInput.model_validate(insumo_data)
+                    except ValidationError as exc:
+                        raise MegalodonException(ErrorCode.BAD_REQUEST, 'Cantidades o precios del insumo inválidos') from exc
+                    insumo_data.clear()
+                    insumo_data.update(validado.model_dump(mode='python'))
+                    if insumo_data.get('actualizacion_precio') is None:
+                        continue
+                    if actor is None:
+                        actor = await self.db.get(User, creado_por_id) if creado_por_id else None
+                        if actor is None or actor.tenant_id != self.tenant_id or not actor.is_active:
+                            raise MegalodonException(ErrorCode.PERMISO_DENEGADO, 'La actualización requiere un usuario del tenant', status_code=403)
+                    try:
+                        solicitud = ActualizacionPrecioInput.model_validate(insumo_data['actualizacion_precio'])
+                    except ValidationError as exc:
+                        raise MegalodonException(ErrorCode.BAD_REQUEST, 'Referencia de actualización inválida') from exc
+                    snapshot = await IndicesCostosService(self.db, actor).resolver(solicitud)
+                    original = snapshot['vinculo']['insumo_original']
+                    insumo_data.update(clave=original['clave'], descripcion=original['descripcion'],
+                                       tipo=original['tipo'], unidad=original['unidad'],
+                                       precio_unitario=Decimal(snapshot['precio_actualizado']), _snapshot_indice=snapshot)
+            if partida_data.get('conceptos') and partida_data.get('insumos'):
+                raise MegalodonException(ErrorCode.BAD_REQUEST, 'No mezclar insumos de partida y de conceptos')
 
         # Independent of concurrent creations and deletions; fits String(100).
         presupuesto_id = uuid4()
@@ -128,6 +166,7 @@ class PresupuestoService(BaseService[Presupuesto]):
                             cantidad=Decimal(str(ins_data.get("cantidad", 0))),
                             precio_unitario=Decimal(str(ins_data.get("precio_unitario", 0))),
                             rendimiento=Decimal(str(ins_data.get("rendimiento", 1.0))),
+                            actualizacion_precio=ins_data.get('_snapshot_indice'),
                         )
                         for ins_data in c_data.get("insumos", [])
                     ]
@@ -150,6 +189,7 @@ class PresupuestoService(BaseService[Presupuesto]):
                         cantidad=Decimal(str(ins_data.get("cantidad", 0))),
                         precio_unitario=Decimal(str(ins_data.get("precio_unitario", 0))),
                         rendimiento=Decimal(str(ins_data.get("rendimiento", 1.0))),
+                        actualizacion_precio=ins_data.get('_snapshot_indice'),
                     )
                     for ins_data in p_data.get("insumos", [])
                 ]
@@ -194,16 +234,16 @@ class PresupuestoService(BaseService[Presupuesto]):
             "nombre": nombre,
             "descripcion": descripcion,
             "expediente_id": expediente_id,
-            "monto_directo": float(presupuesto_costeo.monto_directo),
-            "monto_indirecto": float(presupuesto_costeo.monto_indirecto),
-            "monto_utilidad": float(presupuesto_costeo.monto_utilidad),
-            "monto_riesgo": float(presupuesto_costeo.monto_riesgo),
-            "monto_impuesto": float(presupuesto_costeo.monto_impuesto),
-            "monto_total": float(presupuesto_costeo.monto_total),
-            "factor_indirecto": float(parametros_costeo.factor_indirecto),
-            "factor_utilidad": float(parametros_costeo.factor_utilidad),
-            "factor_impuesto": float(parametros_costeo.factor_impuesto),
-            "factor_riesgo": float(parametros_costeo.factor_riesgo),
+            "monto_directo": presupuesto_costeo.monto_directo,
+            "monto_indirecto": presupuesto_costeo.monto_indirecto,
+            "monto_utilidad": presupuesto_costeo.monto_utilidad,
+            "monto_riesgo": presupuesto_costeo.monto_riesgo,
+            "monto_impuesto": presupuesto_costeo.monto_impuesto,
+            "monto_total": presupuesto_costeo.monto_total,
+            "factor_indirecto": parametros_costeo.factor_indirecto,
+            "factor_utilidad": parametros_costeo.factor_utilidad,
+            "factor_impuesto": parametros_costeo.factor_impuesto,
+            "factor_riesgo": parametros_costeo.factor_riesgo,
             "zona_economica": zona_economica,
             "metadatos": {"parametros_costeo": parametros_costeo.to_dict(), "catalogo_libro": referencias},
             "estado": EstadoPresupuesto.CALCULADO.value,
@@ -215,6 +255,7 @@ class PresupuestoService(BaseService[Presupuesto]):
         await self.db.flush()
 
         # Crear partidas, conceptos e insumos
+        referencias_indices = {}
         for p_costeo in presupuesto_costeo.partidas:
             partida = Partida(
                 id=uuid4(),
@@ -223,9 +264,9 @@ class PresupuestoService(BaseService[Presupuesto]):
                 numero=p_costeo.numero,
                 descripcion=p_costeo.descripcion,
                 unidad=p_costeo.unidad,
-                cantidad=float(p_costeo.cantidad),
-                precio_unitario=float(p_costeo.precio_unitario),
-                importe=float(p_costeo.importe),
+                cantidad=p_costeo.cantidad,
+                precio_unitario=p_costeo.precio_unitario,
+                importe=p_costeo.importe,
             )
             self.db.add(partida)
 
@@ -237,8 +278,8 @@ class PresupuestoService(BaseService[Presupuesto]):
                     clave=c_costeo.clave,
                     descripcion=c_costeo.descripcion,
                     unidad=c_costeo.unidad,
-                    cantidad=float(c_costeo.cantidad),
-                    costo_directo_unitario=float(c_costeo.costo_directo_unitario),
+                    cantidad=c_costeo.cantidad,
+                    costo_directo_unitario=c_costeo.costo_directo_unitario,
                 )
                 self.db.add(concepto)
 
@@ -251,13 +292,18 @@ class PresupuestoService(BaseService[Presupuesto]):
                         descripcion=i_costeo.descripcion,
                         tipo=i_costeo.tipo,
                         unidad=i_costeo.unidad,
-                        cantidad=float(i_costeo.cantidad),
-                        precio_unitario=float(i_costeo.precio_unitario),
-                        importe=float(i_costeo.importe),
-                        rendimiento=float(i_costeo.rendimiento),
+                        cantidad=i_costeo.cantidad,
+                        precio_unitario=i_costeo.precio_unitario,
+                        importe=i_costeo.importe,
+                        rendimiento=i_costeo.rendimiento,
+                        actualizacion_precio=i_costeo.actualizacion_precio,
                     )
+                    if i_costeo.actualizacion_precio:
+                        referencias_indices[str(insumo.id)] = i_costeo.actualizacion_precio['sha256']
                     self.db.add(insumo)
 
+        if referencias_indices:
+            presupuesto.metadatos = {**presupuesto.metadatos, 'actualizaciones_indices': referencias_indices}
         await self.db.commit()
 
         # BUG EVITADO: db.refresh(presupuesto) solo recarga columnas
@@ -302,6 +348,22 @@ class PresupuestoService(BaseService[Presupuesto]):
         """Convierte las partidas ORM (con conceptos e insumos ya cargados)
         a PartidaCosteo, preservando el precio manual de partidas tipo
         tabulador (las que no tienen conceptos)."""
+        from app.engines.costos.indices import verificar_snapshot
+        referencias = (presupuesto.metadatos or {}).get('actualizaciones_indices', {})
+        encontradas = {}
+        try:
+            for p in presupuesto.partidas:
+                for c in p.conceptos:
+                    for ins in c.insumos:
+                        if ins.actualizacion_precio:
+                            verificar_snapshot(ins.actualizacion_precio, Decimal(ins.precio_unitario))
+                            if ins.actualizacion_precio['vinculo']['tenant_id'] != str(self.tenant_id):
+                                raise ValueError('Correspondencia de otro tenant')
+                            encontradas[str(ins.id)] = ins.actualizacion_precio['sha256']
+            if referencias != encontradas:
+                raise ValueError('Referencias de actualización incompletas o alteradas')
+        except (KeyError, TypeError, ValueError) as exc:
+            raise MegalodonException(ErrorCode.PRESUPUESTO_ERROR, f'Evidencia de índices inválida: {exc}') from exc
         partidas_costeo = []
         for p in presupuesto.partidas:
             conceptos = [
@@ -319,6 +381,7 @@ class PresupuestoService(BaseService[Presupuesto]):
                             cantidad=Decimal(str(ins.cantidad)),
                             precio_unitario=Decimal(str(ins.precio_unitario)),
                             rendimiento=Decimal(str(ins.rendimiento)),
+                            actualizacion_precio=ins.actualizacion_precio,
                         )
                         for ins in c.insumos
                     ],
@@ -383,18 +446,22 @@ class PresupuestoService(BaseService[Presupuesto]):
         self.motor_costeo.calcular_presupuesto(presupuesto_costeo)
 
         for p_orm, p_costeo in zip(presupuesto.partidas, presupuesto_costeo.partidas):
-            p_orm.precio_unitario = float(p_costeo.precio_unitario)
-            p_orm.importe = float(p_costeo.importe)
-        presupuesto.factor_indirecto = float(parametros.factor_indirecto)
-        presupuesto.factor_utilidad = float(parametros.factor_utilidad)
-        presupuesto.factor_impuesto = float(parametros.factor_impuesto)
-        presupuesto.factor_riesgo = float(parametros.factor_riesgo)
-        presupuesto.monto_directo = float(presupuesto_costeo.monto_directo)
-        presupuesto.monto_indirecto = float(presupuesto_costeo.monto_indirecto)
-        presupuesto.monto_utilidad = float(presupuesto_costeo.monto_utilidad)
-        presupuesto.monto_riesgo = float(presupuesto_costeo.monto_riesgo)
-        presupuesto.monto_impuesto = float(presupuesto_costeo.monto_impuesto)
-        presupuesto.monto_total = float(presupuesto_costeo.monto_total)
+            p_orm.precio_unitario = p_costeo.precio_unitario
+            p_orm.importe = p_costeo.importe
+            for c_orm, c_costeo in zip(p_orm.conceptos, p_costeo.conceptos):
+                c_orm.costo_directo_unitario = c_costeo.costo_directo_unitario
+                for i_orm, i_costeo in zip(c_orm.insumos, c_costeo.insumos):
+                    i_orm.importe = i_costeo.importe
+        presupuesto.factor_indirecto = parametros.factor_indirecto
+        presupuesto.factor_utilidad = parametros.factor_utilidad
+        presupuesto.factor_impuesto = parametros.factor_impuesto
+        presupuesto.factor_riesgo = parametros.factor_riesgo
+        presupuesto.monto_directo = presupuesto_costeo.monto_directo
+        presupuesto.monto_indirecto = presupuesto_costeo.monto_indirecto
+        presupuesto.monto_utilidad = presupuesto_costeo.monto_utilidad
+        presupuesto.monto_riesgo = presupuesto_costeo.monto_riesgo
+        presupuesto.monto_impuesto = presupuesto_costeo.monto_impuesto
+        presupuesto.monto_total = presupuesto_costeo.monto_total
         presupuesto.metadatos = metadatos
         if actualizado_por_id is not None:
             presupuesto.actualizado_por_id = actualizado_por_id
@@ -421,8 +488,8 @@ class PresupuestoService(BaseService[Presupuesto]):
         # Actualizar también el importe/precio_unitario de cada partida,
         # por si cambiaron insumos desde la última vez.
         for p_orm, p_costeo in zip(presupuesto.partidas, presupuesto_costeo.partidas):
-            p_orm.precio_unitario = float(p_costeo.precio_unitario)
-            p_orm.importe = float(p_costeo.importe)
+            p_orm.precio_unitario = p_costeo.precio_unitario
+            p_orm.importe = p_costeo.importe
 
         # Si el presupuesto ya estaba VALIDADO/APROBADO, un recálculo
         # cambia los montos sobre los que se dio esa validación/
@@ -437,12 +504,12 @@ class PresupuestoService(BaseService[Presupuesto]):
         await self.update(
             presupuesto_id,
             {
-                "monto_directo": float(presupuesto_costeo.monto_directo),
-                "monto_indirecto": float(presupuesto_costeo.monto_indirecto),
-                "monto_utilidad": float(presupuesto_costeo.monto_utilidad),
-                "monto_riesgo": float(presupuesto_costeo.monto_riesgo),
-                "monto_impuesto": float(presupuesto_costeo.monto_impuesto),
-                "monto_total": float(presupuesto_costeo.monto_total),
+                "monto_directo": presupuesto_costeo.monto_directo,
+                "monto_indirecto": presupuesto_costeo.monto_indirecto,
+                "monto_utilidad": presupuesto_costeo.monto_utilidad,
+                "monto_riesgo": presupuesto_costeo.monto_riesgo,
+                "monto_impuesto": presupuesto_costeo.monto_impuesto,
+                "monto_total": presupuesto_costeo.monto_total,
                 "estado": nuevo_estado,
             },
             actualizado_por_id=actualizado_por_id,
@@ -749,5 +816,10 @@ class PresupuestoService(BaseService[Presupuesto]):
                 f"Partida {partida_id} no encontrada en el presupuesto {presupuesto_id}",
             )
         await self.db.delete(partida)
+        if (presupuesto.metadatos or {}).get('actualizaciones_indices'):
+            eliminados = {str(i.id) for c in partida.conceptos for i in c.insumos}
+            presupuesto.metadatos = {**presupuesto.metadatos, 'actualizaciones_indices': {
+                key: value for key, value in presupuesto.metadatos['actualizaciones_indices'].items()
+                if key not in eliminados}}
         await self.db.commit()
         return await self.recalcular(presupuesto_id, expediente_id, actualizado_por_id)

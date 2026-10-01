@@ -892,6 +892,50 @@ export interface InsumoPresupuesto {
   precio_unitario: number;
   importe: number;
   rendimiento: number;
+  actualizacion_precio?: ActualizacionPrecioSnapshot | null;
+}
+
+export interface SolicitudActualizacionPrecio {
+  vinculo_id: string;
+  observacion_base_id: string;
+  observacion_destino_id: string;
+}
+
+export interface EvidenciaIndice {
+  url: string;
+  sha256: string;
+  localizador: string;
+}
+
+export interface ObservacionIndice {
+  id: string;
+  serie_id: string;
+  mes: string;
+  valor: string;
+  publicado_el: string;
+  documento_sha256: string;
+  evidencia: EvidenciaIndice;
+}
+
+export interface VinculoIndice {
+  id: string;
+  serie_id: string;
+  mes_base: string;
+  precio_original: string;
+  fundamento: string;
+  insumo_original: { clave: string; descripcion: string; unidad: string; tipo: string; moneda: string };
+}
+
+export interface ActualizacionPrecioSnapshot {
+  version: 1;
+  tipo: 'ESTIMACION_OBSERVADA';
+  precio_original: string;
+  precio_actualizado: string;
+  sha256: string;
+  vinculo: VinculoIndice;
+  serie: { id: string; codigo: string; nombre: string; region: string };
+  base: ObservacionIndice;
+  destino: ObservacionIndice;
 }
 
 export interface ConceptoPresupuesto {
@@ -1343,6 +1387,15 @@ export class MegalodonClient {
   catalogoLibro = {
     buscar: (q: string, skip = 0): Promise<{total: number; items: ConceptoLibro[]}> =>
       this.request("GET", `/catalogo-libro?${new URLSearchParams({q, skip: String(skip), limit: '50'})}`),
+  };
+
+  indicesCostos = {
+    vinculos: (skip = 0): Promise<VinculoIndice[]> =>
+      this.request('GET', `/indices-costos/vinculos?skip=${skip}&limit=50`),
+    observaciones: (serieId: string, skip = 0): Promise<ObservacionIndice[]> =>
+      this.request('GET', `/indices-costos/observaciones?${new URLSearchParams({ serie_id: serieId, skip: String(skip), limit: '500' })}`),
+    calcular: (solicitud: SolicitudActualizacionPrecio): Promise<ActualizacionPrecioSnapshot> =>
+      this.request('POST', '/indices-costos/calcular', solicitud),
   };
 
   presupuestos = {

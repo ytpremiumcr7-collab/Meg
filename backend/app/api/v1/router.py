@@ -14,7 +14,7 @@ from app.api.v1 import (
     montecarlo, validadores, ocr, firma, programacion, topografia,
     dashboard, catalogo_apu, licitaciones, contratos,
     compliance, transparencia, catalogo_conceptos, catalogo_libro,
-    audit, documentos, search, expedientes_advanced,
+    audit, documentos, search, expedientes_advanced, indices_costos,
     presupuestos_advanced,
     # ═══ INTEGRACIÓN ZIP 2 y 3 ═══
     licitaciones_obra, legal_consultor,
@@ -81,5 +81,6 @@ api_router.include_router(pagos.router, prefix="/pagos", tags=["Pagos"])
 api_router.include_router(procurement.router, prefix="/procurement", tags=["Tender Automation"])
 
 api_router.include_router(catalogo_libro.router, prefix="/catalogo-libro", tags=["Catálogo del libro"])
+api_router.include_router(indices_costos.router, prefix="/indices-costos", tags=["Índices de costos"])
 
 api_router.include_router(users.router, prefix="/users", tags=["Usuarios"])

@@ -225,6 +225,7 @@ class Insumo(Base, UUIDMixin, TenantMixin):
 
     # Fuente del catálogo
     fuente_catalogo: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    actualizacion_precio: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     rendimiento: Mapped[float] = mapped_column(Numeric(8, 4), default=1.0)
 
     # Relaciones

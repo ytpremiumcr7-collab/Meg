@@ -19,8 +19,9 @@ import {
 import { useMegalodonStore } from '@/stores/useMegalodonStore';
 import { useExpedienteStore } from '@/stores/useExpedienteStore';
 import { megalodonClient } from '@/lib/api-client';
-import type { Presupuesto, PropuestaLicitacionData, ValidacionResultado } from '@/lib/megalodon-client';
+import type { Presupuesto, PropuestaLicitacionData, ValidacionResultado, SolicitudActualizacionPrecio } from '@/lib/megalodon-client';
 import { CatalogoLibroPicker } from './CatalogoLibroPicker';
+import { MaterialIndexadoPicker } from './MaterialIndexadoPicker';
 import { FSR_CONST } from './data/legales';
 import { computeComplianceScore, getOverallStatus } from './engines/validador';
 import { formatMXN, getDefaultSimulationVariables } from './engines/montecarlo';
@@ -31,6 +32,7 @@ import type { SimulationResult } from './engines/montecarlo';
 type TabId = 'resumen' | 'presupuesto' | 'analisis' | 'validacion' | 'reporte';
 
 interface BudgetLine {
+  actualizacionPrecio?: SolicitudActualizacionPrecio;
   catalogoLibroId?: string;
   sourceLabel?: string;
   id: string;
@@ -193,6 +195,7 @@ function BudgetGrid() {
   const [search, setSearch] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
   const [showCatalog, setShowCatalog] = useState(false);
+  const [showIndices, setShowIndices] = useState(false);
   const [newLine, setNewLine] = useState({ conceptKey: '', description: '', unit: '', quantity: 0, unitPrice: 0 });
 
   // Presupuestos ya guardados en el backend para este expediente (solo
@@ -296,6 +299,8 @@ function BudgetGrid() {
           unidad: l.unit,
           cantidad: l.quantity,
           precio_unitario: l.unitPrice,
+          ...(l.actualizacionPrecio ? { insumos: [{ clave: l.conceptKey, descripcion: l.description,
+            tipo: 'MATERIAL', unidad: l.unit, cantidad: 1, actualizacion_precio: l.actualizacionPrecio }] } : {}),
         })),
         parametros_costeo: {
           factor_indirecto: factorIndirecto,
@@ -345,6 +350,7 @@ function BudgetGrid() {
             <Plus className="w-3.5 h-3.5" /> Concepto
           </button>
           <button onClick={() => setShowCatalog(!showCatalog)} className="px-3 py-1.5 border border-[#C9A84C] text-[#C9A84C] text-xs rounded">Catálogo del libro</button>
+          <button onClick={() => setShowIndices(!showIndices)} className="px-3 py-1.5 border border-[#C9A84C] text-[#C9A84C] text-xs rounded">Actualizar material</button>
           <button onClick={exportJSON} className="flex items-center gap-1.5 px-3 py-1.5 border border-[#2A2A3E] text-[#8A8578] text-xs rounded hover:border-[#C9A84C] hover:text-[#C9A84C] transition-colors">
             <FileJson className="w-3.5 h-3.5" /> Exportar JSON
           </button>
@@ -403,6 +409,15 @@ function BudgetGrid() {
           amount: Math.round((quantity * unitPrice + Number.EPSILON) * 100) / 100,
           status: 'pending',
         }]);
+      }} />}
+
+      {showIndices && <MaterialIndexadoPicker onSelect={(snapshot, solicitud, quantity) => {
+        const original = snapshot.vinculo.insumo_original;
+        const unitPrice = Number(snapshot.precio_actualizado);
+        setLines(previous => [...previous, { id: crypto.randomUUID(), actualizacionPrecio: solicitud,
+          conceptKey: original.clave, description: original.descripcion, unit: original.unidad,
+          quantity, unitPrice, amount: Math.round(quantity * unitPrice * 100) / 100, status: 'pending',
+          sourceLabel: `Estimación ${snapshot.base.mes.slice(0, 7)} → ${snapshot.destino.mes.slice(0, 7)} · ${snapshot.serie.codigo}` }]);
       }} />}
 
       {/* Add form */}
