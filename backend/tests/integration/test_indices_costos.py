@@ -243,8 +243,9 @@ async def test_eliminaciones_concurrentes_preservan_manifiesto(async_client, ind
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(not settings.database_async_url.startswith('postgresql'), reason='PostgreSQL shared export lock')
-async def test_exportacion_coherente_durante_eliminacion(async_client, indices, db_session):
+@pytest.mark.parametrize('operacion', ['exportar', 'listar'])
+@pytest.mark.skipif(not settings.database_async_url.startswith('postgresql'), reason='PostgreSQL shared aggregate read lock')
+async def test_lectura_coherente_durante_eliminacion(async_client, indices, db_session, operacion):
     import asyncio
 
     from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -264,20 +265,30 @@ async def test_exportacion_coherente_durante_eliminacion(async_client, indices, 
     presupuesto_id, expediente_id = UUID(presupuesto['id']), UUID(indices['expediente_id'])
     async with maker() as lectura, maker() as escritura:
         lector = PresupuestoService(lectura, tenant)
-        await lector._reconstruir_partidas_desde_db(presupuesto_id, expediente_id)
+        if operacion == 'listar':
+            presupuestos = await lector.listar_por_expediente(expediente_id)
+            agregado = next(p for p in presupuestos if p.id == presupuesto_id)
+        else:
+            agregado = await lector._reconstruir_partidas_desde_db(presupuesto_id, expediente_id)
         pid = await escritura.scalar(text('SELECT pg_backend_pid()'))
         tarea = asyncio.create_task(PresupuestoService(escritura, tenant).eliminar_partida(
             presupuesto_id, expediente_id, UUID(presupuesto['partidas'][0]['id'])))
         try:
             async def esperar_bloqueo():
                 while not await lectura.scalar(text('SELECT EXISTS(SELECT 1 FROM pg_locks WHERE pid=:pid AND NOT granted)'), {'pid': pid}):
-                    assert not tarea.done(), 'El escritor modificó el agregado mientras se estaba exportando'
+                    assert not tarea.done(), 'El escritor modificó el agregado durante su lectura'
                     await asyncio.sleep(0.01)
             await asyncio.wait_for(esperar_bloqueo(), timeout=5)
-            excel = await lector.generar_excel(presupuesto_id, expediente_id)
-            wb = load_workbook(BytesIO(excel), data_only=True)
-            assert wb['Presupuesto']['F2'].value == 22
-            assert wb['Actualizacion materiales']['F2'].value == '22.00'
+            if operacion == 'exportar':
+                excel = await lector.generar_excel(presupuesto_id, expediente_id)
+                wb = load_workbook(BytesIO(excel), data_only=True)
+                assert wb['Presupuesto']['F2'].value == 22
+                assert wb['Actualizacion materiales']['F2'].value == '22.00'
+            else:
+                assert agregado.monto_total == 22
+                assert len(agregado.partidas) == 1
+                assert agregado.partidas[0].conceptos[0].insumos[0].precio_unitario == 22
+                assert len(agregado.metadatos['actualizaciones_indices']) == 1
             await lectura.rollback()
             resultado = await asyncio.wait_for(tarea, timeout=5)
             assert resultado.monto_total == 0

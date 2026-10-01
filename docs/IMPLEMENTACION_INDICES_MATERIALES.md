@@ -71,8 +71,8 @@ retirar su observación; registrar el mismo mes/serie/documento con
 sucesor. No se necesita falsificar un hash para corregir la captura.
 
 Las mutaciones del presupuesto bloquean el agregado y confirman detalles,
-manifiesto y recálculo juntos. Exportar mantiene bloqueo compartido durante la
-carga del padre y los hijos. Las columnas de texto del XLSX se escriben como
+manifiesto y recálculo juntos. Listar y exportar mantienen bloqueo compartido
+durante la carga del padre y los hijos. Las columnas de texto del XLSX se escriben como
 texto literal; importes y cantidades siguen siendo numéricos.
 
 ## Operación

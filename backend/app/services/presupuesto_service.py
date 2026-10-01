@@ -50,6 +50,9 @@ class PresupuestoService(BaseService[Presupuesto]):
             .order_by(Presupuesto.created_at.desc())
             .offset(skip)
             .limit(limit)
+            # Keep totals and selectinloaded details in the same aggregate revision.
+            .with_for_update(of=Presupuesto, read=True)
+            .execution_options(populate_existing=True)
         )
         return list(result.scalars().all())
 
