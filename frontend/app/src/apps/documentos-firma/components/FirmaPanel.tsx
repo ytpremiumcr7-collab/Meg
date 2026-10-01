@@ -9,12 +9,13 @@ import { useState } from 'react';
 import {
   FileSignature, ShieldCheck, Link2, FileCheck2, ListChecks,
   Loader2, AlertCircle, CheckCircle2, Lock,
+  type LucideIcon,
 } from 'lucide-react';
 import { megalodonClient } from '@/lib/api-client';
 
 type SubTab = 'firmar' | 'validar' | 'merkle' | 'cfdi' | 'formato';
 
-const SUBTABS: { id: SubTab; label: string; icon: React.ElementType }[] = [
+const SUBTABS: { id: SubTab; label: string; icon: LucideIcon }[] = [
   { id: 'firmar', label: 'Firmar documento', icon: FileSignature },
   { id: 'validar', label: 'Validar firma', icon: ShieldCheck },
   { id: 'merkle', label: 'Merkle expediente', icon: Link2 },

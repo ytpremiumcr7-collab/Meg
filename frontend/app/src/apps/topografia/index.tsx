@@ -28,7 +28,7 @@
  * harness en apps/tezcatlipoca-hub, sin tocar aquí).
  */
 import { useState } from 'react';
-import { Mountain, Map as MapIcon, Layers3, MapPin, Hexagon, TrendingUp, Waves, FolderKanban } from 'lucide-react';
+import { Mountain, Map as MapIcon, Layers3, MapPin, Hexagon, TrendingUp, Waves, FolderKanban, type LucideIcon } from 'lucide-react';
 import { useExpedienteStore } from '@/stores/useExpedienteStore';
 import type { Levantamiento, SuperficieTIN } from '@/lib/megalodon-client';
 import MapaPanel from './components/MapaPanel';
@@ -39,7 +39,7 @@ import PerfilPanel from './components/PerfilPanel';
 import CurvasPanel from './components/CurvasPanel';
 
 type Tab = 'mapa' | 'levantamiento' | 'puntos' | 'poligonal' | 'perfil' | 'curvas';
-const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
+const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
   { id: 'mapa', label: 'Mapa', icon: MapIcon },
   { id: 'levantamiento', label: 'Levantamiento', icon: Layers3 },
   { id: 'puntos', label: 'Puntos', icon: MapPin },

@@ -11,6 +11,7 @@ de que cualquier import de app.* las lea.
 """
 
 import os
+import json
 
 # ─── Settings de prueba (inyectadas antes de cualquier import de app.*) ──
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./.pytest_megalodon_test.db")
@@ -28,6 +29,7 @@ import pytest
 import pytest_asyncio
 from uuid import uuid4
 from httpx import AsyncClient, ASGITransport
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -39,6 +41,32 @@ from tezcatlipoca.db.models import Base as TezBase
 TEST_DATABASE_URL = os.environ["DATABASE_URL"]
 
 engine_test = create_async_engine(TEST_DATABASE_URL, echo=False)
+
+
+if TEST_DATABASE_URL.startswith("sqlite"):
+    @event.listens_for(engine_test.sync_engine, "connect")
+    def _register_sqlite_jsonb_functions(dbapi_connection, _connection_record):
+        def jsonb_array_length(value):
+            if value is None:
+                return None
+            parsed = json.loads(value) if isinstance(value, str) else value
+            return len(parsed) if isinstance(parsed, list) else 0
+
+        dbapi_connection.create_function("jsonb_array_length", 1, jsonb_array_length)
+        # GeoAlchemy emits SpatiaLite maintenance calls around DDL even though
+        # the default unit-test database does not execute spatial queries.
+        # Production and integration tests still use PostGIS; these no-op
+        # shims only let SQLite create/drop the same metadata graph.
+        for name, arity in (
+            ("RecoverGeometryColumn", 5),
+            ("CreateSpatialIndex", 2),
+            ("CheckSpatialIndex", 2),
+            ("DisableSpatialIndex", 2),
+            ("DiscardGeometryColumn", 2),
+        ):
+            dbapi_connection.create_function(name, arity, lambda *_args: 1)
+
+
 AsyncSessionLocalTest = sessionmaker(engine_test, class_=AsyncSession, expire_on_commit=False)
 
 
@@ -52,20 +80,38 @@ app.dependency_overrides[get_db] = override_get_db
 
 @pytest_asyncio.fixture(scope="session", autouse=True)
 async def setup_database():
-    async with engine_test.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        await conn.run_sync(TezBase.metadata.create_all)
+    if TEST_DATABASE_URL.startswith('sqlite'):
+        async with engine_test.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            await conn.run_sync(TezBase.metadata.create_all)
+    else:
+        # PostgreSQL tests exercise the migrated schema. ORM create_all must
+        # not repair a broken installation or replace migration authority.
+        from scripts.verify_migrated_schema import verify
+        async with engine_test.connect() as conn:
+            await conn.run_sync(verify)
 
     yield
 
-    async with engine_test.begin() as conn:
-        await conn.run_sync(TezBase.metadata.drop_all)
-        await conn.run_sync(Base.metadata.drop_all)
+    if TEST_DATABASE_URL.startswith('sqlite'):
+        async with engine_test.begin() as conn:
+            await conn.run_sync(TezBase.metadata.drop_all)
+            await conn.run_sync(Base.metadata.drop_all)
+    # CI owns a disposable PostgreSQL container; tests never drop its migrated
+    # schema using an ORM graph with unnamed cyclic foreign keys.
+    await engine_test.dispose()
 
 
 @pytest_asyncio.fixture
 async def async_client():
-    transport = ASGITransport(app=app)
+    # HTTPX's ASGITransport does not execute the application's lifespan.
+    # The test database is initialized by setup_database above, so mark the
+    # embedded Tezcatlipoca subsystem ready explicitly for router tests.
+    app.state.tezcatlipoca_ready = True
+    app.state.tezcatlipoca_status = {"state": "READY", "components": {}}
+    # Each test models an independent client while requests within a test
+    # share an identity and exercise the real Redis limits.
+    transport = ASGITransport(app=app, client=(f'test-{uuid4().hex}', 123))
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
 

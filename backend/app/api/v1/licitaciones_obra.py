@@ -32,6 +32,7 @@ from app.models.proveedor import Proveedor
 from app.models.contrato import Contrato, EstadoContrato, EntregableContrato
 from app.schemas.contrato import ContratoCreate, ContratoUpdate, EntregableCreate
 from app.services.contrato_service import ContratoService
+from app.services.licitacion_service import LicitacionService
 from app.models.licitacion import Licitacion, Proposicion, EstadoLicitacion, EvaluacionLicitacion, TipoEvaluacion, ResultadoEvaluacion
 from app.core.errors import handle_megalodon_errors
 from app.schemas.licitacion import LicitacionCreate, LicitacionUpdate, EvaluacionCreate, TransicionEstadoCreate

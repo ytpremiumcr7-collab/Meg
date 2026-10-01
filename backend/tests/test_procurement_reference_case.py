@@ -14,7 +14,8 @@ GUIDE_CASE = Path(__file__).parent / 'fixtures' / 'procurement' / 'CONAGUA_PTAR_
 def test_conagua_case_extracts_all_guided_annexes():
     text = GUIDE_CASE.read_text(encoding='utf-8')
     case = ConaguaPtArCaseParser().parse(text)
-    assert sorted(case.sections) == [*(f'AT-{i:02d}' for i in range(1, 14)), *(f'AE-{i:02d}' for i in range(1, 13))]
+    expected = {*(f'AT-{i:02d}' for i in range(1, 14)), *(f'AE-{i:02d}' for i in range(1, 13))}
+    assert set(case.sections) == expected
     assert len(case.economic['partidas']) == 27
     assert any(p['numero'] == '2.01.006' and p['conceptos'] for p in case.economic['partidas'])
     assert len(case.economic['indirect_costs']['items']) == 9

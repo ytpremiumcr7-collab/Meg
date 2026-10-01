@@ -1,6 +1,13 @@
 
 
 
+import math
+from dataclasses import dataclass
+from typing import Dict, List, Tuple
+
+from app.core.errors import ErrorCode, MegalodonException
+
+
 @dataclass(slots=True)
 class AjustePoligonalResult:
     metodo: str

@@ -2,9 +2,9 @@
  * Calculadora de Plazos Interactiva
  * Calcula días hábiles, fecha de cierre, alertas de vencimiento
  */
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Calendar, Clock, AlertTriangle, CheckCircle2, Calculator, ChevronRight } from 'lucide-react';
+import { Calendar, Clock, AlertTriangle, CheckCircle2, Calculator } from 'lucide-react';
 import { megalodonClient } from '@/lib/api-client';
 import { claveProcedimiento, nombreProcedimiento, plazosPara, advertenciaConfiabilidad } from '../lib/procedimiento';
 

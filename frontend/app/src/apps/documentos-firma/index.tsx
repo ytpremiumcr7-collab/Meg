@@ -17,14 +17,14 @@
  * marcaba la auditoría para Firma y para Documentos/CDE.
  */
 import { useState } from 'react';
-import { FileStack, FileSignature, FolderKanban } from 'lucide-react';
+import { FileStack, FileSignature, FolderKanban, type LucideIcon } from 'lucide-react';
 import { useExpedienteStore } from '@/stores/useExpedienteStore';
 import RepositorioPanel from './components/RepositorioPanel';
 import FirmaPanel from './components/FirmaPanel';
 
 type Tab = 'repositorio' | 'firma';
 
-const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
+const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
   { id: 'repositorio', label: 'Repositorio (CDE)', icon: FileStack },
   { id: 'firma', label: 'Firma Electrónica', icon: FileSignature },
 ];

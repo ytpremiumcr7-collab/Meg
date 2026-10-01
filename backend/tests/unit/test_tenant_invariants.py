@@ -3,6 +3,8 @@
 Verifica que NINGUNA operación pueda escapar del tenant del usuario.
 Estos tests atacan las invariantes, no solo los endpoints felices.
 """
+from pathlib import Path
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
@@ -102,7 +104,7 @@ class TestProgramacionServiceTenantValidation:
         import inspect
         source = inspect.getsource(ProgramacionService.crear_programa)
         assert "tenant_id" in source
-        assert "expediente.tenant_id != tenant_id" in source or "programa.expediente.tenant_id != effective_tenant" in source
+        assert "expediente.tenant_id) != effective_tenant" in source
 
     @pytest.mark.asyncio
     async def test_validar_programa_en_expediente_checks_tenant(self):

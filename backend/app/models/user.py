@@ -9,12 +9,16 @@ Modelos de usuario y autenticación.
 from datetime import datetime
 from enum import Enum
 from uuid import uuid4
+from typing import TYPE_CHECKING
 
-from sqlalchemy import String, Boolean, DateTime, ForeignKey, Index
+from sqlalchemy import String, Boolean, DateTime, ForeignKey, Index, Integer
 from app.db.types import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, UUIDMixin, TenantMixin
+
+if TYPE_CHECKING:
+    from app.models.expediente import ExpedienteObra
 
 
 class UserRole(str, Enum):
@@ -37,6 +41,7 @@ class User(Base, UUIDMixin, TenantMixin):
     curp: Mapped[str | None] = mapped_column(String(18), nullable=True)
     role: Mapped[UserRole] = mapped_column(String(50), default=UserRole.TECNICO)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    auth_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     last_login: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

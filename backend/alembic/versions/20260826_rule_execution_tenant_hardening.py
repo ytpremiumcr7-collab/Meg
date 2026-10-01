@@ -189,12 +189,15 @@ def upgrade() -> None:
                 input_facts = '{}'::jsonb,
                 actions = COALESCE(x.result_payload -> 'actions', '[]'::jsonb),
                 error_code = NULLIF(x.result_payload ->> 'error', ''),
-                revision = COALESCE(v.revision, t.current_revision, 1),
+                revision = COALESCE((
+                    SELECT v.revision FROM tender_validation_runs v
+                    WHERE v.id = x.validation_run_id AND v.tenant_id = x.tenant_id
+                ), t.current_revision, 1),
                 executed_at = x.created_at::text
-            FROM tender_rule_definitions r
-            JOIN tender_packages t ON t.id = x.tender_id
-            LEFT JOIN tender_validation_runs v ON v.id = x.validation_run_id
+            FROM tender_rule_definitions r, tender_packages t
             WHERE r.id = x.rule_definition_id
+              AND t.id = x.tender_id
+              AND r.tenant_id = x.tenant_id AND t.tenant_id = x.tenant_id
             """
         )
     )

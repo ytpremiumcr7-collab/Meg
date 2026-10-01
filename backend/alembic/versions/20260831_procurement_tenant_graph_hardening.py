@@ -78,6 +78,22 @@ def _ensure_parent_unique(table: str, name: str) -> None:
 
 
 def upgrade() -> None:
+    # Evidence links originally had tenant ownership but no tender_id.
+    # Derive the aggregate from their evidence; never guess a default tenant.
+    from sqlalchemy.dialects import postgresql
+    op.add_column('tender_evidence_links', sa.Column('tender_id', postgresql.UUID(as_uuid=True), nullable=True))
+    op.execute(sa.text('''
+        UPDATE tender_evidence_links c SET tender_id = e.tender_id
+        FROM tender_evidence e
+        WHERE e.id = c.evidence_id AND e.tenant_id = c.tenant_id
+    '''))
+    unresolved = op.get_bind().execute(sa.text(
+        'SELECT count(*) FROM tender_evidence_links WHERE tender_id IS NULL'
+    )).scalar_one()
+    if unresolved:
+        raise RuntimeError('Evidence links have orphan or cross-tenant evidence; resolve before migration')
+    op.alter_column('tender_evidence_links', 'tender_id', nullable=False)
+    op.create_index('ix_tender_evidence_links_tender_id', 'tender_evidence_links', ['tender_id'])
     # All existing rows must be internally tenant-consistent before adding DB guards.
     for child, column, parent, _, _ in _CHILD_RELATIONS:
         _assert_no_cross_tenant_mismatch(child, column, parent)
@@ -126,3 +142,5 @@ def downgrade() -> None:
         ), {"table": table, "name": name}).first()
         if exists:
             op.drop_constraint(name, table, type_="unique")
+    op.drop_index('ix_tender_evidence_links_tender_id', table_name='tender_evidence_links')
+    op.drop_column('tender_evidence_links', 'tender_id')

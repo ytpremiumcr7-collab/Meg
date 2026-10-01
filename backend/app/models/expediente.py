@@ -9,12 +9,21 @@ Modelos de expediente electrónico.
 from datetime import datetime
 from enum import Enum
 from uuid import uuid4
+from typing import TYPE_CHECKING
 
 from sqlalchemy import UniqueConstraint, String, Text, Numeric, ForeignKey, Index, DateTime
 from app.db.types import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, UUIDMixin, TenantMixin, AuditMixin
+
+if TYPE_CHECKING:
+    from app.models.compliance import Inconformidad
+    from app.models.contrato import Contrato
+    from app.models.documento import DocumentoCDE
+    from app.models.licitacion import Licitacion
+    from app.models.presupuesto import Presupuesto
+    from app.models.user import Tenant, User
 
 
 class EstadoExpediente(str, Enum):
@@ -96,7 +105,10 @@ class ExpedienteObra(Base, UUIDMixin, TenantMixin, AuditMixin):
         "Documento", back_populates="expediente", cascade="all, delete-orphan"
     )
     presupuestos: Mapped[list["Presupuesto"]] = relationship(
-        "Presupuesto", back_populates="expediente", cascade="all, delete-orphan"
+        "Presupuesto",
+        back_populates="expediente",
+        cascade="all, delete-orphan",
+        foreign_keys="Presupuesto.expediente_id",
     )
 
     __table_args__ = (

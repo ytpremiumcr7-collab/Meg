@@ -1,4 +1,6 @@
 from decimal import Decimal
+import io
+import zipfile
 
 from app.engines.procurement.consistency import ProcurementConsistencyEngine
 from app.engines.procurement.jurisdiction import JurisdictionDecision
@@ -55,12 +57,32 @@ def test_consistency_blocks_cross_total_mismatch():
 
 def test_compiler_produces_nonempty_real_artifacts():
     compiler = ProcurementArtifactCompiler()
-    xlsx = compiler.compile_economic_xlsx({"economic": {"partidas": [], "budget_total": 0}})
-    pdf = compiler.compile_summary_pdf({"title": "T"}, [])
+    model = {
+        "identifier": "TEST-001",
+        "title": "T",
+        "economic": {
+            "partidas": [{
+                "numero": "1",
+                "descripcion": "Concepto verificable",
+                "unidad": "pza",
+                "cantidad": 1,
+                "precio_unitario": 100,
+                "importe": 100,
+            }],
+            "budget_total": 100,
+        },
+    }
+    xlsx = compiler.compile_economic_xlsx(model)
+    pdf = compiler.compile_summary_pdf(model, [])
     assert xlsx[:2] == b"PK"
     assert pdf.startswith(b"%PDF")
     assert len(xlsx) > 100
     assert len(pdf) > 100
-    package = compiler.compile_submission_zip([{"path": "QA/report.pdf", "content": pdf}])
+    package = compiler.compile_submission_zip(
+        [{"path": "QA/report.pdf", "content": pdf}],
+        {"identifier": "TEST-001", "artifacts": ["QA/report.pdf"]},
+    )
     assert package[:2] == b"PK"
-    assert len(package) > len(pdf)
+    with zipfile.ZipFile(io.BytesIO(package)) as archive:
+        assert set(archive.namelist()) == {"QA/report.pdf", "MANIFEST.json"}
+        assert archive.read("QA/report.pdf") == pdf

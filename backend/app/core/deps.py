@@ -59,7 +59,10 @@ async def get_current_user(
     tezcatlipoca/routers/auth.py -- se replicó aquí a propósito para que
     el login quede consistente en toda la plataforma unificada.
     """
-    final_token = request.cookies.get(SESSION_COOKIE_NAME) or token
+    # An explicit Authorization header is authoritative. This matters for
+    # API/SDK clients and also prevents a stale browser cookie from silently
+    # replacing the identity selected by a Bearer token.
+    final_token = token or request.cookies.get(SESSION_COOKIE_NAME)
     if not final_token:
         raise HTTPException(
             status_code=401,

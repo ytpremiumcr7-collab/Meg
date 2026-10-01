@@ -34,20 +34,10 @@ logger = structlog.get_logger()
 # ═══════════════════════════════════════════════════════════════════
 # INTEGRACIÓN ZIP 4: TEZCATLIPOCA (geo / OSINT / cyber / aviación / SAR)
 # ═══════════════════════════════════════════════════════════════════
-# tezcatlipoca/ es el backend de TU-OSINT tal cual, montado aquí como
-# routers adicionales sobre esta MISMA app (un solo proceso, un solo
-# deploy). A propósito NO se tocó su sistema de auth (cookie + Bearer
-# propio, User/DB propios, síncrono) ni se fusionó con el modelo
-# multi-tenant de Megalodon -- eso es una decisión de producto que
-# falta tomar (¿los recursos de Tezcatlipoca son por tenant, por
-# usuario, o globales?), no algo para decidir en automático. Ver
-# docs/ARQUITECTURA_UNIFICACION.md, sección "Fase 2: Auth compartida".
-#
-# Verificado: compila limpio (py_compile) y no hay colisión de nombres
-# de paquete top-level con el árbol app.*. NO se pudo levantar el
-# server completo en este entorno (sin red no se instalan las
-# dependencias nuevas) -- probar `uvicorn app.main:app` de verdad antes
-# de producción.
+# Los routers de Tezcatlipoca comparten el runtime y la identidad de MEGALODON.
+# Su espejo local conserva relaciones de recursos, nunca sesiones ni permisos.
+# Las migraciones son un paso previo de despliegue; el arranque verifica el
+# esquema sin modificarlo. Los adaptadores externos siguen siendo opcionales.
 import sys
 from pathlib import Path
 
@@ -335,6 +325,11 @@ async def lifespan(app: FastAPI):
     # siquiera arranque. Se movió a alembic/versions/0001_extensions.py;
     # lifespan solo inicializa lo que le corresponde (clientes, caches,
     # health checks), no administra permisos de base de datos.
+
+    from scripts.verify_migrated_schema import verify
+    from app.models.base import Base
+    async with engine.connect() as connection:
+        await connection.run_sync(verify, metadata_collection=(Base.metadata,))
 
     tezcatlipoca_vivos = await _iniciar_tezcatlipoca(app)
 

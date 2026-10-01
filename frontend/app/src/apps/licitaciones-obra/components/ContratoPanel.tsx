@@ -28,6 +28,7 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   FileText, Play, AlertTriangle, Plus, X, Loader2, RefreshCw,
   ShieldCheck, FileWarning, Gavel, ChevronRight, Ban, PauseCircle, CheckCircle2,
+  type LucideIcon,
 } from 'lucide-react';
 import { megalodonClient } from '@/lib/api-client';
 import {
@@ -69,7 +70,7 @@ const ESTADO_TONE: Record<string, string> = {
   CERRADO: 'text-zinc-500 bg-zinc-800/50 border-zinc-700',
 };
 
-const TRANSICION_ICON: Record<string, React.ElementType> = {
+const TRANSICION_ICON: Record<string, LucideIcon> = {
   VIGENTE: Play, EN_MODIFICACION: FileText, SUSPENDIDO: PauseCircle,
   TERMINADO: CheckCircle2, RESCINDIDO: Ban, CERRADO: ShieldCheck,
 };
@@ -241,7 +242,7 @@ export default function ContratoPanel({ expedienteId }: { expedienteId: string }
               ['modificatorios', `Modificatorios (${modificatorios.length})`, FileText],
               ['garantias', `Garantías (${garantias.length})`, ShieldCheck],
               ['penalizaciones', `Penalizaciones (${penalizaciones.length})`, Gavel],
-            ] as [SubTab, string, React.ElementType][]).map(([id, label, Icon]) => (
+            ] as [SubTab, string, LucideIcon][]).map(([id, label, Icon]) => (
               <button
                 key={id}
                 onClick={() => setSubTab(id)}

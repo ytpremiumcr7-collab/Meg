@@ -86,6 +86,22 @@ async def transicionar_estado_licitacion(
 
 # ─── JUNTA DE ACLARACIONES ─────────────────────────────────────────────────
 
+@router.post(
+    "/{licitacion_id}/junta-aclaraciones",
+    response_model=JuntaAclaracionOut,
+    status_code=status.HTTP_201_CREATED,
+)
+@handle_megalodon_errors
+async def registrar_junta_aclaraciones(
+    licitacion_id: UUID,
+    data: JuntaAclaracionCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _rate_limit: bool = Depends(rate_limit_strict),
+):
+    """Registra el acta y los cambios de una junta celebrada externamente."""
+    return await service.registrar_junta(db, licitacion_id, data, current_user)
+
 @router.get("/{licitacion_id}/junta-aclaraciones", response_model=list[JuntaAclaracionOut])
 @handle_megalodon_errors
 async def listar_juntas_aclaraciones(

@@ -3,7 +3,7 @@
  */
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { GitCompare, Search, X, BookOpen, ArrowRightLeft } from 'lucide-react';
+import { GitCompare, Search, BookOpen, ArrowRightLeft } from 'lucide-react';
 import { megalodonClient } from '@/lib/api-client';
 
 interface ArticuloData {

@@ -105,6 +105,7 @@ class AuthService:
         *,
         session_id: Optional[str] = None,
         jti: Optional[str] = None,
+        auth_version: int = 0,
     ) -> str:
         """Crea token JWT de acceso con jti real y session id."""
         now = datetime.now(timezone.utc)
@@ -118,6 +119,7 @@ class AuthService:
             "sid": token_session_id,
             "jti": token_jti,
             "type": "access",
+            "auth_version": auth_version,
             "iat": now,
             "exp": now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
         }
@@ -129,6 +131,7 @@ class AuthService:
         *,
         session_id: Optional[str] = None,
         jti: Optional[str] = None,
+        auth_version: int = 0,
     ) -> str:
         """Crea token JWT de refresh con jti real y session id."""
         now = datetime.now(timezone.utc)
@@ -139,6 +142,7 @@ class AuthService:
             "sid": token_session_id,
             "jti": token_jti,
             "type": "refresh",
+            "auth_version": auth_version,
             "iat": now,
             "exp": now + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
         }
@@ -158,11 +162,13 @@ class AuthService:
             role_value,
             session_id=session_id,
             jti=access_jti,
+            auth_version=user.auth_version,
         )
         refresh_token = self.create_refresh_token(
             user.id,
             session_id=session_id,
             jti=refresh_jti,
+            auth_version=user.auth_version,
         )
 
         expires_at = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
@@ -293,6 +299,13 @@ class AuthService:
                     "Usuario no encontrado o inactivo",
                 )
 
+            version = payload.get("auth_version")
+            if type(version) is not int or version != user.auth_version:
+                raise TokenRevocadoException(
+                    "La identidad cambió; se requiere iniciar sesión de nuevo.",
+                    details={"sub": user_id_raw},
+                )
+
             payload_tenant_id = payload.get("tenant_id")
             if payload_tenant_id and str(user.tenant_id) != str(payload_tenant_id):
                 raise MegalodonException(
@@ -345,6 +358,13 @@ class AuthService:
                     "Usuario no encontrado o inactivo",
                 )
 
+            version = payload.get("auth_version")
+            if type(version) is not int or version != user.auth_version:
+                raise TokenRevocadoException(
+                    "La identidad cambió; se requiere iniciar sesión de nuevo.",
+                    details={"sub": user_id_raw},
+                )
+
             tenant_id = str(user.tenant_id)
             role_value = self._role_value(user.role)
 
@@ -385,11 +405,13 @@ class AuthService:
                 role_value,
                 session_id=session_id,
                 jti=new_access_jti,
+                auth_version=user.auth_version,
             )
             new_refresh = self.create_refresh_token(
                 user.id,
                 session_id=session_id,
                 jti=new_refresh_jti,
+                auth_version=user.auth_version,
             )
 
             return access_token, new_refresh

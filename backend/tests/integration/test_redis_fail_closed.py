@@ -58,16 +58,16 @@ class TestSecurityControlsWithRedisDown:
     @pytest.mark.asyncio
     async def test_token_revocation_fail_closed(self, monkeypatch):
         """Token revocation debe fallar cerrado si Redis no disponible."""
-        monkeypatch.setenv("REDIS_FAILURE_POLICY", "fail_closed")
+        monkeypatch.setattr("app.config.settings.security_protection_fail_closed", True)
         from app.core.token_revocation import TokenRevocation
-
-        with patch("app.core.token_revocation.redis_client") as mock_redis:
-            mock_redis.get = AsyncMock(return_value=None)
-            mock_redis.setex = AsyncMock(return_value=True)
-
-            tr = TokenRevocation()
-            # Con Redis simulado disponible
-            assert await tr.is_revoked("test_jti") is False
+        from app.core.errors import SecurityControlUnavailableException
+        failed_backend = AsyncMock()
+        failed_backend.exists.side_effect = ConnectionError('Redis unavailable')
+        monkeypatch.setattr('app.core.token_revocation._redis_instance', lambda: failed_backend)
+        with pytest.raises(SecurityControlUnavailableException) as error:
+            await TokenRevocation().is_revoked('test_jti')
+        assert error.value.status_code == 503
+        assert error.value.details['token_kind'] == 'access'
 
     def test_settings_fail_closed_flag(self, monkeypatch):
         """security_protection_fail_closed en settings."""

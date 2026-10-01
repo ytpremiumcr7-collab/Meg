@@ -9,7 +9,7 @@ Consultas, reportes y verificación de integridad del audit ledger.
 """
 from typing import List, Optional, Dict, Any
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import select, and_, desc
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -41,10 +41,12 @@ class AuditService(BaseService[AuditLedger]):
         user_agent: Optional[str] = None,
         hash_previo: Optional[str] = None,
         tenant_id: Optional[UUID] = None,
+        commit: bool = True,
     ) -> AuditLedger:
         import hashlib
         import json
 
+        timestamp = datetime.now(timezone.utc)
         payload = {
             "user_id": str(user_id) if user_id else None,
             "entidad_tipo": entidad_tipo,
@@ -52,15 +54,16 @@ class AuditService(BaseService[AuditLedger]):
             "accion": accion.value,
             "descripcion": descripcion,
             "datos_nuevos": datos_nuevos,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": timestamp.isoformat(),
             "hash_previo": hash_previo,
         }
         hash_registro = hashlib.sha256(
             json.dumps(payload, sort_keys=True, default=str).encode()
         ).hexdigest()
 
-        registro = await self.create({
+        registro = AuditLedger(**{
             "tenant_id": tenant_id,
+            "created_at": timestamp,
             "user_id": user_id,
             "user_email": user_email,
             "user_role": user_role,
@@ -75,6 +78,11 @@ class AuditService(BaseService[AuditLedger]):
             "ip_address": ip_address,
             "user_agent": user_agent,
         })
+        self.db.add(registro)
+        await self.db.flush()
+        if commit:
+            await self.db.commit()
+            await self.db.refresh(registro)
         return registro
 
     async def obtener_historial_expediente(
@@ -152,7 +160,7 @@ class AuditService(BaseService[AuditLedger]):
                 "accion": reg.accion.value if hasattr(reg.accion, 'value') else reg.accion,
                 "descripcion": reg.descripcion,
                 "datos_nuevos": reg.datos_nuevos,
-                "timestamp": reg.created_at.isoformat() if reg.created_at else None,
+                "timestamp": (reg.created_at.replace(tzinfo=timezone.utc) if reg.created_at.tzinfo is None else reg.created_at.astimezone(timezone.utc)).isoformat() if reg.created_at else None,
                 "hash_previo": reg.hash_previo,
             }
             hash_recomputado = hashlib.sha256(

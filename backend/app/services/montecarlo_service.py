@@ -141,7 +141,20 @@ class MonteCarloService:
         # se utiliza el monto aprobado/actual persistido.
         presupuesto_base = payload.get("presupuesto_base")
         if presupuesto_base is None and presupuesto_id:
-            presupuesto = await self.db.scalar(select(Presupuesto).join(ExpedienteObra, ExpedienteObra.id == Presupuesto.expediente_id).where(Presupuesto.id == presupuesto_id, ExpedienteObra.tenant_id == tenant_id))
+            presupuesto = await self.db.scalar(
+                select(Presupuesto)
+                .join(ExpedienteObra, ExpedienteObra.id == Presupuesto.expediente_id)
+                .where(
+                    Presupuesto.id == presupuesto_id,
+                    ExpedienteObra.tenant_id == user.tenant_id,
+                )
+            )
+            if presupuesto is None:
+                raise MegalodonException(
+                    ErrorCode.TAREA_NO_ENCONTRADA,
+                    "Presupuesto no encontrado en el tenant.",
+                    status_code=404,
+                )
             presupuesto_base = float(presupuesto.monto_total)
         if not presupuesto_base or presupuesto_base <= 0:
             raise MegalodonException(ErrorCode.PARAMETRO_INVALIDO, "Se requiere un presupuesto_base > 0 o un presupuesto_id válido.")
@@ -152,7 +165,14 @@ class MonteCarloService:
             )
 
         if payload.get("plazo_base_dias") is None and programa_id is not None:
-            programa = await self.db.scalar(select(ProgramaObra).join(ExpedienteObra, ExpedienteObra.id == ProgramaObra.expediente_id).where(ProgramaObra.id == programa_id, ExpedienteObra.tenant_id == tenant_id))
+            programa = await self.db.scalar(
+                select(ProgramaObra)
+                .join(ExpedienteObra, ExpedienteObra.id == ProgramaObra.expediente_id)
+                .where(
+                    ProgramaObra.id == programa_id,
+                    ExpedienteObra.tenant_id == user.tenant_id,
+                )
+            )
             if programa and programa.duracion_plan_dias:
                 payload["plazo_base_dias"] = int(programa.duracion_plan_dias)
         if payload.get("plazo_maximo_dias") is not None and payload.get("plazo_base_dias") is None:

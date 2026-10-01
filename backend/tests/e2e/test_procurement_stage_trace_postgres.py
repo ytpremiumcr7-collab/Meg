@@ -7,9 +7,11 @@ Run explicitly with:
 from __future__ import annotations
 
 import json
+import asyncio
 import os
 from pathlib import Path
 from uuid import uuid4
+from decimal import Decimal
 
 import pytest
 from sqlalchemy import delete, select
@@ -81,6 +83,11 @@ async def test_inbal_stage_trace_postgres_tenant_a_b():
             {"id": "A4", "name": "Sanitarios", "duration_days": 10, "budget": 800000, "predecessors": ["A2", "A3"]},
             {"id": "A5", "name": "Complementarios", "duration_days": 13, "budget": 500000, "predecessors": ["A4"]},
         ]
+        # The four priced concepts define the direct schedule allocation.
+        # Closing documents are a separate zero-cost activity in this fixture.
+        for activity, concept in zip(activities, concepts, strict=False):
+            activity['budget'] = float(Decimal(str(concept['cantidad'])) * Decimal(str(concept['pu'])))
+        activities[-1].update(name='Cierre documental', budget=0)
         return {
             "identifier": synthetic["expediente"]["identificador"],
             "title": synthetic["expediente"]["titulo"],
@@ -92,7 +99,7 @@ async def test_inbal_stage_trace_postgres_tenant_a_b():
                 "procedure_type": "PUBLIC_TENDER",
                 "contract_type": "UNIT_PRICES",
                 "evaluation_criterion": "BEST_VALUE",
-                "bidder": synthetic["proposicion"]["licitante"],
+                "bidder": {**synthetic["proposicion"]["licitante"], "capital": 5000000},
             },
             "technical": {"concepts": [{"code": x["codigo"]} for x in concepts]},
             "economic": {
@@ -206,6 +213,17 @@ async def test_inbal_stage_trace_postgres_tenant_a_b():
                 requirement_id=req.id, relation="SUPPORTS",
             ))
             await db.commit()
+            # Use the production activation gate; a raw condition is not an
+            # approved executable rule. Test both sides of its boundary.
+            activation = await ProcurementService(db, user).create_requirement_rule_version(
+                tender.id, req.id,
+                {'id': req.code, 'conditions': [{'field': 'bidder.capital', 'op': 'gte', 'val': 1000000}]},
+                test_cases=[
+                    {'facts': {'bidder': {'capital': 1000000}}, 'expected': True},
+                    {'facts': {'bidder': {'capital': 999999}}, 'expected': False},
+                ],
+            )
+            assert activation['status'] == 'ACTIVE'
             tenants.append((tenant.id, user.id))
             tenders.append((tender.id, tenant.id, user.id))
 
@@ -213,7 +231,9 @@ async def test_inbal_stage_trace_postgres_tenant_a_b():
         results = []
         for tender_id, tenant_id, user_id in tenders:
             user = await db.get(User, user_id)
-            result = await ProcurementService(db, user).run(tender_id)
+            # Regression: a parent FOR UPDATE lock must not deadlock the
+            # independent transaction that persists the preparation trace.
+            result = await asyncio.wait_for(ProcurementService(db, user).run(tender_id), timeout=60)
             results.append((tender_id, tenant_id, result))
 
         for tender_id, tenant_id, result in results:
@@ -228,7 +248,7 @@ async def test_inbal_stage_trace_postgres_tenant_a_b():
             ))).scalars().all()
             names = {s.stage for s in stages}
             assert {"CONTRACT_POLICY", "LOAD_RULE_INPUTS", "REQUIREMENT_EVALUATION", "MATERIALIZATION", "RISK_ANALYSIS", "CROSS_CONSISTENCY", "VALIDATION_EVIDENCE", "LIFECYCLE_GATE"}.issubset(names)
-            assert result["review_state"] == TenderState.READY_FOR_HUMAN_REVIEW.value
+            assert result["review_state"] == TenderState.READY_FOR_HUMAN_REVIEW.value, result['findings']
 
         # Cross-tenant lookup must fail at the service boundary.
         user_a = await db.get(User, tenders[0][2])

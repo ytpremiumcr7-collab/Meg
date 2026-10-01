@@ -10,7 +10,7 @@
  * App de escritorio para consulta de datos abiertos y transparencia
  */
 import { useState, useEffect, useCallback } from 'react';
-import { Search, FileText, Download, Eye, Filter, Calendar, DollarSign, Building2 } from 'lucide-react';
+import { Search, FileText, Download, Eye, Calendar, DollarSign, Building2 } from 'lucide-react';
 import { megalodonClient } from '@/lib/api-client';
 
 interface ExpedientePublico {

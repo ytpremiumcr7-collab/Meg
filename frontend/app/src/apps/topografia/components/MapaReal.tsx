@@ -27,7 +27,9 @@
  * aquí. Este componente no sabe nada de topografía, solo de mapas.
  */
 import { useEffect, useRef, useState, useCallback } from 'react';
-import maplibregl from 'maplibre-gl';
+import * as maplibregl from 'maplibre-gl';
+import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
+import type { FeatureCollection, LineString } from 'geojson';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { Satellite, MapIcon, Orbit, Crosshair, Calendar } from 'lucide-react';
 
@@ -64,6 +66,7 @@ function ayer(): string {
 
 const NASA_LAYER = 'MODIS_Terra_CorrectedReflectance_TrueColor';
 const NASA_TILEMATRIX = 'GoogleMapsCompatible_Level9';
+maplibregl.setWorkerUrl(maplibreWorkerUrl);
 function urlNasa(fecha: string): string {
   return `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/${NASA_LAYER}/default/${fecha}/${NASA_TILEMATRIX}/{z}/{y}/{x}.jpg`;
 }
@@ -123,7 +126,7 @@ const ESTILO_BASE: maplibregl.StyleSpecification = {
   ],
 };
 
-function lineaAGeoJSON(contornos: MapaRealProps['contornos']): GeoJSON.FeatureCollection {
+function lineaAGeoJSON(contornos: MapaRealProps['contornos']): FeatureCollection<LineString> {
   const elevaciones = (contornos || []).map((c) => c.elevacion);
   const min = Math.min(...elevaciones, 0);
   const max = Math.max(...elevaciones, 1);
@@ -219,9 +222,12 @@ export default function MapaReal({
     const mapa = mapaRef.current;
     if (!mapa || !listo) return;
     const cerrado = poligono.length > 2 ? [...poligono, poligono[0]] : poligono;
+    const feature = poligono.length > 2
+      ? { type: 'Feature' as const, properties: {}, geometry: { type: 'Polygon' as const, coordinates: [cerrado] } }
+      : { type: 'Feature' as const, properties: {}, geometry: { type: 'LineString' as const, coordinates: cerrado } };
     (mapa.getSource('poligono') as maplibregl.GeoJSONSource | undefined)?.setData({
       type: 'FeatureCollection',
-      features: poligono.length > 1 ? [{ type: 'Feature', properties: {}, geometry: { type: poligono.length > 2 ? 'Polygon' : 'LineString', coordinates: poligono.length > 2 ? [cerrado] : cerrado } }] : [],
+      features: poligono.length > 1 ? [feature] : [],
     });
   }, [poligono, listo]);
 

@@ -36,6 +36,8 @@ class CatalogoFuente(Base, UUIDMixin, AuditMixin):
     vigencia_fin: Mapped[str] = mapped_column(String(10), nullable=False)
     descripcion: Mapped[str | None] = mapped_column(Text, nullable=True)
     url_fuente: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    moneda: Mapped[str | None] = mapped_column(String(3), nullable=True)
+    moneda_evidencia: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     activo: Mapped[bool] = mapped_column(default=True)
 
 

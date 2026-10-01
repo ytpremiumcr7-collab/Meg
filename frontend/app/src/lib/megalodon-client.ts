@@ -55,6 +55,21 @@ export interface DashboardResponse {
   recent_activity: DashboardActivityItem[];
 }
 
+export interface HealthResponse {
+  status: string;
+  version: string;
+  environment: string;
+}
+
+export interface ReadinessResponse {
+  status: "ready" | "not_ready";
+  database: boolean;
+  redis: boolean;
+  tezcatlipoca: boolean;
+  ready: boolean;
+  optional_dependencies: Record<string, string>;
+}
+
 export interface Expediente {
   id: string;
   identificador: string;
@@ -572,6 +587,21 @@ export interface GeneracionBIM4D5D {
   num_actividades_generadas?: number;
 }
 
+export interface ConceptoLibro {
+  id: string;
+  descripcion: string;
+  unidad: string;
+  precio_unitario: string | null;
+  modelo_id: string;
+  pagina: string;
+  supuesto: string;
+  utilizable: boolean;
+  bloqueo: string | null;
+  fuente: string;
+  sha256: string;
+  fila_csv: number;
+}
+
 export interface CatalogoAPUOut {
   id: string;
   clave: string;
@@ -862,6 +892,51 @@ export interface InsumoPresupuesto {
   precio_unitario: number;
   importe: number;
   rendimiento: number;
+  actualizacion_precio?: ActualizacionPrecioSnapshot | null;
+}
+
+export interface SolicitudActualizacionPrecio {
+  vinculo_id: string;
+  observacion_base_id: string;
+  observacion_destino_id: string;
+}
+
+export interface EvidenciaIndice {
+  url: string;
+  sha256: string;
+  localizador: string;
+}
+
+export interface ObservacionIndice {
+  id: string;
+  serie_id: string;
+  mes: string;
+  valor: string;
+  publicado_el: string;
+  documento_sha256: string;
+  evidencia: EvidenciaIndice;
+  revision_captura: number;
+}
+
+export interface VinculoIndice {
+  id: string;
+  serie_id: string;
+  mes_base: string;
+  precio_original: string;
+  fundamento: string;
+  insumo_original: { clave: string; descripcion: string; unidad: string; tipo: string; moneda: string };
+}
+
+export interface ActualizacionPrecioSnapshot {
+  version: 1;
+  tipo: 'ESTIMACION_OBSERVADA';
+  precio_original: string;
+  precio_actualizado: string;
+  sha256: string;
+  vinculo: VinculoIndice;
+  serie: { id: string; codigo: string; nombre: string; region: string };
+  base: ObservacionIndice;
+  destino: ObservacionIndice;
 }
 
 export interface ConceptoPresupuesto {
@@ -1087,6 +1162,37 @@ export class MegalodonClient {
     this.token = token;
   }
 
+  private sessionRefresh: Promise<void> | null = null;
+
+  private async fetchWithSession(url: string, config: RequestInit): Promise<Response> {
+    const response = await fetch(url, config);
+    const path = url.slice(this.baseUrl.length);
+    const sessionRoute = path.startsWith('/api/v1/auth/') && path !== '/api/v1/auth/me';
+    if (response.status !== 401 || this.token || sessionRoute) return response;
+    if (!this.sessionRefresh) {
+      this.sessionRefresh = this.auth.refresh().then(() => undefined).finally(() => {
+        this.sessionRefresh = null;
+      });
+    }
+    try { await this.sessionRefresh; } catch { return response; }
+    return fetch(url, config);
+  }
+
+  private async requestRoot<T>(path: string): Promise<T> {
+    const headers: Record<string, string> = {};
+    if (this.token) headers.Authorization = `Bearer ${this.token}`;
+    const response = await this.fetchWithSession(`${this.baseUrl}${path}`, {
+      method: "GET",
+      headers,
+      credentials: "include",
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ message: `HTTP ${response.status}: ${response.statusText}` }));
+      throw new Error(error.detail || error.message || `HTTP ${response.status}`);
+    }
+    return response.json() as Promise<T>;
+  }
+
   private async requestTez<T>(
     method: string,
     path: string,
@@ -1106,7 +1212,7 @@ export class MegalodonClient {
       config.body = body;
       if (!(body instanceof URLSearchParams)) delete headers["Content-Type"];
     }
-    const response = await fetch(url, config);
+    const response = await this.fetchWithSession(url, config);
     if (!response.ok) {
       const error = await response.json().catch(() => ({ message: `HTTP ${response.status}: ${response.statusText}` }));
       throw new Error(error.detail || error.message || `HTTP ${response.status}`);
@@ -1153,7 +1259,7 @@ export class MegalodonClient {
       }
     }
 
-    const response = await fetch(url, config);
+    const response = await this.fetchWithSession(url, config);
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({
@@ -1169,18 +1275,18 @@ export class MegalodonClient {
     return response.json();
   }
 
-  auth = {
-    login: async (username: string, password: string): Promise<Token> => {
-      const formData = new URLSearchParams();
-      formData.append("username", username);
-      formData.append("password", password);
+  health = {
+    live: async (): Promise<HealthResponse> => this.requestRoot<HealthResponse>("/health"),
+    ready: async (): Promise<ReadinessResponse> => this.requestRoot<ReadinessResponse>("/ready"),
+  };
 
-      const token = await this.request<Token>("POST", "/auth/login", formData, {
+  auth = {
+    login: async (username: string, password: string): Promise<{ expires_in: number }> => {
+      this.setToken("");
+      const formData = new URLSearchParams({ username, password });
+      return this.request("POST", "/auth/session/login", formData, {
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
       });
-
-      this.setToken(token.access_token);
-      return token;
     },
 
     register: async (data: {
@@ -1194,12 +1300,12 @@ export class MegalodonClient {
       return this.request<User>("POST", "/auth/register", data);
     },
 
-    refresh: async (refreshToken?: string): Promise<Token> => {
-      const body = refreshToken ? { refresh_token: refreshToken } : undefined;
-      return this.request<Token>("POST", "/auth/refresh", body);
+    refresh: async (): Promise<{ expires_in: number }> => {
+      return this.request("POST", "/auth/session/refresh");
     },
 
     logout: async (): Promise<void> => {
+      if (this.sessionRefresh) await this.sessionRefresh.catch(() => undefined);
       await this.request<void>("POST", "/auth/logout");
       this.setToken("");
     },
@@ -1279,11 +1385,26 @@ export class MegalodonClient {
     },
   };
 
+  catalogoLibro = {
+    buscar: (q: string, skip = 0): Promise<{total: number; items: ConceptoLibro[]}> =>
+      this.request("GET", `/catalogo-libro?${new URLSearchParams({q, skip: String(skip), limit: '50'})}`),
+  };
+
+  indicesCostos = {
+    vinculos: (skip = 0): Promise<VinculoIndice[]> =>
+      this.request('GET', `/indices-costos/vinculos?skip=${skip}&limit=50`),
+    observaciones: (serieId: string, skip = 0): Promise<ObservacionIndice[]> =>
+      this.request('GET', `/indices-costos/observaciones?${new URLSearchParams({ serie_id: serieId, skip: String(skip), limit: '500' })}`),
+    calcular: (solicitud: SolicitudActualizacionPrecio): Promise<ActualizacionPrecioSnapshot> =>
+      this.request('POST', '/indices-costos/calcular', solicitud),
+  };
+
   presupuestos = {
     create: async (expedienteId: string, data: {
       nombre: string;
       descripcion?: string;
       partidas: Array<{
+        catalogo_libro_id?: string;
         numero: number;
         descripcion: string;
         unidad: string;
@@ -2618,7 +2739,12 @@ export class MegalodonClient {
     // vía app/core/calendar.py) -- ver legal_consultor.py::calcular_fechas_procedimiento.
     // Corrige que CalculadoraPlazos.tsx calculaba estas fechas en el
     // navegador con días calendario.
-    calcularFechas: async (fechaInicio: string, procedimiento: string) => {
+    calcularFechas: async (fechaInicio: string, procedimiento: string): Promise<{
+      fecha_inicio: string;
+      fecha_cierre_estimada: string;
+      fecha_fallo_estimada: string;
+      plazos: Record<string, number>;
+    }> => {
       const params = new URLSearchParams({ fecha_inicio: fechaInicio, procedimiento });
       return this.request("POST", `/legal/calcular-fechas?${params.toString()}`);
     },
@@ -2630,7 +2756,11 @@ export class MegalodonClient {
       const params = new URLSearchParams({ max_resultados: String(maxResultados) });
       return this.request("POST", `/legal/categoria/${categoriaId}?${params.toString()}`);
     },
-    chat: async (mensaje: string) => {
+    chat: async (mensaje: string): Promise<{
+      respuesta: string;
+      intencion_detectada: string;
+      parametros: Record<string, unknown>;
+    }> => {
       const params = new URLSearchParams({ mensaje });
       return this.request("POST", `/legal/chat?${params.toString()}`);
     },

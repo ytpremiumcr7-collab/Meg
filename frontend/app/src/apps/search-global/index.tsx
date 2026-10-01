@@ -10,7 +10,7 @@
  * Búsqueda across todos los dominios del sistema
  */
 import { useState, useEffect, useCallback } from 'react';
-import { Search, FileText, Folder, Calculator, Gavel, Award, Filter, X, Tag } from 'lucide-react';
+import { Search, FileText, Folder, Calculator, Gavel, Award, Filter, X } from 'lucide-react';
 import { megalodonClient } from '../../lib/api-client';
 
 interface SearchResult {
