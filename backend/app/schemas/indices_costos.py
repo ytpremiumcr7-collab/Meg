@@ -53,10 +53,14 @@ class ObservacionIndiceCreate(Estricto):
     valor: Decimal = Field(gt=0, max_digits=18, decimal_places=8, allow_inf_nan=False)
     publicado_el: date
     evidencia: EvidenciaIndice
+    revision_captura: int = Field(1, ge=1)
+    sustituye_id: UUID | None = None
     _mes = field_validator('mes')(validar_mes)
 
     @model_validator(mode='after')
     def publicacion_observada(self):
+        if (self.revision_captura == 1) != (self.sustituye_id is None):
+            raise ValueError('Una corrección requiere revisión de captura y observación sustituida')
         if self.publicado_el <= self.mes or self.publicado_el > datetime.now(UTC).date():
             raise ValueError('Fecha de publicación incompatible o futura')
         next_month = self.mes.replace(year=self.mes.year + (self.mes.month == 12), month=self.mes.month % 12 + 1)
@@ -73,6 +77,12 @@ class VinculoIndiceCreate(Estricto):
     fundamento: str = Field(min_length=20, max_length=5000)
     evidencia: EvidenciaIndice
     _mes = field_validator('mes_base')(validar_mes)
+
+
+class AcreditacionMonedaCreate(Estricto):
+    fuente_id: UUID
+    moneda: str = Field(pattern=r'^[A-Z]{3}$')
+    evidencia: EvidenciaIndice
 
 
 class ActualizacionPrecioInput(Estricto):

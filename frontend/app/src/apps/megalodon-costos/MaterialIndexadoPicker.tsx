@@ -54,7 +54,7 @@ export function MaterialIndexadoPicker({ onSelect }: {
     finally { setCalculando(false); }
   };
   const clase = 'bg-[#12121A] border border-[#2A2A3E] rounded p-2 text-xs text-[#E8E4DC]';
-  const etiqueta = (o: ObservacionIndice) => `${o.mes.slice(0, 7)} · nivel ${o.valor} · publicado ${o.publicado_el} · ${o.id.slice(0, 8)}`;
+  const etiqueta = (o: ObservacionIndice) => `${o.mes.slice(0, 7)} · nivel ${o.valor} · publicado ${o.publicado_el} · captura ${o.revision_captura} · ${o.id.slice(0, 8)}`;
 
   return <div className="p-3 space-y-3 border-b border-[#2A2A3E] text-xs text-[#E8E4DC]">
     <p>Estimación por material, usando una correspondencia revisada y niveles publicados. Los precios del catálogo se conservan.</p>

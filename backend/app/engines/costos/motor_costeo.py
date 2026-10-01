@@ -278,6 +278,11 @@ class MotorCosteo:
         ws.column_dimensions["D"].width = 15
         ws.column_dimensions["E"].width = 15
         ws.column_dimensions["F"].width = 18
+        for row in ws.iter_rows(min_row=2):
+            # Catalogue text is data, never an executable spreadsheet formula.
+            for column in (1, 2):
+                if isinstance(row[column].value, str):
+                    row[column].data_type = 's'
 
         actualizaciones = [i for p in presupuesto.partidas for c in p.conceptos
                            for i in c.insumos if i.actualizacion_precio]

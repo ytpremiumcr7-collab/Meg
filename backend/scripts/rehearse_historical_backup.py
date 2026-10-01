@@ -25,7 +25,9 @@ from sqlalchemy.engine import make_url
 from scripts.postgres_backup import BackupInputError, connection, digest, restore
 
 HISTORICAL = "20260914_workspace_bridge_tenant"
-HEAD = "20260930_identity_authority"
+from scripts.migration_head import application_head
+
+HEAD = application_head()
 # Only migrations in this explicitly reviewed interval are supported.
 RENAMES = {"catalog_terms": {"created_by_id": "creado_por_id",
                             "updated_by_id": "actualizado_por_id"}}
@@ -200,7 +202,8 @@ def run_rehearsal(backup, uri, env):
     restore_seconds = time.monotonic() - restore_started
     with read_snapshot(uri, env) as conn:
         tables, revision = inventory(conn)
-        require(revision in {HISTORICAL, HEAD}, "Backup revision outside the reviewed migration interval")
+        require(revision in {HISTORICAL, '20260930_identity_authority', '20261001_indices_materiales', HEAD},
+                "Backup revision outside the reviewed migration interval")
         before = fingerprints(conn, tables)
         expected = fingerprints(conn, tables, source_transforms=True) if revision == HISTORICAL else before
         with conn.cursor() as cursor:
@@ -215,7 +218,14 @@ def run_rehearsal(backup, uri, env):
     with read_snapshot(uri, env) as conn:
         current, target = inventory(conn)
         expected_tables = set(tables) | ({"bridge_field_contracts"} if revision == HISTORICAL else set())
+        indices_tables = {'series_indices_costos', 'observaciones_indices_costos',
+                         'vinculos_indices_insumos', 'retiros_indices_costos'}
+        expected_tables |= indices_tables
         require(target == HEAD and set(current) == expected_tables, "Unexpected revision or historical table changes")
+        for table in indices_tables - set(tables):
+            with conn.cursor() as cursor:
+                cursor.execute(sql.SQL('SELECT count(*) FROM {}').format(sql.Identifier('public', table)))
+                require(cursor.fetchone()[0] == 0, 'Historical upgrade must not invent index observations or mappings')
         after = fingerprints(conn, tables, migrated=revision != HEAD,
                              historical_profile_ids=profile_ids if revision == HISTORICAL else None)
         compare(expected, after)

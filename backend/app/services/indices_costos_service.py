@@ -17,6 +17,7 @@ from app.models.indices_costos import (
 )
 from app.models.user import User, UserRole
 from app.schemas.indices_costos import (
+    AcreditacionMonedaCreate,
     ActualizacionPrecioInput,
     ObservacionIndiceCreate,
     RetiroIndiceCreate,
@@ -72,9 +73,22 @@ class IndicesCostosService:
     async def crear_observacion(self, data: ObservacionIndiceCreate):
         self._autorizar(global_=True)
         await self._serie(data.serie_id)
+        if data.sustituye_id:
+            anterior = await self.db.scalar(select(ObservacionIndiceCosto).where(
+                ObservacionIndiceCosto.id == data.sustituye_id).with_for_update())
+            if not anterior:
+                raise _error(ErrorCode.NOT_FOUND, 'Captura anterior no encontrada')
+            retirado = await self.db.scalar(select(RetiroIndiceCosto.id).where(
+                RetiroIndiceCosto.observacion_id == anterior.id))
+            if not retirado or (anterior.serie_id, anterior.mes, anterior.documento_sha256,
+                                anterior.revision_captura + 1) != (data.serie_id, data.mes,
+                                data.evidencia.sha256, data.revision_captura):
+                raise _error(ErrorCode.BAD_REQUEST,
+                             'La corrección requiere retirar la captura anterior y conservar serie, mes y documento')
         return await self._guardar(ObservacionIndiceCosto(
             serie_id=data.serie_id, mes=data.mes, valor=data.valor, publicado_el=data.publicado_el,
             documento_sha256=data.evidencia.sha256, evidencia=data.evidencia.model_dump(mode='json'),
+            revision_captura=data.revision_captura, sustituye_id=data.sustituye_id,
             registrado_por=str(self.usuario.id),
         ))
 
@@ -87,6 +101,8 @@ class IndicesCostosService:
         fuente = await self.db.get(CatalogoFuente, insumo.fuente_id)
         if not fuente or not fuente.activo:
             raise _error(ErrorCode.BAD_REQUEST, 'Fuente de catálogo inactiva')
+        if fuente.moneda != 'MXN':
+            raise _error(ErrorCode.BAD_REQUEST, 'Moneda original desconocida o distinta de MXN; acreditar la fuente antes de indexar')
         if insumo.tipo != 'MATERIAL' or insumo.incluye_iva or data.region != serie.region:
             raise _error(ErrorCode.BAD_REQUEST,
                 'Se requiere material sin IVA y revisión del ámbito de la serie; salarios/equipo necesitan su propio modelo')
@@ -94,13 +110,29 @@ class IndicesCostosService:
             raise _error(ErrorCode.BAD_REQUEST, 'Precio original inválido')
         original = serializar(insumo)
         original['fuente'] = serializar(fuente)
-        original['moneda'] = 'MXN'
+        original['moneda'] = fuente.moneda
         return await self._guardar(VinculoIndiceInsumo(
             tenant_id=self.usuario.tenant_id, insumo_id=insumo.id, serie_id=serie.id,
             mes_base=data.mes_base, precio_original=insumo.precio_unitario,
             insumo_original=original, fundamento=data.fundamento,
             evidencia=data.evidencia.model_dump(mode='json'), revisado_por=str(self.usuario.id),
         ))
+
+    async def acreditar_moneda(self, data: AcreditacionMonedaCreate):
+        from datetime import UTC, datetime
+        self._autorizar(global_=True)
+        fuente = await self.db.scalar(select(CatalogoFuente).where(
+            CatalogoFuente.id == data.fuente_id).with_for_update())
+        if not fuente:
+            raise _error(ErrorCode.NOT_FOUND, 'Fuente de catálogo no encontrada')
+        if fuente.moneda is not None:
+            raise _error(ErrorCode.CONFLICT, 'La fuente ya tiene moneda; una corrección requiere revisar y retirar sus correspondencias')
+        fuente.moneda = data.moneda
+        fuente.moneda_evidencia = {**data.evidencia.model_dump(mode='json'),
+                                  'revisado_por': str(self.usuario.id),
+                                  'registrado_el': datetime.now(UTC).isoformat()}
+        fuente.actualizado_por_id = self.usuario.id
+        return await self._guardar(fuente)
 
     async def listar_series(self, skip: int, limit: int):
         rows = await self.db.scalars(select(SerieIndiceCosto).order_by(SerieIndiceCosto.codigo, SerieIndiceCosto.id).offset(skip).limit(limit))

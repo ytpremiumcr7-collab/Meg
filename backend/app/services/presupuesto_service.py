@@ -313,7 +313,7 @@ class PresupuestoService(BaseService[Presupuesto]):
         # MissingGreenlet. Se re-consulta ya con todo precargado.
         return await self._reconstruir_partidas_desde_db(presupuesto.id, expediente_id)
 
-    async def _reconstruir_partidas_desde_db(self, presupuesto_id: UUID, expediente_id: UUID) -> "Presupuesto":
+    async def _reconstruir_partidas_desde_db(self, presupuesto_id: UUID, expediente_id: UUID, *, bloquear: bool = False) -> "Presupuesto":
         """Recarga un presupuesto con partidas → conceptos → insumos completos.
         Valida que el presupuesto pertenezca al expediente de la ruta.
 
@@ -325,7 +325,7 @@ class PresupuestoService(BaseService[Presupuesto]):
         """
         from sqlalchemy.orm import selectinload
 
-        result = await self.db.execute(
+        statement = (
             select(Presupuesto)
             .where(Presupuesto.id == presupuesto_id)
             .where(Presupuesto.expediente_id == expediente_id)
@@ -336,6 +336,10 @@ class PresupuestoService(BaseService[Presupuesto]):
                 .selectinload(Concepto.insumos)
             )
         )
+        # Shared locks give selectinload a coherent aggregate under READ COMMITTED;
+        # all writers acquire an exclusive parent lock before loading children.
+        statement = statement.with_for_update(of=Presupuesto, read=not bloquear).execution_options(populate_existing=True)
+        result = await self.db.execute(statement)
         presupuesto = result.scalar_one_or_none()
         if not presupuesto:
             raise MegalodonException(
@@ -357,6 +361,9 @@ class PresupuestoService(BaseService[Presupuesto]):
                     for ins in c.insumos:
                         if ins.actualizacion_precio:
                             verificar_snapshot(ins.actualizacion_precio, Decimal(ins.precio_unitario))
+                            original = ins.actualizacion_precio['vinculo']['insumo_original']
+                            if any(getattr(ins, key) != original[key] for key in ('clave', 'descripcion', 'tipo', 'unidad')):
+                                raise ValueError('La identidad o unidad del material difiere de su evidencia')
                             if ins.actualizacion_precio['vinculo']['tenant_id'] != str(self.tenant_id):
                                 raise ValueError('Correspondencia de otro tenant')
                             encontradas[str(ins.id)] = ins.actualizacion_precio['sha256']
@@ -428,7 +435,7 @@ class PresupuestoService(BaseService[Presupuesto]):
         parametros: ParametrosCosteoSnapshot,
         actualizado_por_id: Optional[UUID] = None,
     ) -> Presupuesto:
-        presupuesto = await self._reconstruir_partidas_desde_db(presupuesto_id, expediente_id)
+        presupuesto = await self._reconstruir_partidas_desde_db(presupuesto_id, expediente_id, bloquear=True)
         if presupuesto.estado in (EstadoPresupuesto.VALIDADO.value, EstadoPresupuesto.APROBADO.value):
             raise MegalodonException(
                 ErrorCode.PRESUPUESTO_ERROR,
@@ -473,7 +480,7 @@ class PresupuestoService(BaseService[Presupuesto]):
     ) -> Presupuesto:
         """Recalcula un presupuesto existente a partir de sus partidas,
         conceptos e insumos reales guardados en BD."""
-        presupuesto = await self._reconstruir_partidas_desde_db(presupuesto_id, expediente_id)
+        presupuesto = await self._reconstruir_partidas_desde_db(presupuesto_id, expediente_id, bloquear=True)
         partidas_costeo = self._partidas_costeo_desde_orm(presupuesto)
 
         presupuesto_costeo = PresupuestoCosteo(
@@ -490,6 +497,10 @@ class PresupuestoService(BaseService[Presupuesto]):
         for p_orm, p_costeo in zip(presupuesto.partidas, presupuesto_costeo.partidas):
             p_orm.precio_unitario = p_costeo.precio_unitario
             p_orm.importe = p_costeo.importe
+            for c_orm, c_costeo in zip(p_orm.conceptos, p_costeo.conceptos):
+                c_orm.costo_directo_unitario = c_costeo.costo_directo_unitario
+                for i_orm, i_costeo in zip(c_orm.insumos, c_costeo.insumos):
+                    i_orm.importe = i_costeo.importe
 
         # Si el presupuesto ya estaba VALIDADO/APROBADO, un recálculo
         # cambia los montos sobre los que se dio esa validación/
@@ -551,7 +562,7 @@ class PresupuestoService(BaseService[Presupuesto]):
         RECHAZADO) validando que la transición sea válida -- no existía
         ningún mecanismo para esto porque el campo `estado` tampoco
         existía antes de esta ronda de unificación."""
-        presupuesto = await self._reconstruir_partidas_desde_db(presupuesto_id, expediente_id)
+        presupuesto = await self._reconstruir_partidas_desde_db(presupuesto_id, expediente_id, bloquear=True)
         if nuevo_estado not in {e.value for e in EstadoPresupuesto}:
             raise MegalodonException(
                 ErrorCode.PRESUPUESTO_ERROR,
@@ -670,7 +681,7 @@ class PresupuestoService(BaseService[Presupuesto]):
         viene de un catálogo de investigación de mercado con solo un
         precio de referencia), la partida se guarda como tipo tabulador
         con ese precio unitario tal cual, sin inventar un desglose."""
-        presupuesto = await self._reconstruir_partidas_desde_db(presupuesto_id, expediente_id)
+        presupuesto = await self._reconstruir_partidas_desde_db(presupuesto_id, expediente_id, bloquear=True)
 
         # BUG: self.db.get(CatalogoAPU, catalogo_apu_id) no validaba tenant
         # -- cualquier usuario autenticado que supiera o adivinara un
@@ -776,7 +787,7 @@ class PresupuestoService(BaseService[Presupuesto]):
                     rendimiento=float(ins_costeo.rendimiento),
                 ))
 
-        await self.db.commit()
+        await self.db.flush()
 
         # Recalcula los montos agregados del presupuesto (indirectos,
         # utilidad, impuesto) sobre TODAS las partidas, incluida ésta.
@@ -790,7 +801,7 @@ class PresupuestoService(BaseService[Presupuesto]):
         nueva_cantidad: float,
         actualizado_por_id: Optional[UUID] = None,
     ) -> Presupuesto:
-        presupuesto = await self._reconstruir_partidas_desde_db(presupuesto_id, expediente_id)
+        presupuesto = await self._reconstruir_partidas_desde_db(presupuesto_id, expediente_id, bloquear=True)
         partida = next((p for p in presupuesto.partidas if str(p.id) == str(partida_id)), None)
         if not partida:
             raise MegalodonException(
@@ -798,7 +809,7 @@ class PresupuestoService(BaseService[Presupuesto]):
                 f"Partida {partida_id} no encontrada en el presupuesto {presupuesto_id}",
             )
         partida.cantidad = nueva_cantidad
-        await self.db.commit()
+        await self.db.flush()
         return await self.recalcular(presupuesto_id, expediente_id, actualizado_por_id)
 
     async def eliminar_partida(
@@ -808,7 +819,7 @@ class PresupuestoService(BaseService[Presupuesto]):
         partida_id: UUID,
         actualizado_por_id: Optional[UUID] = None,
     ) -> Presupuesto:
-        presupuesto = await self._reconstruir_partidas_desde_db(presupuesto_id, expediente_id)
+        presupuesto = await self._reconstruir_partidas_desde_db(presupuesto_id, expediente_id, bloquear=True)
         partida = next((p for p in presupuesto.partidas if str(p.id) == str(partida_id)), None)
         if not partida:
             raise MegalodonException(
@@ -821,5 +832,5 @@ class PresupuestoService(BaseService[Presupuesto]):
             presupuesto.metadatos = {**presupuesto.metadatos, 'actualizaciones_indices': {
                 key: value for key, value in presupuesto.metadatos['actualizaciones_indices'].items()
                 if key not in eliminados}}
-        await self.db.commit()
+        await self.db.flush()
         return await self.recalcular(presupuesto_id, expediente_id, actualizado_por_id)

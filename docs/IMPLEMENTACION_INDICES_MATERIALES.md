@@ -59,6 +59,44 @@ incluye valores, fuentes, meses, correspondencia, política de redondeo y hash.
 Al reconstruir se compara con el precio persistido del insumo; una alteración
 no se disimula recalculando contra el catálogo actual.
 
+La moneda histórica desconocida queda `NULL`. `POST
+/api/v1/indices-costos/acreditaciones-moneda` permite a superadmin acreditar una
+fuente sin moneda mediante URL, SHA y localizador; conserva revisor y fecha.
+No sustituye una moneda ya declarada ni convierte divisas. Las fuentes nuevas
+pueden declarar moneda en su registro; sólo MXN se acepta en este cálculo.
+
+Una transcripción incorrecta puede corregirse conservando el SHA del documento:
+retirar su observación; registrar el mismo mes/serie/documento con
+`sustituye_id` y `revision_captura` anterior + 1. Una observación sólo admite un
+sucesor. No se necesita falsificar un hash para corregir la captura.
+
+Las mutaciones del presupuesto bloquean el agregado y confirman detalles,
+manifiesto y recálculo juntos. Exportar mantiene bloqueo compartido durante la
+carga del padre y los hijos. Las columnas de texto del XLSX se escriben como
+texto literal; importes y cantidades siguen siendo numéricos.
+
+## Operación
+
+1. Aplicar `alembic upgrade head` y ejecutar `python -m scripts.verify_migrated_schema`.
+2. Revisar fuente del catálogo, moneda, mes observado del precio y condiciones
+   de IVA/entrega. Acreditar moneda desconocida sólo con evidencia verificable.
+3. Superadmin registra `/indices-costos/series` y `/observaciones` con niveles
+   de la misma metodología, periodo de referencia y región. La API requiere
+   revisión humana: no descarga documentos ni demuestra por sí sola que su
+   contenido coincide con una captura.
+4. Administrador del tenant registra `/vinculos`, fundamentando la pertinencia
+   material/familia y las condiciones del precio. El selector «Actualizar
+   material» ofrece únicamente correspondencias y observaciones activas.
+5. Elegir ediciones base/destino, confirmar precio y añadir material. Guardar
+   revalida las referencias en servidor; un retiro posterior al cálculo previo
+   puede impedir el guardado y exigir elegir una edición válida.
+
+El CSV del libro contiene precios de conceptos: sólo se actualiza por componente
+cuando exista un desglose APU acreditado. Este módulo no inventa desgloses ni
+atribuye la inflación de un material a un concepto completo. No se precargaron
+niveles ficticios. La activación de las series oficiales y revisión de catálogos
+continúa como trabajo separado, junto con salarios y maquinaria.
+
 ## Validación prevista
 
 API autenticada → cálculo de dos materiales con alza/baja distintas → presupuesto

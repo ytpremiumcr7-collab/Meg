@@ -24,7 +24,7 @@ class CatalogoConceptosService:
             raise MegalodonException(ErrorCode.CONFLICT, f"Fuente '{data.nombre}' ya existe.")
         f = CatalogoFuente(nombre=data.nombre, tipo=data.tipo.value,
             vigencia_inicio=data.vigencia_inicio, vigencia_fin=data.vigencia_fin,
-            descripcion=data.descripcion, url_fuente=data.url_fuente, creado_por_id=current_user.id)
+            descripcion=data.descripcion, url_fuente=data.url_fuente, moneda=data.moneda, creado_por_id=current_user.id)
         db.add(f); await db.commit(); await db.refresh(f); return f
 
     async def listar_fuentes(self, db: AsyncSession, activo=None) -> List[CatalogoFuente]:

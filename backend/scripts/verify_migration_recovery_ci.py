@@ -18,10 +18,11 @@ from uuid import UUID, uuid4
 import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 import geoalchemy2  # noqa: F401 -- register PostGIS reflection types
+from scripts.migration_head import application_head
 
 
 HISTORICAL = "20260914_workspace_bridge_tenant"
-HEAD = "20260930_identity_authority"
+HEAD = application_head()
 OWNED = ("presupuestos", "partidas", "conceptos", "insumos",
          "programas_obra", "actividades_programa")
 TABLES = ("tenants", "users", "expedientes_obra", *OWNED,

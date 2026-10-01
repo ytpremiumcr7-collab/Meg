@@ -1,6 +1,6 @@
 """Controlled fixtures are deliberately not official INEGI/CMIC observations."""
 from io import BytesIO
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 import pytest_asyncio
@@ -27,7 +27,7 @@ async def indices(async_client, db_session, tenant_a_user):
                  hashed_password=AuthService(db_session).hash_password('testpass123'),
                  full_name='Revisor de prueba', role=UserRole.ADMIN.value, is_active=True, is_verified=True)
     fuente = CatalogoFuente(id=uuid4(), nombre='CONTROLADO NO OFICIAL', tipo='CUSTOM',
-                            vigencia_inicio='2020-01-01', vigencia_fin='2020-12-31', activo=True)
+                            vigencia_inicio='2020-01-01', vigencia_fin='2020-12-31', activo=True, moneda='MXN')
     expediente = make_expediente(tenant_a, admin)
     db_session.add_all([admin, fuente, expediente])
     if not await db_session.scalar(select(PlanLimite).where(PlanLimite.plan == 'FREE')):
@@ -36,7 +36,7 @@ async def indices(async_client, db_session, tenant_a_user):
     global_auth, auth = await _login(async_client, user_a.email), await _login(async_client, admin.email)
     referencias = []
     for i, precio in enumerate(('20', '50')):
-        insumo = InsumoCatalogo(id=uuid4(), fuente_id=fuente.id, clave=f'TEST-{i}',
+        insumo = InsumoCatalogo(id=uuid4(), fuente_id=fuente.id, clave=f'=1+{i}',
                                descripcion=f'Material controlado {i}', tipo='MATERIAL', unidad='kg',
                                precio_unitario=precio, incluye_iva=False, activo=True)
         db_session.add(insumo)
@@ -72,7 +72,7 @@ async def indices(async_client, db_session, tenant_a_user):
 
 
 @pytest.mark.asyncio
-async def test_indices_apu_guardado_recalculo_excel_y_retiro(async_client, indices):
+async def test_indices_apu_guardado_recalculo_excel_y_retiro(async_client, indices, db_session):
     refs, auth = indices['refs'], indices['auth']
     for referencia, precio in zip(refs, ('22.00', '45.00'), strict=True):
         response = await async_client.post(BASE + '/calcular', headers=auth, json=referencia)
@@ -82,7 +82,7 @@ async def test_indices_apu_guardado_recalculo_excel_y_retiro(async_client, indic
     body = {'nombre': 'APU indexado controlado', 'parametros_costeo': {
         'factor_indirecto': 0, 'factor_utilidad': 0, 'factor_impuesto': 0, 'factor_riesgo': 0,
         'fuente': 'CAPTURA_USUARIO', 'referencia': 'Datos sintéticos de prueba',
-    }, 'partidas': [{'numero': 1, 'descripcion': 'APU de dos materiales', 'unidad': 'm2', 'cantidad': 2,
+    }, 'partidas': [{'numero': 1, 'descripcion': '=1+1', 'unidad': '=SUM(A1)', 'cantidad': 2,
                      'insumos': [{'clave': 'dato cliente', 'descripcion': 'No autorizado', 'unidad': 'x',
                                   'tipo': 'MANO_OBRA', 'cantidad': cantidad, 'precio_unitario': 999,
                                   'actualizacion_precio': ref} for cantidad, ref in zip((2, 3), refs, strict=True)]}]}
@@ -121,6 +121,29 @@ async def test_indices_apu_guardado_recalculo_excel_y_retiro(async_client, indic
     assert any(row[-1] == 358 for row in wb['Presupuesto'].iter_rows(values_only=True))
     assert wb['Actualizacion materiales']['F2'].value == '22.00'
     assert wb['Actualizacion materiales']['K2'].value == old_sha
+    assert wb['Presupuesto']['B2'].data_type == 's'
+    assert wb['Presupuesto']['C2'].data_type == 's'
+    assert wb['Presupuesto']['F2'].data_type == 'n'
+    assert wb['Actualizacion materiales']['A2'].data_type == 's'
+    # Correcting a transcription preserves the real document hash.
+    correction = await async_client.post(BASE + '/observaciones', headers=indices['global_auth'], json={
+        'serie_id': original['serie_id'], 'medida': 'NIVEL', 'mes': original['mes'], 'valor': '101',
+        'publicado_el': original['publicado_el'], 'evidencia': original['evidencia'],
+        'revision_captura': 2, 'sustituye_id': original['id'],
+    })
+    assert correction.status_code == 201, correction.text
+    assert correction.json()['documento_sha256'] == original['documento_sha256']
+    corrected = await async_client.post(BASE + '/calcular', headers=auth, json={
+        **refs[0], 'observacion_destino_id': correction.json()['id']})
+    assert corrected.json()['precio_actualizado'] == '20.20'
+    assert corrected.json()['destino']['sustituye_id'] == original['id']
+    from app.models.presupuesto import Insumo
+    guardado = await db_session.get(Insumo, UUID(insumos[0]['id']))
+    for tipo, unidad in (('MATERIAL', 'ton'), ('MANO_OBRA', 'kg')):
+        guardado.tipo, guardado.unidad = tipo, unidad
+        await db_session.commit()
+        response = await async_client.get(root + f"/{presupuesto['id']}/excel", headers=auth)
+        assert response.status_code == 400 and 'identidad o unidad' in response.text
 
 
 @pytest.mark.asyncio
@@ -156,3 +179,109 @@ async def test_evidencia_inmutable_con_sql_directo(indices, db_session):
         with pytest.raises(DBAPIError):
             async with db_session.begin_nested():
                 await db_session.execute(text(sentencia), {'id': indices['refs'][0]['observacion_base_id']})
+
+
+@pytest.mark.asyncio
+async def test_rechaza_moneda_desconocida_dolares_iva_y_salarios(async_client, indices, db_session):
+    calculated = (await async_client.post(BASE + '/calcular', headers=indices['auth'], json=indices['refs'][0])).json()
+    original = calculated['vinculo']['insumo_original']
+    fuente = await db_session.get(CatalogoFuente, UUID(original['fuente_id']))
+    insumo = await db_session.get(InsumoCatalogo, UUID(original['id']))
+    payload = {'insumo_id': original['id'], 'serie_id': calculated['serie']['id'],
+               'mes_base': '2020-01-01', 'region': 'NACIONAL',
+               'fundamento': 'Intento controlado con condiciones incompatibles', 'evidencia': calculated['base']['evidencia']}
+    for moneda, tipo, iva in ((None, 'MATERIAL', False), ('USD', 'MATERIAL', False),
+                              ('MXN', 'MANO_OBRA', False), ('MXN', 'MATERIAL', True)):
+        fuente.moneda, insumo.tipo, insumo.incluye_iva = moneda, tipo, iva
+        await db_session.commit()
+        response = await async_client.post(BASE + '/vinculos', headers=indices['auth'], json=payload)
+        assert response.status_code == 400, response.text
+    fuente.moneda, insumo.tipo, insumo.incluye_iva = None, 'MATERIAL', False
+    await db_session.commit()
+    acreditacion = {'fuente_id': str(fuente.id), 'moneda': 'MXN', 'evidencia': payload['evidencia']}
+    response = await async_client.post(BASE + '/acreditaciones-moneda', headers=indices['auth'], json=acreditacion)
+    assert response.status_code == 403
+    response = await async_client.post(BASE + '/acreditaciones-moneda', headers=indices['global_auth'], json=acreditacion)
+    assert response.status_code == 201, response.text
+    assert response.json()['moneda_evidencia']['sha256'] == payload['evidencia']['sha256']
+    assert (await async_client.post(BASE + '/acreditaciones-moneda', headers=indices['global_auth'], json=acreditacion)).status_code == 409
+    response = await async_client.post(BASE + '/vinculos', headers=indices['auth'], json=payload)
+    assert response.status_code == 201, response.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not settings.database_async_url.startswith('postgresql'), reason='PostgreSQL concurrent aggregate writes')
+async def test_eliminaciones_concurrentes_preservan_manifiesto(async_client, indices, db_session):
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.services.presupuesto_service import PresupuestoService
+    root = f"/api/v1/presupuestos/{indices['expediente_id']}/presupuestos"
+    body = {'nombre': 'Eliminaciones simultáneas', 'parametros_costeo': {
+        'factor_indirecto': 0, 'factor_utilidad': 0, 'factor_impuesto': 0, 'factor_riesgo': 0,
+        'fuente': 'CAPTURA_USUARIO', 'referencia': 'Ensayo de dos transacciones PostgreSQL',
+    }, 'partidas': [{'numero': n, 'descripcion': 'Material', 'unidad': 'kg', 'cantidad': 1,
+                    'insumos': [{'cantidad': 1, 'actualizacion_precio': ref}]}
+                   for n, ref in enumerate(indices['refs'], 1)]}
+    response = await async_client.post(root, headers=indices['auth'], json=body)
+    assert response.status_code == 200, response.text
+    presupuesto = response.json()
+    tenant = UUID((await async_client.post(BASE + '/calcular', headers=indices['auth'], json=indices['refs'][0])).json()['vinculo']['tenant_id'])
+    maker = async_sessionmaker(db_session.bind, expire_on_commit=False)
+    async def eliminar(id):
+        async with maker() as session:
+            service = PresupuestoService(session, tenant)
+            return await service.eliminar_partida(UUID(presupuesto['id']), UUID(indices['expediente_id']), UUID(id))
+    await asyncio.wait_for(asyncio.gather(*(eliminar(p['id']) for p in presupuesto['partidas'])), timeout=15)
+    response = await async_client.get(root + f"/{presupuesto['id']}", headers=indices['auth'])
+    assert response.status_code == 200, response.text
+    assert response.json()['partidas'] == []
+    assert response.json()['metadatos']['actualizaciones_indices'] == {}
+    assert response.json()['monto_total'] == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not settings.database_async_url.startswith('postgresql'), reason='PostgreSQL shared export lock')
+async def test_exportacion_coherente_durante_eliminacion(async_client, indices, db_session):
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.services.presupuesto_service import PresupuestoService
+    root = f"/api/v1/presupuestos/{indices['expediente_id']}/presupuestos"
+    body = {'nombre': 'Exportación simultánea', 'parametros_costeo': {
+        'factor_indirecto': 0, 'factor_utilidad': 0, 'factor_impuesto': 0, 'factor_riesgo': 0,
+        'fuente': 'CAPTURA_USUARIO', 'referencia': 'Ensayo de exportación PostgreSQL',
+    }, 'partidas': [{'numero': 1, 'descripcion': 'Material', 'unidad': 'kg', 'cantidad': 1,
+                    'insumos': [{'cantidad': 1, 'actualizacion_precio': indices['refs'][0]}]}]}
+    response = await async_client.post(root, headers=indices['auth'], json=body)
+    assert response.status_code == 200, response.text
+    presupuesto = response.json()
+    tenant = UUID((await async_client.post(BASE + '/calcular', headers=indices['auth'], json=indices['refs'][0])).json()['vinculo']['tenant_id'])
+    maker = async_sessionmaker(db_session.bind, expire_on_commit=False)
+    presupuesto_id, expediente_id = UUID(presupuesto['id']), UUID(indices['expediente_id'])
+    async with maker() as lectura, maker() as escritura:
+        lector = PresupuestoService(lectura, tenant)
+        await lector._reconstruir_partidas_desde_db(presupuesto_id, expediente_id)
+        pid = await escritura.scalar(text('SELECT pg_backend_pid()'))
+        tarea = asyncio.create_task(PresupuestoService(escritura, tenant).eliminar_partida(
+            presupuesto_id, expediente_id, UUID(presupuesto['partidas'][0]['id'])))
+        try:
+            async def esperar_bloqueo():
+                while not await lectura.scalar(text('SELECT EXISTS(SELECT 1 FROM pg_locks WHERE pid=:pid AND NOT granted)'), {'pid': pid}):
+                    assert not tarea.done(), 'El escritor modificó el agregado mientras se estaba exportando'
+                    await asyncio.sleep(0.01)
+            await asyncio.wait_for(esperar_bloqueo(), timeout=5)
+            excel = await lector.generar_excel(presupuesto_id, expediente_id)
+            wb = load_workbook(BytesIO(excel), data_only=True)
+            assert wb['Presupuesto']['F2'].value == 22
+            assert wb['Actualizacion materiales']['F2'].value == '22.00'
+            await lectura.rollback()
+            resultado = await asyncio.wait_for(tarea, timeout=5)
+            assert resultado.monto_total == 0
+        finally:
+            await lectura.rollback()
+            if not tarea.done():
+                tarea.cancel()
+                await asyncio.gather(tarea, return_exceptions=True)

@@ -21,6 +21,7 @@ class CatalogoFuenteCreate(BaseModel):
     vigencia_fin: str
     descripcion: Optional[str] = None
     url_fuente: Optional[str] = None
+    moneda: Optional[str] = Field(None, pattern=r'^[A-Z]{3}$')
 
 
 class CatalogoFuenteOut(BaseModel):
@@ -31,6 +32,8 @@ class CatalogoFuenteOut(BaseModel):
     vigencia_fin: str
     descripcion: Optional[str] = None
     url_fuente: Optional[str] = None
+    moneda: Optional[str] = None
+    moneda_evidencia: Optional[dict] = None
     activo: bool
     created_at: datetime
 

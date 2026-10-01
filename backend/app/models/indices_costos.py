@@ -3,7 +3,16 @@ import uuid
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import CheckConstraint, Date, ForeignKey, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import (
+    CheckConstraint,
+    Date,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.types import JSONB, UUID
@@ -31,10 +40,13 @@ class ObservacionIndiceCosto(Base, UUIDMixin):
     valor: Mapped[Decimal] = mapped_column(Numeric(18, 8), nullable=False)
     publicado_el: Mapped[date] = mapped_column(Date, nullable=False)
     documento_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    revision_captura: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default='1')
+    sustituye_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey('observaciones_indices_costos.id', ondelete='RESTRICT'), unique=True)
     evidencia: Mapped[dict] = mapped_column(JSONB, nullable=False)
     registrado_por: Mapped[str] = mapped_column(String(36), nullable=False)
     __table_args__ = (
-        UniqueConstraint('serie_id', 'mes', 'documento_sha256', name='uq_observacion_indice_edicion'),
+        UniqueConstraint('serie_id', 'mes', 'documento_sha256', 'revision_captura', name='uq_observacion_indice_captura'),
+        CheckConstraint('(revision_captura = 1 AND sustituye_id IS NULL) OR (revision_captura > 1 AND sustituye_id IS NOT NULL)', name='ck_indice_revision_captura'),
         CheckConstraint('valor > 0 AND valor < 10000000000', name='ck_indice_nivel_positivo'),
         CheckConstraint('publicado_el > mes', name='ck_indice_publicacion_posterior'),
     )

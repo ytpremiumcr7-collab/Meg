@@ -915,6 +915,7 @@ export interface ObservacionIndice {
   publicado_el: string;
   documento_sha256: string;
   evidencia: EvidenciaIndice;
+  revision_captura: number;
 }
 
 export interface VinculoIndice {

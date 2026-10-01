@@ -8,6 +8,7 @@ from app.core.deps import get_current_user, get_db
 from app.core.rate_limit import rate_limit_standard, rate_limit_strict
 from app.models.user import User
 from app.schemas.indices_costos import (
+    AcreditacionMonedaCreate,
     ActualizacionPrecioInput,
     ObservacionIndiceCreate,
     RetiroIndiceCreate,
@@ -61,3 +62,8 @@ async def calcular(data: ActualizacionPrecioInput, service: Annotated[IndicesCos
 @router.post('/retiros', status_code=201, dependencies=[Depends(rate_limit_strict)])
 async def retirar(data: RetiroIndiceCreate, service: Annotated[IndicesCostosService, Depends(servicio)]):
     return await service.retirar(data)
+
+
+@router.post('/acreditaciones-moneda', status_code=201, dependencies=[Depends(rate_limit_strict)])
+async def acreditar_moneda(data: AcreditacionMonedaCreate, service: Annotated[IndicesCostosService, Depends(servicio)]):
+    return await service.acreditar_moneda(data)
