@@ -107,3 +107,138 @@ La evidencia abierta de Varela confirma productos de costos con actualizaciones 
 No se descargaron las series completas por insumo ni se calcularon factores enero→agosto por material. No se acreditó una tabla Varela septiembre 2026. El informe residencial CMIC de septiembre no pudo abrirse por la ruta revisada; no se afirma que no exista. Los resultados de comunidad no aportaron una serie nueva independiente y verificable. La búsqueda pública fue acotada, no exhaustiva.
 
 Revisión de evidencia: afirmaciones C01–C05/I01–I02 contrastadas con texto de los originales; fechas de portada separadas del periodo medido. El juicio sobre la discrepancia C05 es observación textual, no corrección del original. Las conclusiones numéricas se limitan a los datos legibles y su periodo declarado. El documento constituye investigación y especificación condicionada; no prueba integración ni preparación para producción.
+
+## Ampliación: salarios, obligaciones y costo horario
+
+Corte: 30 de septiembre de 2026 en México / 1 de octubre UTC. Esta ampliación incorpora revisión paralela de salarios/FASAR, maquinaria/energía y publicaciones Varela. Las reglas de diseño siguientes son propuestas derivadas; no se presentan como funcionalidad implementada.
+
+### Charter y canon de la ampliación
+
+Q5: ¿qué parte del salario es mínimo, mercado, prestación, cuota o productividad? Q6: ¿qué parámetros tienen vigencias distintas? Q7: ¿cómo actualizar maquinaria, alquiler, energía y divisas sin duplicar cargos? Q8: ¿las afirmaciones atribuidas a Varela tienen evidencia original?
+
+Orden: originales del emisor, metodología/normativa original, documentos originales suministrados y, finalmente, publicaciones secundarias para localizar originales. CMIC y el boletín INEGI no constituyen mediciones independientes cuando remiten a la misma serie. Se contrastaron procedimientos con normas y con la descripción de consumo operativo del fabricante, sin trasladar sus cifras extranjeras al mercado mexicano.
+
+### Canonical sources adicionales
+
+| ID | Original abierto | Uso / localizador |
+|---|---|---|
+| C3 | [CMIC marzo 2026](https://www.cmic.org.mx/comisiones/Tematicas/costosyp/Informes_CEICO/INEGI/2026/03_Marzo/Variacion_precio_insumos.pdf) | Páginas 2–6; referencia febrero 2025–febrero 2026. |
+| C4 | [CMIC julio 2026](https://www.cmic.org.mx/comisiones/Tematicas/costosyp/Informes_CEICO/INEGI/2026/07_Julio/CEICO_Informe_Julio_2026_Variacion_precio_materiales.pdf) | Páginas 2–3; referencia junio 2025–junio 2026. |
+| I2 | [INEGI metodología INPP 2025](https://inegi.org.mx/contenidos/programas/inpp/2019a/doc/889463924807.pdf) | §§6.4.1–6.4.3, páginas impresas 34–38, PDF 45–49. |
+| S1 | [CONASAMI, resolución 2026](https://sidof.segob.gob.mx/notas/docFuente/5775534) | Publicación DOF 9-12-2025; resolutivos y tabla profesional, vigencia 1-1-2026. |
+| S2 | [INEGI UMA 2026](https://www.inegi.org.mx/contenidos/saladeprensa/boletines/2026/uma/uma2026.pdf) | Vigencia 1-2-2026. |
+| S3 | [Ley del Seguro Social](https://www.diputados.gob.mx/LeyesBiblio/pdf/LSS.pdf) | Texto servido: reforma 15-1-2026; artículos 27, 28, 36, 72, 106, 107, 147, 168, 211 y transitorios aplicables. |
+| S4 | [Ley Infonavit](https://www.diputados.gob.mx/LeyesBiblio/pdf/LIFNVT.pdf) | Artículo 29, integración y aportación. |
+| S5 | [Decreto pensiones 2020](https://sidof.segob.gob.mx/notas/docFuente/5607729) | Segundo transitorio, tabla CEAV 2023–2030. Tabla original inspeccionada visualmente. |
+| S6 | [Ley Federal del Trabajo](https://www.diputados.gob.mx/LeyesBiblio/pdf/LFT.pdf) | Artículos 74, 76, 80, 87 y vigencias/transitorios. |
+| S7 | [Decreto jornada, mayo 2026](https://sidof.segob.gob.mx/notas/docFuente/5786537) | Segundo y séptimo transitorios; gradualidad. |
+| S8 | [IMSS SUA](https://www.imss.gob.mx/patrones/sua) | Herramienta oficial para contrastar casos de cuotas; no se ejecutó SUA. |
+| R1 | [RLOPSRM](https://www.diputados.gob.mx/LeyesBiblio/regley/Reg_LOPSRM.pdf) | Original servido: reforma 24-2-2023; artículos 190–209. Fórmula FSR inspeccionada visualmente. |
+| E1 | [CNE precios por estación](https://www.cne.gob.mx/ConsultaPrecios/GasolinasyDiesel/GasolinasyDiesel.html) | Precios reportados por producto/estación, actualización diaria. |
+| E2 | [Acuerdo tarifas eléctricas 2026](https://dof.gob.mx/nota_detalle_popup.php?codigo=5783862) | Determinación/publicación mensual de tarifas finales; no equivale a una tarifa única por kWh. |
+| E3 | [Banxico CF102](https://www.banxico.org.mx/SieInternet/consultarDirectorioInternetAction.do?accion=consultarCuadro&idCuadro=CF102&locale=es&sector=6) | Diferencia FIX, liquidación, interbancario y cierre. |
+| V7 | [Varela, teoría y praxis, fragmento](https://varela.com.mx/wp-content/uploads/CostosDeConstruccionParaArquitectosEIngenieros.pdf) | Edición agosto 2023, §1.3, página impresa 22, PDF 17; Pareto. |
+| V8 | [Varela, construcción pesada, fragmento](https://varela.com.mx/wp-content/uploads/CostosDeConstruccionPesada1.pdf) | Edición 2023, páginas impresas 17–18; salario de mercado y prestaciones. |
+| V9 | [Varela, caso ultralujo](https://varela.com.mx/presupuesto-del-costo-de-reposicion-para-efecto-de-avaluo-de-casa-de-ultra-lujo-ul/) | Caso particular fechado 31-7-2026; no serie de inflación. |
+| M1 | [Caterpillar, estimar ofertas](https://www.cat.com/en_US/articles/ci-articles/accurate-job-bids.html) | 6-3-2024; consumo por máquina, trabajo y tiempo ocioso. Contraste técnico, no precios mexicanos. |
+
+### Findings ledger adicional
+
+| ID | Hallazgo | Evidencia / rango | Pregunta |
+|---|---|---|---|
+| A01 | 4.08% construcción, 4.72% residencial y 17.42% cables son tasas anuales febrero 2025–febrero 2026. No representan enero–septiembre de 2026. | C3, pp. 2–3 / 1 | Q1–Q2 |
+| A02 | C4 publicado en julio observa junio: construcción 5.20%, tubos cobre 26.01%, diésel 17.55%, cables 17.40%, tubería plástico 14.97%; tasas anuales. | C4, pp. 2–3 / 1 | Q1–Q2 |
+| A03 | ICC captura salarios pagados por contratistas por ciudad; admite destajo, generalmente sin prestaciones. No es sólo una tabla de mínimos. | I2, §§6.4.1–6.4.2 / 1–2 | Q5 |
+| A04 | Mínimo general 2026: 315.04 MXN/día ZSMG (+13%); frontera 440.87 (+5%). 6.5% es componente de fijación junto con MIR, no incremento total general. | S1, resolutivo tercero / 1 | Q5–Q6 |
+| A05 | UMA diaria 117.31 desde febrero; enero conserva 113.14. Salario y UMA tienen calendarios diferentes. | S2; aviso original UMA/contraste IMSS revisados por investigador / 1 | Q6 |
+| A06 | Aportación Infonavit patronal 5% de la base aplicable; amortización del crédito de la persona trabajadora es objeto separado. | S4, art. 29 / 1 | Q5 |
+| A07 | CEAV patronal depende del año y tramo salarial; riesgos de trabajo dependen del patrón. | S3 y S5 / 1 | Q5–Q6 |
+| A08 | Semana máxima del decreto: 2026 48 h, 2027 46, 2028 44, 2029 42, 2030 40, sin reducción salarial por la transición. | S7, transitorios 2 y 7 / 1 | Q6 |
+| A09 | Consumo de combustible, operador, desgaste y cargos fijos son componentes distintos del costo horario. | R1 arts. 194–206; M1 / 1–2 | Q7 |
+| A10 | No se acreditan primas Varela +4.5% laborales ni +6.2% acumulado de lujo con las páginas originales revisadas. V9 es un caso, no un índice. | V1–V9; búsqueda acotada / 1 | Q8 |
+| A11 | Pareto aparece en V7 como criterio de relevancia; no acredita cobertura completa de un presupuesto omitiendo su resto. | V7, §1.3 / 1 | Q8 |
+
+### Salarios utilizables como mínimos, no como cotizaciones
+
+Importes diarios de S1 vigentes desde enero. La ZLFN corresponde a los municipios enumerados, no al estado completo.
+
+| Categoría | ZSMG MXN/día | ZLFN MXN/día |
+|---|---:|---:|
+| General | 315.04 | 440.87 |
+| Oficial albañil | 363.44 | 440.87 |
+| Carpintero obra negra | 363.44 | 440.87 |
+| Colocador mosaicos/azulejos | 356.19 | 440.87 |
+| Yesero construcción | 339.20 | 440.87 |
+| Electricista instalaciones | 356.19 | 440.87 |
+| Herrero | 351.59 | 440.87 |
+| Soldador arco/soplete | 359.63 | 440.87 |
+| Operador buldózer/traxcavo | 380.74 | 440.87 |
+
+No aplicar el aumento de enero nuevamente a un catálogo ya fechado en enero de 2026. La fórmula general de fijación es `(278.80 + 17.01) × 1.065`, redondeada a 315.04; el MIR no es referente automático de otros salarios. Para estimaciones se necesitan sueldo local, categoría, condiciones y evidencia; el mínimo sirve para comprobar límites (A04).
+
+### Cargas sociales: tasas, bases y vigencias separadas
+
+Resumen de S3: E&M requiere artículo 106 **y transitorio decimonoveno original de 1995**, no el transitorio homónimo de otra reforma. SBC se integra; no equivale automáticamente al nominal.
+
+| Concepto | Patronal | Obrera | Base |
+|---|---:|---:|---|
+| E&M fija | 20.40% | — | UMA |
+| E&M excedente | 1.10% | 0.40% | max(SBC − 3 UMA, 0) |
+| E&M dinero | 0.70% | 0.25% | SBC |
+| Gastos médicos pensionados | 1.05% | 0.375% | SBC |
+| Invalidez/vida | 1.75% | 0.625% | SBC |
+| Guarderías/sociales | 1.00% | — | SBC |
+| Retiro | 2.00% | — | SBC |
+| CEAV | Tramo/año | 1.125% | SBC |
+| Riesgos de trabajo | Prima del patrón | — | SBC |
+
+S3 art. 36 contempla absorción de cuota obrera para salario mínimo. Separar retención, absorción y costo patronal; respetar límites, incidencias y días de cotización. No sumar mecánicamente toda la columna obrera a cualquier APU. Infonavit se trata conforme S4 (A06).
+
+Tabla S5, columna 2026 transcrita del original:
+
+| Etiqueta legal de rango | CEAV patronal 2026 |
+|---|---:|
+| 1.0 SM | 3.150% |
+| 1.01 SM a 1.50 UMA | 3.676% |
+| 1.51 a 2.00 UMA | 4.851% |
+| 2.01 a 2.50 UMA | 5.556% |
+| 2.51 a 3.00 UMA | 6.026% |
+| 3.01 a 3.50 UMA | 6.361% |
+| 3.51 a 4.00 UMA | 6.613% |
+| 4.01 UMA en adelante | 7.513% |
+
+La transcripción no es un selector operativo: mezcla SM y UMA y deja etiquetas que no deben reinterpretarse arbitrariamente. Validar límites, precisión, mínimo integrado y frontera con casos reproducibles contra S8 antes de producción. No se ejecutó esa comparación.
+
+Prestaciones de S6: vacaciones iniciales mínimas 12 días y progresión por antigüedad; prima vacacional mínima 25%; aguinaldo mínimo 15 días, con proporcionalidad cuando proceda. El calendario debe representar descansos y festivos reales sin deducir dos veces coincidencias. Debe conservar antigüedad, régimen, tipo de jornada y contrato colectivo.
+
+### Modelos de recomposición y límites de alcance
+
+De R1, artículos 190–191: `Sr = Sn × Fsr`, `Fsr = (1 + Ps) × Tp/Tl`, `Mo = Sr/R`. Conservar bases de Ps y periodo común de Tp/Tl. En contratos de obra pública R1 fija tratamiento contractual del factor y de ajustes: diferenciar estimación nueva y ajuste contractual; no recalcular indiscriminadamente FSR ya convenido.
+
+Para equipo propio, R1 arts. 194–206 separan depreciación, inversión, seguro, mantenimiento, combustibles, otras energías, lubricantes, llantas, piezas especiales y operador. Costos por hora se convierten por rendimiento a costo por unidad ejecutada. Combustible: consumo horario × precio compatible; operador: salario real del turno / horas efectivas. Alquiler se modela según alcance cotizado, no como matriz de propiedad. Horas efectivas y horas pagadas son parámetros diferentes (A09).
+
+E1 sirve para localizar precio de combustible por estación/producto; no se obtuvo histórico completo. E2 requiere categoría, división, mes, kWh, demanda y asignación de cargos; no se obtuvo tabla completa CFE. E3 distingue series/fechas de divisas; no se obtuvo serie operativa completa. La conversión sólo se aplica al componente realmente en otra moneda. Evitar sumar flete, IVA, prestaciones o tipo de cambio ya contenidos en la base. Estas últimas son reglas de diseño derivadas de las condiciones de las fuentes.
+
+### Scope filter / Object filter adicionales
+
+Se excluyen cuotas IMSS presuntivas de mano de obra por m² como reemplazo de salarios de mercado. Estadísticas ENEC de remuneraciones reales/desestacionalizadas no son precios nominales de oficios. Blogs Slabsz/Opus se abrieron como localizadores; no acreditaron las primas Varela alegadas. La falta de tabla pública no prueba inexistencia de actualizaciones privadas.
+
+La metodología no convierte proyecciones de septiembre en observaciones oficiales. Una base 100 normalizada debe señalar periodo, serie originaria y regla de normalización. Un índice por familia no acredita que bloque de concreto y tabique de arcilla tengan el mismo comportamiento. Pareto permite priorizar revisión, no ocultar ítems sin correspondencia.
+
+### Conclusions y Next steps / Risks adicionales
+
+Las fuentes permiten establecer reglas y algunos valores oficiales; no aportan por sí solas un conjunto completo de precios locales actualizados. A01/A02 impiden convertir tasas anuales en una trayectoria enero–septiembre. A03/A04/A07 requieren separar nominal, mínimo, FSR y productividad. A05/A08 requieren reglas con vigencia. A09 impide un factor diésel para el total de maquinaria. A10 impide activar porcentajes atribuidos al editor sin su evidencia.
+
+Revisión puntual del repositorio: `ParametrosCosteoSnapshot` ya conserva evidencia de sobrecostos, pero no constituye una serie mensual de índices. `InsumoCatalogo` guarda precio y fuente; no modela por sí solo observaciones/vintages ni correspondencias revisadas. `ValidadorFactorSalarioReal` valida aritmética de Ps/Tp/Tl declarados; no calcula cuotas legales ni acredita sus bases. Sus límites globales de días en `constants.py` necesitan revisión con calendarios/vigencias antes de calificarlos como reglas legales universales. Esto es hallazgo de alcance, no certificación completa del módulo.
+
+Migración propuesta, sin capa de compatibilidad que conserve inferencias erróneas:
+
+1. **Fuente y versión**: original inmutable, huella, fecha publicada, periodo observado, metodología, base y condiciones de precio.
+2. **Serie y observación**: identificador real, ámbito, unidad, clase `nivel/mensual/anual/pronóstico`, versión de publicación. Tasas anuales sólo informativas para este flujo.
+3. **Correspondencia revisada**: insumo→serie con sustento y vigencia. Ausencia/conflicto bloquean actualización; cobertura por ítems y por valor visible.
+4. **Precio original y derivado**: mes base y moneda explícitos; factor de la misma serie; precio derivado separado, nunca sobreescritura del original.
+5. **Motor laboral versionado**: categoría/municipio, nominal, mínimos, SBC, UMA, tabla año, riesgo, prestaciones, calendario, rendimiento y tratamiento contractual.
+6. **Matrices de equipo**: propiedad/alquiler, alcance, consumos y unidades, costos fijos, energía y operador; sin doble conteo.
+7. **Presupuesto reproducible**: instantánea de fuentes/reglas/mapeos y política de redondeo. Proyecciones separadas de observaciones, con validación retrospectiva antes de habilitarlas.
+
+Aún faltan series mensuales por insumo y mapeos completos; selector CEAV contrastado con SUA; mercadeo/consumos locales; migración con datos reales y pruebas integradas. No se implementó ni se declara listo un sistema de actualización automática con esta investigación. Esta ronda añade auditoría de evidencia y especificación; no modifica el estado GO de despliegue.
