@@ -234,11 +234,12 @@ async def test_eliminaciones_concurrentes_preservan_manifiesto(async_client, ind
             service = PresupuestoService(session, tenant)
             return await service.eliminar_partida(UUID(presupuesto['id']), UUID(indices['expediente_id']), UUID(id))
     await asyncio.wait_for(asyncio.gather(*(eliminar(p['id']) for p in presupuesto['partidas'])), timeout=15)
-    response = await async_client.get(root + f"/{presupuesto['id']}", headers=indices['auth'])
+    response = await async_client.get(root, headers=indices['auth'])
     assert response.status_code == 200, response.text
-    assert response.json()['partidas'] == []
-    assert response.json()['metadatos']['actualizaciones_indices'] == {}
-    assert response.json()['monto_total'] == 0
+    guardado = next(p for p in response.json() if p['id'] == presupuesto['id'])
+    assert guardado['partidas'] == []
+    assert guardado['metadatos']['actualizaciones_indices'] == {}
+    assert guardado['monto_total'] == 0
 
 
 @pytest.mark.asyncio

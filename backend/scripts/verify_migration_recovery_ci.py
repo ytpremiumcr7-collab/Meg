@@ -4,22 +4,22 @@ Synthetic fixtures are confined to a dedicated disposable CI service. This is
 not a production migration command, and a passing report does not certify a
 customer database, its credentials, role grants, or external artifact storage.
 """
-from datetime import datetime, timezone
-from decimal import Decimal
 import hashlib
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from datetime import UTC, datetime
+from decimal import Decimal
+from pathlib import Path
 from uuid import UUID, uuid4
 
+import geoalchemy2  # noqa: F401 -- register PostGIS reflection types
 import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
-import geoalchemy2  # noqa: F401 -- register PostGIS reflection types
-from scripts.migration_head import application_head
 
+from scripts.migration_head import application_head
 
 HISTORICAL = "20260914_workspace_bridge_tenant"
 HEAD = application_head()
@@ -28,7 +28,7 @@ OWNED = ("presupuestos", "partidas", "conceptos", "insumos",
 TABLES = ("tenants", "users", "expedientes_obra", *OWNED,
           "catalog_terms", "webhook_eventos_procesados", "tezcatlipoca_users", "snapshots",
           "levantamientos", "puntos_topograficos")
-INSTANT = datetime(2026, 9, 14, 12, 34, 56, 123456, tzinfo=timezone.utc)
+INSTANT = datetime(2026, 9, 14, 12, 34, 56, 123456, tzinfo=UTC)
 NAIVE = INSTANT.replace(tzinfo=None)
 D = Decimal
 
@@ -41,7 +41,7 @@ def require(condition, message):
 def normalize(value):
     if isinstance(value, datetime):
         # Historical Tez timestamps explicitly represented UTC without tzinfo.
-        return value.replace(tzinfo=timezone.utc).isoformat() if value.tzinfo is None else value.astimezone(timezone.utc).isoformat()
+        return value.replace(tzinfo=UTC).isoformat() if value.tzinfo is None else value.astimezone(UTC).isoformat()
     if isinstance(value, (UUID, Decimal)):
         return str(value)
     if isinstance(value, dict):
@@ -142,7 +142,7 @@ def seed(engine):
                    x=D("500000.123456"), y=D("2100000.654321"), z=D("2234.567890"), precision_xy=D("0.0010"),
                    geom=sa.func.ST_GeomFromEWKT("SRID=6362;POINT Z(500000.123456 2100000.654321 2234.56789)"))
             graph.append({"tenant": tenant, "user": user, "term": term,
-                          **dict(zip(OWNED, (presupuesto, partida, concepto, insumo, programa, actividad)))})
+                          **dict(zip(OWNED, (presupuesto, partida, concepto, insumo, programa, actividad), strict=True))})
         insert("webhook_eventos_procesados", id=uuid4(), proveedor="stripe",
                evento_id="ci-historical-event", procesado_en=INSTANT)
     return graph
@@ -157,6 +157,9 @@ def verify_upgrade(before, after, graph):
             row["tenant_id"] = by_id[row["id"]]
             if name == "presupuestos":
                 row.update(factor_riesgo=None, monto_riesgo=None)
+            if name == "insumos":
+                # Historical costs have no fabricated index provenance.
+                row["actualizacion_precio"] = None
     for row in expected["users"]:
         row["auth_version"] = 0
     for row in expected["catalog_terms"]:
