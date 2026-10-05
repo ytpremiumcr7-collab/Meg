@@ -127,6 +127,11 @@ def projection_query(table, columns, migrated=False, source_transforms=False, hi
     for original, kind in columns:
         name = RENAMES.get(table, {}).get(original, original) if migrated else original
         expression = sql.Identifier(name)
+        if (migrated and table == 'observaciones_indices_costos' and original == 'valor'
+                and kind == 'numeric(18,8)'):
+            # Widening appends decimal zeros; compare the original column's
+            # exact scale without changing or rounding any historical value.
+            expression = sql.SQL('{}::numeric(18,8)').format(expression)
         if source_transforms and table == "jurisdiction_profiles" and original == "templates":
             expression = expected_templates_expression()
         if (not migrated and original in UTC_COLUMNS.get(table, ())
@@ -202,7 +207,8 @@ def run_rehearsal(backup, uri, env):
     restore_seconds = time.monotonic() - restore_started
     with read_snapshot(uri, env) as conn:
         tables, revision = inventory(conn)
-        require(revision in {HISTORICAL, '20260930_identity_authority', '20261001_indices_materiales', HEAD},
+        require(revision in {HISTORICAL, '20260930_identity_authority', '20261001_indices_materiales',
+                            '20261001_indices_revision', HEAD},
                 "Backup revision outside the reviewed migration interval")
         before = fingerprints(conn, tables)
         expected = fingerprints(conn, tables, source_transforms=True) if revision == HISTORICAL else before
@@ -219,7 +225,7 @@ def run_rehearsal(backup, uri, env):
         current, target = inventory(conn)
         expected_tables = set(tables) | ({"bridge_field_contracts"} if revision == HISTORICAL else set())
         indices_tables = {'series_indices_costos', 'observaciones_indices_costos',
-                         'vinculos_indices_insumos', 'retiros_indices_costos'}
+                         'vinculos_indices_insumos', 'retiros_indices_costos', 'cargas_indices_costos'}
         expected_tables |= indices_tables
         require(target == HEAD and set(current) == expected_tables, "Unexpected revision or historical table changes")
         for table in indices_tables - set(tables):

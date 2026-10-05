@@ -55,7 +55,7 @@ from app.models.catalogo_apu import CatalogoAPU, PrecioUnitarioAsignado, TipoCon
 from app.models.catalogo_conceptos import (
     CatalogoFuente, ConceptoCatalogo, InsumoCatalogo, TipoCatalogo
 )
-from app.models.indices_costos import SerieIndiceCosto, ObservacionIndiceCosto, VinculoIndiceInsumo, RetiroIndiceCosto
+from app.models.indices_costos import SerieIndiceCosto, ObservacionIndiceCosto, VinculoIndiceInsumo, RetiroIndiceCosto, CargaIndiceCosto
 
 # ─── 9. Programación ───────────────────────────────────────
 from app.models.programacion import ProgramaObra, ActividadPrograma

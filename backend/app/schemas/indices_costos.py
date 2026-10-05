@@ -2,6 +2,7 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Annotated, Literal
 from uuid import UUID
+from urllib.parse import unquote
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
@@ -30,7 +31,35 @@ class EvidenciaIndice(Estricto):
     def sin_credenciales(cls, value):
         if value.username or value.password or value.query or value.fragment:
             raise ValueError('URL de evidencia sin credenciales, parámetros ni fragmentos')
+        if (value.host and (value.host == 'inegi.org.mx' or value.host.endswith('.inegi.org.mx'))
+                and '/app/api/' in unquote(value.path).lower()):
+            raise ValueError('La URL de la API INEGI contiene el token; usar una referencia pública')
         return value
+
+
+class ContratoINEGI(Estricto):
+    """Codes resolved against INEGI catalogues by the authenticated reviewer.
+
+    No code is guessed from a material name or from a percentage in a report.
+    Changes require a new immutable methodology version.
+    """
+    indicador: str = Field(pattern=r'^\d{1,30}$')
+    frecuencia: str = Field(min_length=1, max_length=120)
+    unidad: str = Field(min_length=1, max_length=120)
+    multiplicador: str = Field(min_length=1, max_length=120)
+    tema: str = Field(min_length=1, max_length=500)
+    fuente: str = Field(min_length=1, max_length=500)
+    notas: str = Field(max_length=2000)
+    estatus_serie: str = Field(max_length=120)
+    cobertura: str = Field(min_length=1, max_length=120)
+    estatus_observacion: str = Field(max_length=120)
+    fuente_observacion: str = Field(max_length=500)
+    notas_observacion: str = Field(max_length=2000)
+    periodicidad_revisada: Literal['MENSUAL']
+    medida_revisada: Literal['NIVEL_INDICE']
+    escala_revisada: Literal['UNIDAD']
+    alcance_revisado: Literal['MATERIAL']
+    evidencia_metadatos: EvidenciaIndice
 
 
 class SerieIndiceCreate(Estricto):
@@ -44,13 +73,20 @@ class SerieIndiceCreate(Estricto):
     condiciones_precio: str = Field(min_length=10, max_length=5000)
     periodo_referencia: str = Field(min_length=3, max_length=100)
     evidencia: EvidenciaIndice
+    contrato_inegi: ContratoINEGI | None = None
+
+    @model_validator(mode='after')
+    def codigo_inegi(self):
+        if self.contrato_inegi and self.codigo != self.contrato_inegi.indicador:
+            raise ValueError('El código de la serie debe ser el indicador original de INEGI')
+        return self
 
 
 class ObservacionIndiceCreate(Estricto):
     serie_id: UUID
     medida: Literal['NIVEL']
     mes: Mes
-    valor: Decimal = Field(gt=0, max_digits=18, decimal_places=8, allow_inf_nan=False)
+    valor: Decimal = Field(gt=0, lt=10000000000, max_digits=30, decimal_places=20, allow_inf_nan=False)
     publicado_el: date
     evidencia: EvidenciaIndice
     revision_captura: int = Field(1, ge=1)
@@ -67,6 +103,32 @@ class ObservacionIndiceCreate(Estricto):
         if self.publicado_el < next_month:
             raise ValueError('La publicación debe corresponder a un mes cerrado')
         return self
+
+
+class CargaINEGIInput(Estricto):
+    serie_id: UUID
+    mes_inicio: Mes
+    mes_fin: Mes
+    publicado_el: date
+    ultima_actualizacion: str = Field(min_length=1, max_length=120)
+    evidencia: EvidenciaIndice
+    _inicio = field_validator('mes_inicio')(validar_mes)
+    _fin = field_validator('mes_fin')(validar_mes)
+
+    @model_validator(mode='after')
+    def intervalo(self):
+        if self.mes_fin < self.mes_inicio:
+            raise ValueError('Intervalo de meses invertido')
+        return self
+
+    @field_validator('evidencia')
+    @classmethod
+    def referencia_publica(cls, value):
+        # Never store an API URL, whose path contains the user's private token.
+        if (value.url.scheme != 'https' or value.url.host != 'www.inegi.org.mx'
+                or not value.url.path.startswith(('/programas/inpp/', '/contenidos/programas/inpp/'))):
+            raise ValueError('Usar una referencia pública del programa INPP sin token de API')
+        return value
 
 
 class VinculoIndiceCreate(Estricto):

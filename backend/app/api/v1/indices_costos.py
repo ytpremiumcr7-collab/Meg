@@ -1,7 +1,8 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, File, Form, UploadFile, HTTPException, Response
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
@@ -14,7 +15,9 @@ from app.schemas.indices_costos import (
     RetiroIndiceCreate,
     SerieIndiceCreate,
     VinculoIndiceCreate,
+    CargaINEGIInput,
 )
+from app.engines.costos.ingesta_inegi import MAX_ARCHIVO
 from app.services.indices_costos_service import IndicesCostosService
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
@@ -67,3 +70,30 @@ async def retirar(data: RetiroIndiceCreate, service: Annotated[IndicesCostosServ
 @router.post('/acreditaciones-moneda', status_code=201, dependencies=[Depends(rate_limit_strict)])
 async def acreditar_moneda(data: AcreditacionMonedaCreate, service: Annotated[IndicesCostosService, Depends(servicio)]):
     return await service.acreditar_moneda(data)
+
+
+@router.post('/cargas/inegi', dependencies=[Depends(rate_limit_strict)])
+async def cargar_inegi(service: Annotated[IndicesCostosService, Depends(servicio)],
+                      archivo: Annotated[UploadFile, File()], metadatos: Annotated[str, Form(max_length=12000)],
+                      confirmar: bool = Query(False)):
+    # Validate before reading; this administrative path never makes remote requests.
+    service._autorizar(global_=True)
+    try:
+        try:
+            data = CargaINEGIInput.model_validate_json(metadatos)
+        except ValidationError as exc:
+            raise HTTPException(422, 'Metadatos de carga inválidos') from exc
+        body = await archivo.read(MAX_ARCHIVO + 1)
+        if len(body) > MAX_ARCHIVO:
+            raise HTTPException(413, 'Archivo mayor a 2 MiB')
+        return await service.cargar_inegi(data, body, confirmar=confirmar)
+    finally:
+        await archivo.close()
+
+
+@router.get('/cargas/{carga_id}/archivo', dependencies=[Depends(rate_limit_strict)])
+async def archivo_carga(carga_id: UUID, service: Annotated[IndicesCostosService, Depends(servicio)]):
+    body = await service.archivo_carga(carga_id)
+    return Response(body, media_type='application/json', headers={
+        'Content-Disposition': f'attachment; filename="indice-{carga_id}.json"',
+        'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff'})

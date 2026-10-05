@@ -8,9 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ErrorCode, MegalodonException
 from app.engines.costos.indices import actualizar_precio, sellar_snapshot
+from app.engines.costos.ingesta_inegi import revisar_archivo
 from app.models.catalogo_conceptos import CatalogoFuente, InsumoCatalogo
 from app.models.indices_costos import (
     ObservacionIndiceCosto,
+    CargaIndiceCosto,
     RetiroIndiceCosto,
     SerieIndiceCosto,
     VinculoIndiceInsumo,
@@ -22,6 +24,8 @@ from app.schemas.indices_costos import (
     ObservacionIndiceCreate,
     RetiroIndiceCreate,
     SerieIndiceCreate,
+    CargaINEGIInput,
+    ContratoINEGI,
     VinculoIndiceCreate,
 )
 
@@ -69,6 +73,62 @@ class IndicesCostosService:
         self._autorizar(global_=True)
         values = data.model_dump(mode='json', exclude={'alcance', 'moneda', 'incluye_iva'})
         return await self._guardar(SerieIndiceCosto(**values, registrado_por=str(self.usuario.id)))
+
+    async def cargar_inegi(self, data: CargaINEGIInput, archivo: bytes, *, confirmar: bool):
+        self._autorizar(global_=True)
+        # All imports for the same immutable contract serialize in PostgreSQL.
+        serie = await self.db.scalar(select(SerieIndiceCosto).where(
+            SerieIndiceCosto.id == data.serie_id).with_for_update())
+        if not serie:
+            raise _error(ErrorCode.NOT_FOUND, 'Serie no encontrada')
+        if not serie.contrato_inegi:
+            raise _error(ErrorCode.BAD_REQUEST, 'La serie no tiene contrato de metadatos INEGI revisado')
+        try:
+            niveles = revisar_archivo(archivo, ContratoINEGI.model_validate(serie.contrato_inegi), data)
+        except ValueError as exc:
+            raise _error(ErrorCode.BAD_REQUEST, str(exc)) from exc
+        anterior = await self.db.scalar(select(CargaIndiceCosto).where(
+            CargaIndiceCosto.serie_id == serie.id, CargaIndiceCosto.documento_sha256 == data.evidencia.sha256))
+        if anterior and (anterior.publicado_el != data.publicado_el or anterior.mes_inicio != data.mes_inicio
+                         or anterior.mes_fin != data.mes_fin or anterior.ultima_actualizacion != data.ultima_actualizacion
+                         or anterior.evidencia != data.evidencia.model_dump(mode='json')):
+            raise _error(ErrorCode.CONFLICT, 'El mismo archivo ya tiene otra revisión; no cambiar sus fechas o intervalo')
+        carga = anterior
+        if confirmar and not anterior:
+            carga = CargaIndiceCosto(serie_id=serie.id, documento_sha256=data.evidencia.sha256,
+                publicado_el=data.publicado_el, mes_inicio=data.mes_inicio, mes_fin=data.mes_fin,
+                ultima_actualizacion=data.ultima_actualizacion, evidencia=data.evidencia.model_dump(mode='json'),
+                archivo=archivo, registrado_por=str(self.usuario.id))
+            self.db.add(carga)
+            try:
+                await self.db.flush()
+                self.db.add_all([ObservacionIndiceCosto(serie_id=serie.id, mes=n.mes, valor=n.valor,
+                    publicado_el=n.publicado_el, documento_sha256=data.evidencia.sha256,
+                    evidencia=n.evidencia.model_dump(mode='json'), carga_id=carga.id,
+                    registrado_por=str(self.usuario.id)) for n in niveles])
+                await self.db.commit()
+            except IntegrityError as exc:
+                await self.db.rollback()
+                raise _error(ErrorCode.CONFLICT, 'Archivo o niveles ya registrados; la carga completa se revirtió') from exc
+        retiradas = 0
+        if carga:
+            retiradas = len((await self.db.scalars(select(RetiroIndiceCosto.id).join(
+                ObservacionIndiceCosto, RetiroIndiceCosto.observacion_id == ObservacionIndiceCosto.id
+            ).where(ObservacionIndiceCosto.carga_id == carga.id))).all())
+        return {'estado': ('REGISTRADO_CON_RETIROS' if retiradas else 'REGISTRADO') if confirmar else 'VALIDADO_SIN_REGISTRAR',
+                'carga_id': str(carga.id) if carga else None,
+                'repetida': anterior is not None, 'sha256': data.evidencia.sha256,
+                'serie_id': str(serie.id), 'mes_inicio': data.mes_inicio.isoformat(),
+                'mes_fin': data.mes_fin.isoformat(), 'observaciones': len(niveles),
+                'observaciones_retiradas': retiradas,
+                'niveles': [{'mes': n.mes.isoformat(), 'valor': str(n.valor)} for n in niveles]}
+
+    async def archivo_carga(self, id: UUID):
+        self._autorizar(global_=True)
+        carga = await self.db.get(CargaIndiceCosto, id)
+        if not carga:
+            raise _error(ErrorCode.NOT_FOUND, 'Carga no encontrada')
+        return carga.archivo
 
     async def crear_observacion(self, data: ObservacionIndiceCreate):
         self._autorizar(global_=True)
