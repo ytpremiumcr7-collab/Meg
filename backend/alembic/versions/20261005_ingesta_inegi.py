@@ -42,4 +42,4 @@ def upgrade():
 
 
 def downgrade():
-    raise RuntimeError('Forward-only: conservar archivos originales y precisión de los niveles')
+    raise RuntimeError('Migración forward-only: conservar archivos originales y precisión de los niveles')
