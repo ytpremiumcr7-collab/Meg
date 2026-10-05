@@ -40,7 +40,13 @@ from tezcatlipoca.db.models import Base as TezBase
 
 TEST_DATABASE_URL = os.environ["DATABASE_URL"]
 
-engine_test = create_async_engine(TEST_DATABASE_URL, echo=False)
+# Disposable test connections must fail with a diagnostic rather than wait
+# indefinitely for leaked locks. This does not change application connections
+# or database/role defaults. Trigger tests also check their exact error text so
+# a lock timeout cannot masquerade as successful evidence protection.
+test_connect_args = ({"server_settings": {"lock_timeout": "5000", "statement_timeout": "30000"}}
+                     if TEST_DATABASE_URL.startswith("postgresql") else {})
+engine_test = create_async_engine(TEST_DATABASE_URL, echo=False, connect_args=test_connect_args)
 
 
 if TEST_DATABASE_URL.startswith("sqlite"):

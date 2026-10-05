@@ -176,7 +176,7 @@ async def test_indices_aislamiento_roles_y_datos_incompatibles(async_client, ind
 async def test_evidencia_inmutable_con_sql_directo(indices, db_session):
     for sentencia in ("UPDATE observaciones_indices_costos SET valor=150 WHERE id=:id",
                        "DELETE FROM observaciones_indices_costos WHERE id=:id"):
-        with pytest.raises(DBAPIError):
+        with pytest.raises(DBAPIError, match='evidencia de índices es inmutable'):
             async with db_session.begin_nested():
                 await db_session.execute(text(sentencia), {'id': indices['refs'][0]['observacion_base_id']})
 

@@ -36,6 +36,13 @@ No se activaron series oficiales ni catálogos a partir de datos simulados.
   colores semánticos, fuente, animaciones y contorno en colores forzados.
   Las respuestas anónimas de API en estas pruebas son fixtures declaradas;
   no representan una prueba de acceso autenticado de extremo a extremo.
+- El run `37353623827` volvió a quedarse esperando durante pytest, aunque
+  migración, esquema, smoke HTTP, recuperación, auditorías y frontend pasaron.
+  Se limitan los locks y sentencias exclusivamente en conexiones de pruebas,
+  la importación concurrente tiene plazo explícito y las pruebas de
+  inmutabilidad exigen el mensaje del trigger. La CI conserva stdout/stderr y
+  el volcado de hilos, y termina incluso si el proceso ignora SIGTERM. Estos
+  límites hacen observable el fallo; no prueban que su causa esté resuelta.
 
 ## Evidencia local
 
@@ -43,7 +50,8 @@ No se activaron series oficiales ni catálogos a partir de datos simulados.
   aprobadas con PostgreSQL 16.15 / PostGIS 3.4.2.
 - Cinco pruebas de ingestión: aprobadas, incluyendo concurrencia, precisión
   decimal, reimportación, rollback y restricciones SQL sobre evidencia.
-- Suite completa: **412 aprobadas, 2 omitidas, 71 avisos**, 43.47 segundos.
+- Suite completa tras los límites de diagnóstico: **412 aprobadas, 2 omitidas,
+  71 avisos**, 43.37 segundos.
   Las dos omitidas requieren servicios externos opcionales; el smoke HTTP se
   ejecutó por separado contra Uvicorn y Redis reales.
 - Smoke de runtime: aprobado con rol DML sin propiedad del esquema. Tezcatlipoca
@@ -65,6 +73,8 @@ No se activaron series oficiales ni catálogos a partir de datos simulados.
 - [Tema de la implementación oficial](https://github.com/tailwindlabs/tailwindcss/blob/main/packages/tailwindcss/theme.css).
 - [Implementación CSS de animaciones](https://github.com/Wombosvideo/tw-animate-css).
 - [Servidor de pruebas Playwright](https://playwright.dev/docs/test-webserver).
+- [Límites por conexión PostgreSQL](https://www.postgresql.org/docs/16/runtime-config-client.html).
+- [Parámetros server_settings de asyncpg](https://magicstack.github.io/asyncpg/current/api/index.html).
 
 Tailwind 4 requiere Safari 16.4+, Chrome 111+ y Firefox 128+. No se añadió una
 capa del compilador antiguo para navegadores anteriores.

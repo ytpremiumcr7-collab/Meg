@@ -124,13 +124,14 @@ async def test_postgres_reimportacion_concurrente_e_inmutabilidad(async_client, 
     if db_session.bind.dialect.name != 'postgresql':
         pytest.skip('Requires PostgreSQL row locking and evidence triggers')
     f = carga_inegi
-    a, b = await asyncio.gather(cargar(async_client, f), cargar(async_client, f))
+    a, b = await asyncio.wait_for(
+        asyncio.gather(cargar(async_client, f), cargar(async_client, f)), timeout=15)
     assert a.status_code == b.status_code == 200, (a.text, b.text)
     assert a.json()['carga_id'] == b.json()['carga_id']
     assert sorted([a.json()['repetida'], b.json()['repetida']]) == [False, True]
     for statement in ["UPDATE cargas_indices_costos SET archivo=archivo WHERE id=:id",
                       "DELETE FROM cargas_indices_costos WHERE id=:id", "TRUNCATE cargas_indices_costos CASCADE"]:
-        with pytest.raises(DBAPIError):
+        with pytest.raises(DBAPIError, match='evidencia de índices es inmutable'):
             await db_session.execute(text(statement), {'id': UUID(a.json()['carga_id'])})
         await db_session.rollback()
     # Even a direct SQL writer cannot detach an observation from its source's
