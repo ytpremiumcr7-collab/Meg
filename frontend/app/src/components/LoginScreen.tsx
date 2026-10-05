@@ -40,7 +40,7 @@ export default function LoginScreen() {
   };
 
   return (
-    <div className="fixed inset-0 z-[50000] flex items-center justify-center">
+    <div className="fixed inset-0 z-50000 flex flex-col items-center overflow-y-auto py-6">
       {/* Background layers */}
       <div
         className="absolute inset-0 bg-cover bg-center"
@@ -54,7 +54,7 @@ export default function LoginScreen() {
       />
 
       {/* Content */}
-      <div className="relative z-10 flex flex-col items-center max-w-[380px] w-full px-6">
+      <div className="relative z-10 my-auto flex shrink-0 flex-col items-center max-w-[380px] w-full px-6">
         {/* Logo */}
         <motion.div
           initial={{ opacity: 0, scale: 0.8 }}
@@ -109,7 +109,7 @@ export default function LoginScreen() {
                   value={username}
                   onChange={(e) => { setUsername(e.target.value); setError(''); }}
                   placeholder="tu@correo.com"
-                  className="w-full h-11 bg-[#0A0A0F] border border-[#2A2A3E] rounded-md pl-10 pr-3 text-sm text-[#E8E4DC] outline-none focus:border-[#C9A84C] transition-colors placeholder:text-[#4D4A42]"
+                  className="w-full h-11 bg-[#0A0A0F] border border-[#2A2A3E] rounded-md pl-10 pr-3 text-sm text-[#E8E4DC] outline-hidden focus:border-[#C9A84C] transition-colors placeholder:text-[#4D4A42]"
                   autoFocus
                 />
               </div>
@@ -124,7 +124,7 @@ export default function LoginScreen() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Ingresa tu contrase&ntilde;a"
-                  className="w-full h-11 bg-[#0A0A0F] border border-[#2A2A3E] rounded-md pl-10 pr-10 text-sm text-[#E8E4DC] outline-none focus:border-[#C9A84C] transition-colors placeholder:text-[#4D4A42]"
+                  className="w-full h-11 bg-[#0A0A0F] border border-[#2A2A3E] rounded-md pl-10 pr-10 text-sm text-[#E8E4DC] outline-hidden focus:border-[#C9A84C] transition-colors placeholder:text-[#4D4A42]"
                 />
                 <button
                   type="button"
@@ -166,7 +166,7 @@ export default function LoginScreen() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 2, duration: 1 }}
-          className="absolute bottom-6 text-xs text-[#4D4A42] font-mono"
+          className="mt-6 text-center text-xs text-[#4D4A42] font-mono"
         >
           Megalodon OS v3.1 &mdash; Build 2026.06
         </motion.p>

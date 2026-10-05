@@ -110,10 +110,10 @@ export default function SancionesPanel() {
           value={filtroProveedor}
           onChange={(e) => setFiltroProveedor(e.target.value)}
           placeholder="Filtrar por proveedor_id"
-          className="h-8 rounded px-2 text-xs outline-none w-48"
+          className="h-8 rounded px-2 text-xs outline-hidden w-48"
           style={inputStyle()}
         />
-        <select value={filtroTipo} onChange={(e) => setFiltroTipo(e.target.value)} className="h-8 rounded px-2 text-xs outline-none" style={inputStyle()}>
+        <select value={filtroTipo} onChange={(e) => setFiltroTipo(e.target.value)} className="h-8 rounded px-2 text-xs outline-hidden" style={inputStyle()}>
           <option value="">Todos los tipos</option>
           {TIPOS_SANCION_COMPLIANCE.map((t) => <option key={t} value={t}>{t}</option>)}
         </select>
@@ -174,62 +174,62 @@ export default function SancionesPanel() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>Proveedor ID</label>
-                <input value={form.proveedor_id} onChange={(e) => setForm({ ...form, proveedor_id: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-none font-mono" style={inputStyle()} />
+                <input value={form.proveedor_id} onChange={(e) => setForm({ ...form, proveedor_id: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-hidden font-mono" style={inputStyle()} />
               </div>
               <div>
                 <label className="block text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>Tipo</label>
-                <select value={form.tipo} onChange={(e) => setForm({ ...form, tipo: e.target.value as SancionInput['tipo'] })} className="w-full h-8 rounded px-2 text-xs outline-none" style={inputStyle()}>
+                <select value={form.tipo} onChange={(e) => setForm({ ...form, tipo: e.target.value as SancionInput['tipo'] })} className="w-full h-8 rounded px-2 text-xs outline-hidden" style={inputStyle()}>
                   {TIPOS_SANCION_COMPLIANCE.map((t) => <option key={t} value={t}>{t}</option>)}
                 </select>
               </div>
             </div>
             <div>
               <label className="block text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>Motivo</label>
-              <textarea value={form.motivo} onChange={(e) => setForm({ ...form, motivo: e.target.value })} rows={2} className="w-full rounded px-2 py-1.5 text-xs outline-none resize-none" style={inputStyle()} />
+              <textarea value={form.motivo} onChange={(e) => setForm({ ...form, motivo: e.target.value })} rows={2} className="w-full rounded px-2 py-1.5 text-xs outline-hidden resize-none" style={inputStyle()} />
             </div>
             <div>
               <label className="block text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>Hechos (opcional)</label>
-              <textarea value={form.hechos} onChange={(e) => setForm({ ...form, hechos: e.target.value })} rows={2} className="w-full rounded px-2 py-1.5 text-xs outline-none resize-none" style={inputStyle()} />
+              <textarea value={form.hechos} onChange={(e) => setForm({ ...form, hechos: e.target.value })} rows={2} className="w-full rounded px-2 py-1.5 text-xs outline-hidden resize-none" style={inputStyle()} />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>Monto de multa (opcional)</label>
-                <input type="number" min={0} value={form.monto_multa ?? ''} onChange={(e) => setForm({ ...form, monto_multa: e.target.value ? Number(e.target.value) : undefined })} className="w-full h-8 rounded px-2 text-xs outline-none" style={inputStyle()} />
+                <input type="number" min={0} value={form.monto_multa ?? ''} onChange={(e) => setForm({ ...form, monto_multa: e.target.value ? Number(e.target.value) : undefined })} className="w-full h-8 rounded px-2 text-xs outline-hidden" style={inputStyle()} />
               </div>
               <div>
                 <label className="block text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>Expediente sancionador (opcional)</label>
-                <input value={form.expediente_sancionador} onChange={(e) => setForm({ ...form, expediente_sancionador: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-none font-mono" style={inputStyle()} />
+                <input value={form.expediente_sancionador} onChange={(e) => setForm({ ...form, expediente_sancionador: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-hidden font-mono" style={inputStyle()} />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>Fecha de audiencia (opcional)</label>
-                <input type="date" value={form.audiencia_fecha} onChange={(e) => setForm({ ...form, audiencia_fecha: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-none" style={inputStyle()} />
+                <input type="date" value={form.audiencia_fecha} onChange={(e) => setForm({ ...form, audiencia_fecha: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-hidden" style={inputStyle()} />
               </div>
               <div />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>Vigencia inicio (opcional)</label>
-                <input type="date" value={form.vigencia_inicio} onChange={(e) => setForm({ ...form, vigencia_inicio: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-none" style={inputStyle()} />
+                <input type="date" value={form.vigencia_inicio} onChange={(e) => setForm({ ...form, vigencia_inicio: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-hidden" style={inputStyle()} />
               </div>
               <div>
                 <label className="block text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>Vigencia fin (opcional)</label>
-                <input type="date" value={form.vigencia_fin} onChange={(e) => setForm({ ...form, vigencia_fin: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-none" style={inputStyle()} />
+                <input type="date" value={form.vigencia_fin} onChange={(e) => setForm({ ...form, vigencia_fin: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-hidden" style={inputStyle()} />
               </div>
             </div>
             <div>
               <label className="block text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>Resolución (opcional)</label>
-              <textarea value={form.resolucion} onChange={(e) => setForm({ ...form, resolucion: e.target.value })} rows={2} className="w-full rounded px-2 py-1.5 text-xs outline-none resize-none" style={inputStyle()} />
+              <textarea value={form.resolucion} onChange={(e) => setForm({ ...form, resolucion: e.target.value })} rows={2} className="w-full rounded px-2 py-1.5 text-xs outline-hidden resize-none" style={inputStyle()} />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>Expediente relacionado (opcional)</label>
-                <input value={form.expediente_id} onChange={(e) => setForm({ ...form, expediente_id: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-none font-mono" style={inputStyle()} />
+                <input value={form.expediente_id} onChange={(e) => setForm({ ...form, expediente_id: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-hidden font-mono" style={inputStyle()} />
               </div>
               <div>
                 <label className="block text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>Licitación relacionada (opcional)</label>
-                <input value={form.licitacion_id} onChange={(e) => setForm({ ...form, licitacion_id: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-none font-mono" style={inputStyle()} />
+                <input value={form.licitacion_id} onChange={(e) => setForm({ ...form, licitacion_id: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-hidden font-mono" style={inputStyle()} />
               </div>
             </div>
             <button

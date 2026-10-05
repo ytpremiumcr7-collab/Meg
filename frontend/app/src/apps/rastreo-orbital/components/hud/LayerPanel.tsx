@@ -17,7 +17,7 @@ export default function LayerPanel({ counts, visible, onToggle }: LayerPanelProp
           <button
             key={g.key}
             onClick={() => onToggle(i)}
-            className={`flex min-h-[32px] w-full items-center gap-2.5 rounded-md px-2 py-1 text-left transition-opacity hover:bg-white/[0.05] ${
+            className={`flex min-h-[32px] w-full items-center gap-2.5 rounded-md px-2 py-1 text-left transition-opacity hover:bg-white/5 ${
               visible[i] ? '' : 'opacity-35'
             }`}
           >

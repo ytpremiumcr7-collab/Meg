@@ -239,14 +239,14 @@ export default function LevantamientoPanel({
           <select
             value={activo?.id || ''}
             onChange={(e) => setActivo(levantamientos.find((l) => l.id === e.target.value) || null)}
-            className="w-full h-8 rounded px-2 text-xs outline-none mb-2"
+            className="w-full h-8 rounded px-2 text-xs outline-hidden mb-2"
             style={{ background: 'var(--surface-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
           >
             <option value="">— seleccionar —</option>
             {levantamientos.map((l) => <option key={l.id} value={l.id}>{l.nombre}</option>)}
           </select>
           <div className="flex gap-1.5">
-            <input value={nombreNuevo} onChange={(e) => setNombreNuevo(e.target.value)} placeholder="Nombre nuevo levantamiento" className="flex-1 h-8 rounded px-2 text-xs outline-none" style={{ background: 'var(--surface-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }} />
+            <input value={nombreNuevo} onChange={(e) => setNombreNuevo(e.target.value)} placeholder="Nombre nuevo levantamiento" className="flex-1 h-8 rounded px-2 text-xs outline-hidden" style={{ background: 'var(--surface-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }} />
             <button onClick={() => void crearLevantamiento()} disabled={!nombreNuevo.trim()} className="h-8 w-8 flex items-center justify-center rounded disabled:opacity-40" style={{ background: 'var(--accent-gold)', color: 'var(--void)' }}><Plus size={14} /></button>
           </div>
         </div>
@@ -278,16 +278,16 @@ export default function LevantamientoPanel({
         {superficies.length > 0 && (
           <div>
             <p className="text-[11px] font-semibold mb-1.5 flex items-center gap-1.5" style={{ color: 'var(--text-muted)' }}><Calculator size={11} /> VOLUMEN CORTE/RELLENO</p>
-            <select value={superficieA} onChange={(e) => setSuperficieA(e.target.value)} className="w-full h-8 rounded px-2 text-xs outline-none mb-1.5" style={{ background: 'var(--surface-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}>
+            <select value={superficieA} onChange={(e) => setSuperficieA(e.target.value)} className="w-full h-8 rounded px-2 text-xs outline-hidden mb-1.5" style={{ background: 'var(--surface-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}>
               <option value="">Superficie existente</option>
               {superficies.map((s) => <option key={s.id} value={s.id}>{s.nombre}</option>)}
             </select>
-            <select value={superficieB} onChange={(e) => setSuperficieB(e.target.value)} className="w-full h-8 rounded px-2 text-xs outline-none mb-1.5" style={{ background: 'var(--surface-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}>
+            <select value={superficieB} onChange={(e) => setSuperficieB(e.target.value)} className="w-full h-8 rounded px-2 text-xs outline-hidden mb-1.5" style={{ background: 'var(--surface-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}>
               <option value="">Superficie de proyecto (opcional)</option>
               {superficies.map((s) => <option key={s.id} value={s.id}>{s.nombre}</option>)}
             </select>
             {!superficieB && (
-              <input value={elevacionRef} onChange={(e) => setElevacionRef(e.target.value)} type="number" placeholder="o elevación de referencia (m)" className="w-full h-8 rounded px-2 text-xs outline-none mb-1.5" style={{ background: 'var(--surface-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }} />
+              <input value={elevacionRef} onChange={(e) => setElevacionRef(e.target.value)} type="number" placeholder="o elevación de referencia (m)" className="w-full h-8 rounded px-2 text-xs outline-hidden mb-1.5" style={{ background: 'var(--surface-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }} />
             )}
             <button onClick={() => void calcularVolumen()} disabled={calculando || !superficieA || (!superficieB && !elevacionRef)} className="w-full h-8 rounded text-xs font-medium flex items-center justify-center gap-1.5 disabled:opacity-40" style={{ background: 'var(--accent-gold)', color: 'var(--void)' }}>
               {calculando ? <Loader2 size={12} className="animate-spin" /> : <Calculator size={12} />} Calcular
@@ -300,18 +300,18 @@ export default function LevantamientoPanel({
                 <div className="grid grid-cols-3 gap-1 pt-1.5">
                   <label className="space-y-0.5">
                     <span style={{ color: 'var(--text-muted)' }}>Indirectos %</span>
-                    <input type="number" min="0" max="100" step="0.01" value={factorIndirecto * 100} onChange={(e) => setFactorIndirecto(Number(e.target.value) / 100)} className="w-full h-7 rounded px-1.5 outline-none" style={{ background: 'var(--surface-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }} />
+                    <input type="number" min="0" max="100" step="0.01" value={factorIndirecto * 100} onChange={(e) => setFactorIndirecto(Number(e.target.value) / 100)} className="w-full h-7 rounded px-1.5 outline-hidden" style={{ background: 'var(--surface-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }} />
                   </label>
                   <label className="space-y-0.5">
                     <span style={{ color: 'var(--text-muted)' }}>Utilidad %</span>
-                    <input type="number" min="0" max="100" step="0.01" value={factorUtilidad * 100} onChange={(e) => setFactorUtilidad(Number(e.target.value) / 100)} className="w-full h-7 rounded px-1.5 outline-none" style={{ background: 'var(--surface-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }} />
+                    <input type="number" min="0" max="100" step="0.01" value={factorUtilidad * 100} onChange={(e) => setFactorUtilidad(Number(e.target.value) / 100)} className="w-full h-7 rounded px-1.5 outline-hidden" style={{ background: 'var(--surface-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }} />
                   </label>
                   <label className="space-y-0.5">
                     <span style={{ color: 'var(--text-muted)' }}>Impuesto %</span>
-                    <input type="number" min="0" max="100" step="0.01" value={factorImpuesto * 100} onChange={(e) => setFactorImpuesto(Number(e.target.value) / 100)} className="w-full h-7 rounded px-1.5 outline-none" style={{ background: 'var(--surface-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }} />
+                    <input type="number" min="0" max="100" step="0.01" value={factorImpuesto * 100} onChange={(e) => setFactorImpuesto(Number(e.target.value) / 100)} className="w-full h-7 rounded px-1.5 outline-hidden" style={{ background: 'var(--surface-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }} />
                   </label>
                 </div>
-                <input value={referenciaParametros} onChange={(e) => setReferenciaParametros(e.target.value)} placeholder="Fuente o referencia de los parámetros" className="w-full h-7 rounded px-2 outline-none" style={{ background: 'var(--surface-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }} />
+                <input value={referenciaParametros} onChange={(e) => setReferenciaParametros(e.target.value)} placeholder="Fuente o referencia de los parámetros" className="w-full h-7 rounded px-2 outline-hidden" style={{ background: 'var(--surface-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }} />
                 <button onClick={() => void generarPresupuesto()} disabled={!referenciaParametros.trim()} className="w-full mt-1.5 h-7 rounded text-[11px] disabled:opacity-40" style={{ border: '1px solid var(--border-active)', color: 'var(--text-secondary)' }}>Generar presupuesto de movimiento de tierras</button>
                 {mensajePresupuesto && <p style={{ color: 'var(--text-muted)' }}>{mensajePresupuesto}</p>}
               </div>

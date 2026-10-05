@@ -213,7 +213,7 @@ export default function LeglConsultorApp() {
               onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && enviarMensaje()}
               placeholder="Pregúntame cualquier cosa legal..."
               className="flex-1 bg-transparent text-sm text-zinc-100 placeholder-zinc-600 
-                       focus:outline-none"
+                       focus:outline-hidden"
             />
             <button
               onClick={() => enviarMensaje()}

@@ -93,7 +93,7 @@ function NuevoExpedienteForm({ onClose }: { onClose: () => void }) {
                 value={form[campo.key] || ''}
                 onChange={(e) => set(campo.key, e.target.value)}
                 placeholder={campo.placeholder}
-                className="w-full h-9 bg-[#0A0A0F] border border-[#2A2A3E] rounded-md px-3 text-sm text-[#E8E4DC] outline-none focus:border-[#C9A84C]"
+                className="w-full h-9 bg-[#0A0A0F] border border-[#2A2A3E] rounded-md px-3 text-sm text-[#E8E4DC] outline-hidden focus:border-[#C9A84C]"
               />
             </div>
           ))}
@@ -106,7 +106,7 @@ function NuevoExpedienteForm({ onClose }: { onClose: () => void }) {
                 value={monto}
                 onChange={(e) => setMonto(e.target.value)}
                 placeholder="0.00"
-                className="w-full h-9 bg-[#0A0A0F] border border-[#2A2A3E] rounded-md px-3 text-sm text-[#E8E4DC] outline-none focus:border-[#C9A84C]"
+                className="w-full h-9 bg-[#0A0A0F] border border-[#2A2A3E] rounded-md px-3 text-sm text-[#E8E4DC] outline-hidden focus:border-[#C9A84C]"
               />
             </div>
             <div>
@@ -116,7 +116,7 @@ function NuevoExpedienteForm({ onClose }: { onClose: () => void }) {
                 value={plazo}
                 onChange={(e) => setPlazo(e.target.value)}
                 placeholder="0"
-                className="w-full h-9 bg-[#0A0A0F] border border-[#2A2A3E] rounded-md px-3 text-sm text-[#E8E4DC] outline-none focus:border-[#C9A84C]"
+                className="w-full h-9 bg-[#0A0A0F] border border-[#2A2A3E] rounded-md px-3 text-sm text-[#E8E4DC] outline-hidden focus:border-[#C9A84C]"
               />
             </div>
           </div>
@@ -128,7 +128,7 @@ function NuevoExpedienteForm({ onClose }: { onClose: () => void }) {
                 value={form[campo.key] || ''}
                 onChange={(e) => set(campo.key, e.target.value)}
                 placeholder={campo.placeholder}
-                className="w-full h-9 bg-[#0A0A0F] border border-[#2A2A3E] rounded-md px-3 text-sm text-[#E8E4DC] outline-none focus:border-[#C9A84C]"
+                className="w-full h-9 bg-[#0A0A0F] border border-[#2A2A3E] rounded-md px-3 text-sm text-[#E8E4DC] outline-hidden focus:border-[#C9A84C]"
               />
             </div>
           ))}
@@ -185,7 +185,7 @@ export default function Proyectos() {
 
         {error && (
           <div className="flex items-center gap-2 text-sm text-[#B84A4A] bg-[#B84A4A]/10 border border-[#B84A4A]/30 rounded-md p-3 mb-3">
-            <AlertCircle className="w-4 h-4 flex-shrink-0" /> {error}
+            <AlertCircle className="w-4 h-4 shrink-0" /> {error}
           </div>
         )}
 
@@ -212,7 +212,7 @@ export default function Proyectos() {
               >
                 <div className="flex items-start justify-between gap-2 mb-1.5">
                   <span className="text-[10px] font-mono text-[#8A8578]">{exp.identificador}</span>
-                  {activo && <CheckCircle2 className="w-4 h-4 text-[#C9A84C] flex-shrink-0" />}
+                  {activo && <CheckCircle2 className="w-4 h-4 text-[#C9A84C] shrink-0" />}
                 </div>
                 <h4 className="text-sm font-medium text-[#E8E4DC] mb-2 line-clamp-2">{exp.titulo}</h4>
                 <div className="flex items-center gap-3 text-[11px] text-[#8A8578]">

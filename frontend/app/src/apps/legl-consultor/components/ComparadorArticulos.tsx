@@ -56,7 +56,7 @@ export default function ComparadorArticulos() {
           onKeyDown={(e) => e.key === 'Enter' && comparar()}
           placeholder="Número de artículo (ej: 40)"
           className="flex-1 bg-zinc-800/60 border border-zinc-700 rounded-lg px-3 py-2 text-sm 
-                   text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-amber-500/40"
+                   text-zinc-200 placeholder-zinc-600 focus:outline-hidden focus:border-amber-500/40"
         />
         <button
           onClick={comparar}

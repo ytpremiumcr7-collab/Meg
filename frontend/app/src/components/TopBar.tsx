@@ -51,7 +51,7 @@ export default function TopBar({ title }: TopBarProps) {
       <div className="flex items-center gap-4">
         <button
           onClick={openPalette}
-          className="hidden sm:flex items-center gap-2.5 pl-3 pr-2.5 py-1.5 rounded-lg text-[12px] transition-colors hover:border-[color:var(--border-active)]"
+          className="hidden sm:flex items-center gap-2.5 pl-3 pr-2.5 py-1.5 rounded-lg text-[12px] transition-colors hover:border-(--border-active)"
           style={{ background: 'var(--surface-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-secondary)' }}
         >
           <Search className="w-3.5 h-3.5" />
@@ -74,7 +74,7 @@ export default function TopBar({ title }: TopBarProps) {
         <div className="relative">
           <button
             onClick={() => setNotifOpen((v) => !v)}
-            className="relative p-1.5 rounded-md hover:bg-[color:var(--surface-hover)] transition-colors"
+            className="relative p-1.5 rounded-md hover:bg-(--surface-hover) transition-colors"
             aria-label="Notificaciones"
           >
             <Bell className="w-[18px] h-[18px]" style={{ color: 'var(--text-secondary)' }} />
@@ -97,7 +97,7 @@ export default function TopBar({ title }: TopBarProps) {
         <div className="relative">
           <button
             onClick={() => setMenuOpen((v) => !v)}
-            className="flex items-center gap-2 pl-1 pr-2 py-1 rounded-md hover:bg-[color:var(--surface-hover)] transition-colors"
+            className="flex items-center gap-2 pl-1 pr-2 py-1 rounded-md hover:bg-(--surface-hover) transition-colors"
           >
             <div
               className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-semibold"
@@ -119,7 +119,7 @@ export default function TopBar({ title }: TopBarProps) {
             >
               <button
                 onClick={() => { setMenuOpen(false); logout(); }}
-                className="flex items-center gap-2.5 w-full px-3.5 py-2 text-[12.5px] hover:bg-[color:var(--surface-hover)] transition-colors"
+                className="flex items-center gap-2.5 w-full px-3.5 py-2 text-[12.5px] hover:bg-(--surface-hover) transition-colors"
                 style={{ color: 'var(--text-primary)' }}
               >
                 <LogOut className="w-3.5 h-3.5" />

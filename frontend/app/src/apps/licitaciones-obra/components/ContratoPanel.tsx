@@ -48,7 +48,7 @@ function fecha(iso?: string | null): string {
   try { return new Date(iso).toLocaleDateString('es-MX'); } catch { return iso; }
 }
 function inputCls(): string {
-  return 'w-full rounded-lg bg-zinc-950 border border-zinc-800 px-3 py-2 text-sm outline-none focus:border-orange-500/50';
+  return 'w-full rounded-lg bg-zinc-950 border border-zinc-800 px-3 py-2 text-sm outline-hidden focus:border-orange-500/50';
 }
 
 function Metric({ l, v, tone }: { l: string; v: string; tone?: string }) {

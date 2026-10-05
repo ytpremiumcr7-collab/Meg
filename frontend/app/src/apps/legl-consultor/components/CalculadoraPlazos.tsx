@@ -110,7 +110,7 @@ export default function CalculadoraPlazos() {
             onChange={(e) => setMonto(e.target.value)}
             placeholder="Ej: 5000000"
             className="w-full bg-zinc-800/60 border border-zinc-700 rounded-lg px-3 py-2 text-sm 
-                     text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-cyan-500/40"
+                     text-zinc-200 placeholder-zinc-600 focus:outline-hidden focus:border-cyan-500/40"
           />
         </div>
         <div>
@@ -120,7 +120,7 @@ export default function CalculadoraPlazos() {
             value={fechaInicio}
             onChange={(e) => setFechaInicio(e.target.value)}
             className="w-full bg-zinc-800/60 border border-zinc-700 rounded-lg px-3 py-2 text-sm 
-                     text-zinc-200 focus:outline-none focus:border-cyan-500/40"
+                     text-zinc-200 focus:outline-hidden focus:border-cyan-500/40"
           />
         </div>
         <div>
@@ -134,7 +134,7 @@ export default function CalculadoraPlazos() {
             placeholder="Ej: 45000"
             title="El Anexo 9 del PEF es una tabla escalonada por este dato, no por el monto del contrato aislado."
             className="w-full bg-zinc-800/60 border border-zinc-700 rounded-lg px-3 py-2 text-sm 
-                     text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-cyan-500/40"
+                     text-zinc-200 placeholder-zinc-600 focus:outline-hidden focus:border-cyan-500/40"
           />
         </div>
         <button

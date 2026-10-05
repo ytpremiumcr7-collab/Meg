@@ -90,11 +90,11 @@ export default function ReglasPanel() {
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-2 px-3 py-2 flex-wrap" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-        <select value={filtroEtapa} onChange={(e) => setFiltroEtapa(e.target.value)} className="h-8 rounded px-2 text-xs outline-none" style={inputStyle()}>
+        <select value={filtroEtapa} onChange={(e) => setFiltroEtapa(e.target.value)} className="h-8 rounded px-2 text-xs outline-hidden" style={inputStyle()}>
           <option value="">Todas las etapas</option>
           {ETAPAS_COMPLIANCE.map((e) => <option key={e} value={e}>{e}</option>)}
         </select>
-        <select value={filtroActiva} onChange={(e) => setFiltroActiva(e.target.value)} className="h-8 rounded px-2 text-xs outline-none" style={inputStyle()}>
+        <select value={filtroActiva} onChange={(e) => setFiltroActiva(e.target.value)} className="h-8 rounded px-2 text-xs outline-hidden" style={inputStyle()}>
           <option value="">Activas e inactivas</option>
           <option value="true">Sólo activas</option>
           <option value="false">Sólo inactivas</option>
@@ -148,29 +148,29 @@ export default function ReglasPanel() {
             </div>
             <div>
               <label className="block text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>Nombre</label>
-              <input value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-none" style={inputStyle()} />
+              <input value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-hidden" style={inputStyle()} />
             </div>
             <div>
               <label className="block text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>Descripción</label>
-              <textarea value={form.descripcion} onChange={(e) => setForm({ ...form, descripcion: e.target.value })} rows={2} className="w-full rounded px-2 py-1.5 text-xs outline-none resize-none" style={inputStyle()} />
+              <textarea value={form.descripcion} onChange={(e) => setForm({ ...form, descripcion: e.target.value })} rows={2} className="w-full rounded px-2 py-1.5 text-xs outline-hidden resize-none" style={inputStyle()} />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>Tipo de procedimiento</label>
-                <select value={form.tipo_procedimiento} onChange={(e) => setForm({ ...form, tipo_procedimiento: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-none" style={inputStyle()}>
+                <select value={form.tipo_procedimiento} onChange={(e) => setForm({ ...form, tipo_procedimiento: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-hidden" style={inputStyle()}>
                   {TIPOS_PROCEDIMIENTO_COMPLIANCE.map((t) => <option key={t} value={t}>{t}</option>)}
                 </select>
               </div>
               <div>
                 <label className="block text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>Etapa</label>
-                <select value={form.etapa} onChange={(e) => setForm({ ...form, etapa: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-none" style={inputStyle()}>
+                <select value={form.etapa} onChange={(e) => setForm({ ...form, etapa: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-hidden" style={inputStyle()}>
                   {ETAPAS_COMPLIANCE.map((et) => <option key={et} value={et}>{et}</option>)}
                 </select>
               </div>
             </div>
             <div>
               <label className="block text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>Condición de evaluación (opcional)</label>
-              <input value={form.condicion_evaluacion} onChange={(e) => setForm({ ...form, condicion_evaluacion: e.target.value })} placeholder="p. ej. estado == 'CONVOCATORIA' AND fecha IS NOT NULL" className="w-full h-8 rounded px-2 text-xs outline-none font-mono" style={inputStyle()} />
+              <input value={form.condicion_evaluacion} onChange={(e) => setForm({ ...form, condicion_evaluacion: e.target.value })} placeholder="p. ej. estado == 'CONVOCATORIA' AND fecha IS NOT NULL" className="w-full h-8 rounded px-2 text-xs outline-hidden font-mono" style={inputStyle()} />
             </div>
             <div className="flex items-center gap-4">
               <label className="flex items-center gap-2 text-xs" style={{ color: 'var(--text-secondary)' }}>

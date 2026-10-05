@@ -87,7 +87,7 @@ export default function DetailPanel({
       {telemetry ? (
         <div className="mt-3 grid grid-cols-2 gap-1.5 px-4">
           {metrics.map(([k, v]) => (
-            <div key={k} className="rounded-lg border border-white/[0.07] bg-white/[0.03] px-2.5 py-2">
+            <div key={k} className="rounded-lg border border-white/[0.07] bg-white/3 px-2.5 py-2">
               <div className="font-mono text-[9px] uppercase tracking-[0.18em] text-slate-500">
                 {k}
               </div>

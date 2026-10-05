@@ -326,7 +326,7 @@ export default function Home() {
       {/* hover tooltip */}
       {hover && tooltipPos && hoverSat && (
         <div
-          className="pointer-events-none fixed z-30 flex max-w-[180px] items-center gap-1.5 truncate rounded-md border border-white/10 bg-[#0b0f16]/90 px-2.5 py-1 backdrop-blur-sm"
+          className="pointer-events-none fixed z-30 flex max-w-[180px] items-center gap-1.5 truncate rounded-md border border-white/10 bg-[#0b0f16]/90 px-2.5 py-1 backdrop-blur-xs"
           style={tooltipPos}
         >
           <span

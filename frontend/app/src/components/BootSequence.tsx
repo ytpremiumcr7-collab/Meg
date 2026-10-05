@@ -69,7 +69,7 @@ export default function BootSequence() {
   return (
     <AnimatePresence>
       {!fadeOut && (
-        <motion.div exit={{ opacity: 0 }} transition={{ duration: 0.35 }} className="fixed inset-0 z-[50000] bg-[#030305] flex flex-col items-start justify-center" style={{ paddingLeft: '15%' }}>
+        <motion.div exit={{ opacity: 0 }} transition={{ duration: 0.35 }} className="fixed inset-0 z-50000 bg-[#030305] flex flex-col items-start justify-center" style={{ paddingLeft: '15%' }}>
           <div className="max-w-[780px] w-full">
             <div className="font-mono text-sm space-y-1.5 min-h-[240px]">
               {checks.map((check) => (
@@ -79,7 +79,7 @@ export default function BootSequence() {
                   </span>
                   <div>
                     <div className="text-[#8A8578]">{check.name}</div>
-                    {check.detail && <div className="text-[11px] text-[#D45A5A] max-w-[680px] break-words">{check.detail}</div>}
+                    {check.detail && <div className="text-[11px] text-[#D45A5A] max-w-[680px] wrap-break-word">{check.detail}</div>}
                   </div>
                 </div>
               ))}

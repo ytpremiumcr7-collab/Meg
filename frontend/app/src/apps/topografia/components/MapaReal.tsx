@@ -278,7 +278,7 @@ export default function MapaReal({
               value={fechaNasa}
               max={ayer()}
               onChange={(e) => setFechaNasa(e.target.value)}
-              className="text-[10px] bg-transparent outline-none"
+              className="text-[10px] bg-transparent outline-hidden"
               style={{ color: 'var(--text-secondary)', colorScheme: 'dark' }}
             />
           </div>

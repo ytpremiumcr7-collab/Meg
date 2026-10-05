@@ -60,30 +60,30 @@ export default function PerfilPanel({ superficies, levantamiento }: { superficie
     <div className="h-full overflow-auto p-4">
       <div className="max-w-3xl mx-auto space-y-4">
         <div className="flex items-center gap-2 flex-wrap">
-          <select value={superficieId} onChange={(e) => setSuperficieId(e.target.value)} className="h-8 rounded px-2 text-xs outline-none" style={inputCls()}>
+          <select value={superficieId} onChange={(e) => setSuperficieId(e.target.value)} className="h-8 rounded px-2 text-xs outline-hidden" style={inputCls()}>
             <option value="">Superficie</option>
             {superficies.map((s) => <option key={s.id} value={s.id}>{s.nombre}</option>)}
           </select>
 
           {!manual && puntos.length >= 2 ? (
             <>
-              <select value={puntoInicioId} onChange={(e) => setPuntoInicioId(e.target.value)} className="h-8 rounded px-2 text-xs outline-none" style={inputCls()}>
+              <select value={puntoInicioId} onChange={(e) => setPuntoInicioId(e.target.value)} className="h-8 rounded px-2 text-xs outline-hidden" style={inputCls()}>
                 <option value="">Punto inicio</option>
                 {puntos.map((p) => <option key={p.id} value={p.id}>{p.identificador}{p.etiqueta ? ` · ${p.etiqueta}` : ''}</option>)}
               </select>
               <span style={{ color: 'var(--text-muted)' }}>→</span>
-              <select value={puntoFinId} onChange={(e) => setPuntoFinId(e.target.value)} className="h-8 rounded px-2 text-xs outline-none" style={inputCls()}>
+              <select value={puntoFinId} onChange={(e) => setPuntoFinId(e.target.value)} className="h-8 rounded px-2 text-xs outline-hidden" style={inputCls()}>
                 <option value="">Punto fin</option>
                 {puntos.map((p) => <option key={p.id} value={p.id}>{p.identificador}{p.etiqueta ? ` · ${p.etiqueta}` : ''}</option>)}
               </select>
             </>
           ) : (
             <>
-              <input value={eje.x1} onChange={(e) => setEje({ ...eje, x1: e.target.value })} type="number" placeholder="X inicio" className="w-24 h-8 rounded px-2 text-xs outline-none font-mono" style={inputCls()} />
-              <input value={eje.y1} onChange={(e) => setEje({ ...eje, y1: e.target.value })} type="number" placeholder="Y inicio" className="w-24 h-8 rounded px-2 text-xs outline-none font-mono" style={inputCls()} />
+              <input value={eje.x1} onChange={(e) => setEje({ ...eje, x1: e.target.value })} type="number" placeholder="X inicio" className="w-24 h-8 rounded px-2 text-xs outline-hidden font-mono" style={inputCls()} />
+              <input value={eje.y1} onChange={(e) => setEje({ ...eje, y1: e.target.value })} type="number" placeholder="Y inicio" className="w-24 h-8 rounded px-2 text-xs outline-hidden font-mono" style={inputCls()} />
               <span style={{ color: 'var(--text-muted)' }}>→</span>
-              <input value={eje.x2} onChange={(e) => setEje({ ...eje, x2: e.target.value })} type="number" placeholder="X fin" className="w-24 h-8 rounded px-2 text-xs outline-none font-mono" style={inputCls()} />
-              <input value={eje.y2} onChange={(e) => setEje({ ...eje, y2: e.target.value })} type="number" placeholder="Y fin" className="w-24 h-8 rounded px-2 text-xs outline-none font-mono" style={inputCls()} />
+              <input value={eje.x2} onChange={(e) => setEje({ ...eje, x2: e.target.value })} type="number" placeholder="X fin" className="w-24 h-8 rounded px-2 text-xs outline-hidden font-mono" style={inputCls()} />
+              <input value={eje.y2} onChange={(e) => setEje({ ...eje, y2: e.target.value })} type="number" placeholder="Y fin" className="w-24 h-8 rounded px-2 text-xs outline-hidden font-mono" style={inputCls()} />
             </>
           )}
           {puntos.length >= 2 && (
@@ -91,7 +91,7 @@ export default function PerfilPanel({ superficies, levantamiento }: { superficie
               {manual ? 'usar puntos del levantamiento' : 'coordenadas manuales'}
             </button>
           )}
-          <input value={intervalo} onChange={(e) => setIntervalo(e.target.value)} type="number" placeholder="Δ muestreo (m)" className="w-28 h-8 rounded px-2 text-xs outline-none font-mono" style={inputCls()} />
+          <input value={intervalo} onChange={(e) => setIntervalo(e.target.value)} type="number" placeholder="Δ muestreo (m)" className="w-28 h-8 rounded px-2 text-xs outline-hidden font-mono" style={inputCls()} />
           <button onClick={() => void generar()} disabled={!listo || cargando} className="flex items-center gap-1.5 h-8 px-3 rounded text-xs font-semibold disabled:opacity-40" style={{ background: 'var(--accent-gold)', color: 'var(--void)' }}>
             {cargando ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />} Generar
           </button>

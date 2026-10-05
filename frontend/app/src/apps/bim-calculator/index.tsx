@@ -1219,7 +1219,7 @@ export default function BIMCalculator() {
                   <select
                     value={el.type}
                     onChange={(e) => updateElement(el.id, { type: e.target.value as ElementType })}
-                    className="w-full bg-transparent outline-none font-medium"
+                    className="w-full bg-transparent outline-hidden font-medium"
                     style={{ color: 'var(--text-primary)' }}
                   >
                     {ELEMENT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
@@ -1229,7 +1229,7 @@ export default function BIMCalculator() {
                   <select
                     value={el.material}
                     onChange={(e) => updateElement(el.id, { material: e.target.value as Material })}
-                    className="w-full bg-transparent outline-none"
+                    className="w-full bg-transparent outline-hidden"
                     style={{ color: 'var(--text-secondary)' }}
                   >
                     {MATERIALS.map((m) => <option key={m} value={m}>{m}</option>)}
@@ -1241,7 +1241,7 @@ export default function BIMCalculator() {
                       type="number"
                       value={el[field]}
                       onChange={(e) => updateElement(el.id, { [field]: Number(e.target.value) })}
-                      className="w-full bg-transparent font-mono outline-none"
+                      className="w-full bg-transparent font-mono outline-hidden"
                       style={{ color: 'var(--text-primary)' }}
                       step={field === 'quantity' ? 1 : 0.01}
                     />

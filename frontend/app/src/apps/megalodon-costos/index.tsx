@@ -369,7 +369,7 @@ function BudgetGrid() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Buscar concepto..."
-            className="bg-[#12121A] border border-[#2A2A3E] rounded px-2 py-1 text-xs text-[#E8E4DC] placeholder:text-[#4D4A42] focus:border-[#C9A84C] outline-none w-48"
+            className="bg-[#12121A] border border-[#2A2A3E] rounded px-2 py-1 text-xs text-[#E8E4DC] placeholder:text-[#4D4A42] focus:border-[#C9A84C] outline-hidden w-48"
           />
         </div>
       </div>
@@ -423,12 +423,12 @@ function BudgetGrid() {
       {/* Add form */}
       {showAddForm && (
         <div className="p-3 bg-[#1A1A26] border-b border-[#2A2A3E] grid grid-cols-6 gap-2">
-          <input placeholder="Clave" value={newLine.conceptKey} onChange={(e) => setNewLine({ ...newLine, conceptKey: e.target.value })} className="bg-[#12121A] border border-[#2A2A3E] rounded px-2 py-1 text-xs text-[#E8E4DC] focus:border-[#C9A84C] outline-none" />
-          <input placeholder="Descripción" value={newLine.description} onChange={(e) => setNewLine({ ...newLine, description: e.target.value })} className="bg-[#12121A] border border-[#2A2A3E] rounded px-2 py-1 text-xs text-[#E8E4DC] focus:border-[#C9A84C] outline-none col-span-2" />
-          <input placeholder="Unidad" value={newLine.unit} onChange={(e) => setNewLine({ ...newLine, unit: e.target.value })} className="bg-[#12121A] border border-[#2A2A3E] rounded px-2 py-1 text-xs text-[#E8E4DC] focus:border-[#C9A84C] outline-none" />
-          <input type="number" placeholder="Cantidad" value={newLine.quantity || ''} onChange={(e) => setNewLine({ ...newLine, quantity: parseFloat(e.target.value) || 0 })} className="bg-[#12121A] border border-[#2A2A3E] rounded px-2 py-1 text-xs text-[#E8E4DC] focus:border-[#C9A84C] outline-none" />
+          <input placeholder="Clave" value={newLine.conceptKey} onChange={(e) => setNewLine({ ...newLine, conceptKey: e.target.value })} className="bg-[#12121A] border border-[#2A2A3E] rounded px-2 py-1 text-xs text-[#E8E4DC] focus:border-[#C9A84C] outline-hidden" />
+          <input placeholder="Descripción" value={newLine.description} onChange={(e) => setNewLine({ ...newLine, description: e.target.value })} className="bg-[#12121A] border border-[#2A2A3E] rounded px-2 py-1 text-xs text-[#E8E4DC] focus:border-[#C9A84C] outline-hidden col-span-2" />
+          <input placeholder="Unidad" value={newLine.unit} onChange={(e) => setNewLine({ ...newLine, unit: e.target.value })} className="bg-[#12121A] border border-[#2A2A3E] rounded px-2 py-1 text-xs text-[#E8E4DC] focus:border-[#C9A84C] outline-hidden" />
+          <input type="number" placeholder="Cantidad" value={newLine.quantity || ''} onChange={(e) => setNewLine({ ...newLine, quantity: parseFloat(e.target.value) || 0 })} className="bg-[#12121A] border border-[#2A2A3E] rounded px-2 py-1 text-xs text-[#E8E4DC] focus:border-[#C9A84C] outline-hidden" />
           <div className="flex items-center gap-1">
-            <input type="number" placeholder="Precio unitario" value={newLine.unitPrice || ''} onChange={(e) => setNewLine({ ...newLine, unitPrice: parseFloat(e.target.value) || 0 })} className="bg-[#12121A] border border-[#2A2A3E] rounded px-2 py-1 text-xs text-[#E8E4DC] focus:border-[#C9A84C] outline-none flex-1" />
+            <input type="number" placeholder="Precio unitario" value={newLine.unitPrice || ''} onChange={(e) => setNewLine({ ...newLine, unitPrice: parseFloat(e.target.value) || 0 })} className="bg-[#12121A] border border-[#2A2A3E] rounded px-2 py-1 text-xs text-[#E8E4DC] focus:border-[#C9A84C] outline-hidden flex-1" />
             <button onClick={addLine} className="px-2 py-1 bg-[#5A9E6F] text-[#030305] text-xs font-semibold rounded hover:bg-[#6AAF7F]"><Plus className="w-3 h-3" /></button>
           </div>
         </div>
@@ -638,11 +638,11 @@ function ValidationPanel() {
       <div className="grid grid-cols-4 gap-3">
         <div>
           <label className="text-[10px] uppercase text-[#8A8578] block mb-1">RFC</label>
-          <input value={inputs.rfc} onChange={(e) => update('rfc', e.target.value)} className="w-full bg-[#12121A] border border-[#2A2A3E] rounded px-2 py-1 text-xs text-[#E8E4DC] focus:border-[#C9A84C] outline-none font-mono" />
+          <input value={inputs.rfc} onChange={(e) => update('rfc', e.target.value)} className="w-full bg-[#12121A] border border-[#2A2A3E] rounded px-2 py-1 text-xs text-[#E8E4DC] focus:border-[#C9A84C] outline-hidden font-mono" />
         </div>
         <div>
           <label className="text-[10px] uppercase text-[#8A8578] block mb-1">Opinión SAT</label>
-          <select value={inputs.opinionSAT} onChange={(e) => update('opinionSAT', e.target.value)} className="w-full bg-[#12121A] border border-[#2A2A3E] rounded px-2 py-1 text-xs text-[#E8E4DC] focus:border-[#C9A84C] outline-none">
+          <select value={inputs.opinionSAT} onChange={(e) => update('opinionSAT', e.target.value)} className="w-full bg-[#12121A] border border-[#2A2A3E] rounded px-2 py-1 text-xs text-[#E8E4DC] focus:border-[#C9A84C] outline-hidden">
             <option>POSITIVO</option>
             <option>EXTRAVIADA</option>
             <option>NEGATIVO</option>
@@ -651,14 +651,14 @@ function ValidationPanel() {
         </div>
         <div>
           <label className="text-[10px] uppercase text-[#8A8578] block mb-1">IMSS</label>
-          <select value={inputs.imssStatus} onChange={(e) => update('imssStatus', e.target.value)} className="w-full bg-[#12121A] border border-[#2A2A3E] rounded px-2 py-1 text-xs text-[#E8E4DC] focus:border-[#C9A84C] outline-none">
+          <select value={inputs.imssStatus} onChange={(e) => update('imssStatus', e.target.value)} className="w-full bg-[#12121A] border border-[#2A2A3E] rounded px-2 py-1 text-xs text-[#E8E4DC] focus:border-[#C9A84C] outline-hidden">
             <option>ACTIVO</option>
             <option>INACTIVO</option>
           </select>
         </div>
         <div>
           <label className="text-[10px] uppercase text-[#8A8578] block mb-1">INFONAVIT</label>
-          <select value={inputs.infonavitStatus} onChange={(e) => update('infonavitStatus', e.target.value)} className="w-full bg-[#12121A] border border-[#2A2A3E] rounded px-2 py-1 text-xs text-[#E8E4DC] focus:border-[#C9A84C] outline-none">
+          <select value={inputs.infonavitStatus} onChange={(e) => update('infonavitStatus', e.target.value)} className="w-full bg-[#12121A] border border-[#2A2A3E] rounded px-2 py-1 text-xs text-[#E8E4DC] focus:border-[#C9A84C] outline-hidden">
             <option>ACTIVO</option>
             <option>INACTIVO</option>
           </select>
@@ -668,41 +668,41 @@ function ValidationPanel() {
       <div className="grid grid-cols-4 gap-3">
         <div>
           <label className="text-[10px] uppercase text-[#8A8578] block mb-1">e.firma válida</label>
-          <select value={inputs.efirmaValid ? 'si' : 'no'} onChange={(e) => update('efirmaValid', e.target.value === 'si')} className="w-full bg-[#12121A] border border-[#2A2A3E] rounded px-2 py-1 text-xs text-[#E8E4DC] focus:border-[#C9A84C] outline-none">
+          <select value={inputs.efirmaValid ? 'si' : 'no'} onChange={(e) => update('efirmaValid', e.target.value === 'si')} className="w-full bg-[#12121A] border border-[#2A2A3E] rounded px-2 py-1 text-xs text-[#E8E4DC] focus:border-[#C9A84C] outline-hidden">
             <option value="si">Sí</option>
             <option value="no">No</option>
           </select>
         </div>
         <div>
           <label className="text-[10px] uppercase text-[#8A8578] block mb-1">Días vigencia e.firma</label>
-          <input type="number" value={inputs.efirmaExpiryDays} onChange={(e) => update('efirmaExpiryDays', parseInt(e.target.value) || 0)} className="w-full bg-[#12121A] border border-[#2A2A3E] rounded px-2 py-1 text-xs text-[#E8E4DC] focus:border-[#C9A84C] outline-none font-mono" />
+          <input type="number" value={inputs.efirmaExpiryDays} onChange={(e) => update('efirmaExpiryDays', parseInt(e.target.value) || 0)} className="w-full bg-[#12121A] border border-[#2A2A3E] rounded px-2 py-1 text-xs text-[#E8E4DC] focus:border-[#C9A84C] outline-hidden font-mono" />
         </div>
         <div>
           <label className="text-[10px] uppercase text-[#8A8578] block mb-1">Fracción SS (PS)</label>
-          <input type="number" step="0.001" value={inputs.fsrSeguridadSocial} onChange={(e) => update('fsrSeguridadSocial', parseFloat(e.target.value) || 0)} className="w-full bg-[#12121A] border border-[#2A2A3E] rounded px-2 py-1 text-xs text-[#E8E4DC] focus:border-[#C9A84C] outline-none font-mono" />
+          <input type="number" step="0.001" value={inputs.fsrSeguridadSocial} onChange={(e) => update('fsrSeguridadSocial', parseFloat(e.target.value) || 0)} className="w-full bg-[#12121A] border border-[#2A2A3E] rounded px-2 py-1 text-xs text-[#E8E4DC] focus:border-[#C9A84C] outline-hidden font-mono" />
         </div>
         <div>
           <label className="text-[10px] uppercase text-[#8A8578] block mb-1">Factor indirectos</label>
-          <input type="number" step="0.001" value={inputs.factorIndirectos} onChange={(e) => update('factorIndirectos', parseFloat(e.target.value) || 0)} className="w-full bg-[#12121A] border border-[#2A2A3E] rounded px-2 py-1 text-xs text-[#E8E4DC] focus:border-[#C9A84C] outline-none font-mono" />
+          <input type="number" step="0.001" value={inputs.factorIndirectos} onChange={(e) => update('factorIndirectos', parseFloat(e.target.value) || 0)} className="w-full bg-[#12121A] border border-[#2A2A3E] rounded px-2 py-1 text-xs text-[#E8E4DC] focus:border-[#C9A84C] outline-hidden font-mono" />
         </div>
       </div>
 
       <div className="grid grid-cols-4 gap-3">
         <div>
           <label className="text-[10px] uppercase text-[#8A8578] block mb-1">Días pagados (TP)</label>
-          <input type="number" value={inputs.fsrDiasPagados} onChange={(e) => update('fsrDiasPagados', parseInt(e.target.value) || 0)} className="w-full bg-[#12121A] border border-[#2A2A3E] rounded px-2 py-1 text-xs text-[#E8E4DC] focus:border-[#C9A84C] outline-none font-mono" />
+          <input type="number" value={inputs.fsrDiasPagados} onChange={(e) => update('fsrDiasPagados', parseInt(e.target.value) || 0)} className="w-full bg-[#12121A] border border-[#2A2A3E] rounded px-2 py-1 text-xs text-[#E8E4DC] focus:border-[#C9A84C] outline-hidden font-mono" />
         </div>
         <div>
           <label className="text-[10px] uppercase text-[#8A8578] block mb-1">Días laborados (TL)</label>
-          <input type="number" value={inputs.fsrDiasLaborados} onChange={(e) => update('fsrDiasLaborados', parseInt(e.target.value) || 0)} className="w-full bg-[#12121A] border border-[#2A2A3E] rounded px-2 py-1 text-xs text-[#E8E4DC] focus:border-[#C9A84C] outline-none font-mono" />
+          <input type="number" value={inputs.fsrDiasLaborados} onChange={(e) => update('fsrDiasLaborados', parseInt(e.target.value) || 0)} className="w-full bg-[#12121A] border border-[#2A2A3E] rounded px-2 py-1 text-xs text-[#E8E4DC] focus:border-[#C9A84C] outline-hidden font-mono" />
         </div>
         <div>
           <label className="text-[10px] uppercase text-[#8A8578] block mb-1">Utilidad</label>
-          <input type="number" step="0.001" value={inputs.utilidad} onChange={(e) => update('utilidad', parseFloat(e.target.value) || 0)} className="w-full bg-[#12121A] border border-[#2A2A3E] rounded px-2 py-1 text-xs text-[#E8E4DC] focus:border-[#C9A84C] outline-none font-mono" />
+          <input type="number" step="0.001" value={inputs.utilidad} onChange={(e) => update('utilidad', parseFloat(e.target.value) || 0)} className="w-full bg-[#12121A] border border-[#2A2A3E] rounded px-2 py-1 text-xs text-[#E8E4DC] focus:border-[#C9A84C] outline-hidden font-mono" />
         </div>
         <div>
           <label className="text-[10px] uppercase text-[#8A8578] block mb-1">% Costo directo</label>
-          <input type="number" step="0.001" value={inputs.costoDirectoPct} onChange={(e) => update('costoDirectoPct', parseFloat(e.target.value) || 0)} className="w-full bg-[#12121A] border border-[#2A2A3E] rounded px-2 py-1 text-xs text-[#E8E4DC] focus:border-[#C9A84C] outline-none font-mono" />
+          <input type="number" step="0.001" value={inputs.costoDirectoPct} onChange={(e) => update('costoDirectoPct', parseFloat(e.target.value) || 0)} className="w-full bg-[#12121A] border border-[#2A2A3E] rounded px-2 py-1 text-xs text-[#E8E4DC] focus:border-[#C9A84C] outline-hidden font-mono" />
         </div>
       </div>
 

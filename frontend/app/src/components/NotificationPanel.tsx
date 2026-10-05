@@ -26,7 +26,7 @@ export default function NotificationPanel({ onClose }: NotificationPanelProps) {
   return (
     <>
       {/* Backdrop */}
-      <div className="fixed inset-0 z-[19999]" onClick={onClose} />
+      <div className="fixed inset-0 z-19999" onClick={onClose} />
 
       <motion.div
         initial={{ opacity: 0, y: -10 }}
@@ -76,7 +76,7 @@ export default function NotificationPanel({ onClose }: NotificationPanelProps) {
                     className="flex gap-3 p-3 border-b border-[#2A2A3E]/50 hover:bg-[#222235]/50 transition-colors"
                   >
                     <div
-                      className="w-1 self-stretch rounded-full flex-shrink-0"
+                      className="w-1 self-stretch rounded-full shrink-0"
                       style={{ backgroundColor: config.color }}
                     />
                     <div className="flex-1 min-w-0">
@@ -87,7 +87,7 @@ export default function NotificationPanel({ onClose }: NotificationPanelProps) {
                         </div>
                         <button
                           onClick={() => removeNotification(notif.id)}
-                          className="text-[#4D4A42] hover:text-[#8A8578] transition-colors flex-shrink-0"
+                          className="text-[#4D4A42] hover:text-[#8A8578] transition-colors shrink-0"
                         >
                           <X className="w-3 h-3" />
                         </button>

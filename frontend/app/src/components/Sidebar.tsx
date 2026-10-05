@@ -104,7 +104,7 @@ function SidebarItem({
         />
       )}
       <Icon className="w-[17px] h-[17px] shrink-0" />
-      <span className="text-[13px] font-medium truncate group-hover:text-[color:var(--text-primary)]" style={{ color: isActive ? 'var(--accent-gold-bright)' : undefined }}>
+      <span className="text-[13px] font-medium truncate group-hover:text-(--text-primary)" style={{ color: isActive ? 'var(--accent-gold-bright)' : undefined }}>
         {label}
       </span>
     </button>
