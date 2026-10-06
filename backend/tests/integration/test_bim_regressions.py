@@ -147,9 +147,9 @@ async def test_budget_creation_cannot_bypass_costing_quota(db_session, tenant_a_
     assert usage.corridas_costeo == 3
 
 @pytest.mark.asyncio
-async def test_model_uploads_have_immutable_unique_keys_and_queue_failure_visible(db_session, tenant_a_user, monkeypatch):
+async def test_model_uploads_have_immutable_unique_keys_and_durable_intents(db_session, tenant_a_user, monkeypatch):
     from app.services import bim_service
-    from app.core.process_queue import encolar_proceso
+    from app.models.process_job import TrabajoProceso
     class Storage:
         def __init__(self): self.objects = {}
         async def subir(self, path, content, **options):
@@ -168,14 +168,10 @@ async def test_model_uploads_have_immutable_unique_keys_and_queue_failure_visibl
     assert a.ruta_archivo != b.ruta_archivo
     assert storage.objects[a.ruta_archivo] == b'A'
     assert storage.objects[b.ruta_archivo] == b'B'
-    class UnavailableQueue:
-        def delay(self, **kwargs): raise ConnectionError('Broker down')
-    with pytest.raises(MegalodonException) as exc:
-        await encolar_proceso(db_session, a, UnavailableQueue(),
-            estado_field='estado_procesamiento', error_field='error_procesamiento')
-    assert exc.value.status_code == 503
-    await db_session.refresh(a)
-    assert a.estado_procesamiento == 'ERROR'
+    jobs = (await db_session.scalars(select(TrabajoProceso).where(
+        TrabajoProceso.entidad_id.in_([a.id,b.id])))).all()
+    assert len(jobs) == 2
+    assert all(j.estado == 'PENDIENTE' for j in jobs)
 
 @pytest.mark.asyncio
 async def test_partially_measurable_group_is_pending(db_session, tenant_a_user):

@@ -88,3 +88,5 @@ from app.models.entitlements import (
     PlanLimite, TenantUso, Suscripcion, AppModulo,
     PlanTipo, EstadoSuscripcion, ProveedorPago, EstadoModulo,
 )
+
+from app.models.process_job import TrabajoProceso

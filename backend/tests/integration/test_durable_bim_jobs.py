@@ -1,0 +1,134 @@
+"""Durable public job boundary: rollback, redelivery and real domain effects."""
+from datetime import datetime, timezone
+from uuid import uuid4
+
+import pytest
+from sqlalchemy import select
+
+from app.core.process_queue import registrar_trabajo, ejecutar_trabajo, publicar_pendientes
+from app.models.process_job import TrabajoProceso
+from app.models.bim import ElementoBIM, GeneracionBIM4D5D
+from app.models.programacion import ProgramaObra
+from tests.conftest import engine_test
+from tests.integration.test_bim_regressions import model
+
+
+@pytest.mark.asyncio
+async def test_job_and_generation_rollback_together(db_session, tenant_a_user):
+    tenant, user = tenant_a_user
+    exp, obj = await model(db_session, tenant, user)
+    generation = GeneracionBIM4D5D(id=uuid4(), tenant_id=tenant.id,
+        modelo_id=obj.id, expediente_id=exp.id, dias_por_defecto=5)
+    db_session.add(generation)
+    job = registrar_trabajo(db_session, generation, 'BIM_4D', {
+        'modelo_id':str(obj.id), 'expediente_id':str(exp.id),
+        'fecha_inicio_iso':'2026-10-06T00:00:00+00:00', 'dias_por_defecto':5})
+    job_id, generation_id = job.id, generation.id
+    await db_session.flush()
+    await db_session.rollback()
+    assert await db_session.get(TrabajoProceso, job_id) is None
+    assert await db_session.get(GeneracionBIM4D5D, generation_id) is None
+
+
+@pytest.mark.asyncio
+async def test_redelivery_creates_exactly_one_real_program(db_session, tenant_a_user):
+    tenant, user = tenant_a_user
+    exp, obj = await model(db_session, tenant, user)
+    db_session.add(ElementoBIM(modelo_id=obj.id, global_id=uuid4().hex,
+        express_id=1, tipo='IfcWall', area=16, volumen=2, longitud=4, nivel='PB'))
+    gen = GeneracionBIM4D5D(id=uuid4(), tenant_id=tenant.id,
+        modelo_id=obj.id, expediente_id=exp.id, dias_por_defecto=5)
+    db_session.add(gen)
+    job = registrar_trabajo(db_session, gen, 'BIM_4D', {
+        'modelo_id':str(obj.id), 'expediente_id':str(exp.id),
+        'fecha_inicio_iso':'2026-10-06T00:00:00+00:00', 'dias_por_defecto':5})
+    job_id, gen_id, exp_id = job.id, gen.id, exp.id
+    await db_session.commit()
+    assert await ejecutar_trabajo(job_id, engine_test) == 'COMPLETADO'
+    assert await ejecutar_trabajo(job_id, engine_test) == 'COMPLETADO'
+    db_session.expire_all()
+    generation = await db_session.get(GeneracionBIM4D5D, gen_id)
+    assert generation.estado == 'COMPLETADO'
+    programs = (await db_session.scalars(select(ProgramaObra).where(
+        ProgramaObra.expediente_id == exp_id))).all()
+    assert len(programs) == 1
+    assert generation.programa_id == programs[0].id
+
+
+@pytest.mark.asyncio
+async def test_broker_failure_retains_work_for_later_publication(db_session, tenant_a_user):
+    tenant, user = tenant_a_user
+    exp, obj = await model(db_session, tenant, user)
+    job = registrar_trabajo(db_session, obj, 'BIM_IFC', {'extraer_malla':True})
+    job_id = job.id
+    await db_session.commit()
+    def unavailable(job_id):
+        raise ConnectionError('Broker is temporarily unavailable')
+    await publicar_pendientes(engine_test, enviar=unavailable)
+    await db_session.refresh(job)
+    assert job.estado == 'PENDIENTE'
+    assert job.error_publicacion
+    # Advancing the due date models passage of time, without blocking sleeps.
+    job.proxima_publicacion = datetime.now(timezone.utc)
+    await db_session.commit()
+    delivered = []
+    await publicar_pendientes(engine_test, enviar=delivered.append)
+    assert str(job_id) in delivered
+    await db_session.refresh(job)
+    assert job.estado == 'ENVIADO'
+
+
+@pytest.mark.asyncio
+async def test_real_ifc_file_survives_new_executor_and_redelivery(db_session, tenant_a_user, tmp_path, monkeypatch):
+    from pathlib import Path
+    from app.config import settings
+    from app.services.bim_service import BIMService
+    from app.models.bim import ModeloBIM
+    monkeypatch.setattr(settings, 'BIM_STORAGE_PROVIDER', 'filesystem')
+    monkeypatch.setattr(settings, 'BIM_LOCAL_STORAGE_PATH', str(tmp_path))
+    tenant, user = tenant_a_user
+    exp, _ = await model(db_session, tenant, user)
+    content = (Path(__file__).parents[1] / 'fixtures/ifc/wall_millimetres.ifc').read_bytes()
+    uploaded = await BIMService(db_session, tenant.id).crear_modelo(
+        expediente_id=exp.id, nombre='Physical wall', file_content=content, filename='wall.ifc')
+    job = await db_session.scalar(select(TrabajoProceso).where(TrabajoProceso.entidad_id == uploaded.id))
+    job_id, model_id = job.id, uploaded.id
+    await db_session.commit()
+    assert await ejecutar_trabajo(job_id, engine_test) == 'COMPLETADO'
+    assert await ejecutar_trabajo(job_id, engine_test) == 'COMPLETADO'
+    db_session.expire_all()
+    assert (await db_session.get(ModeloBIM, model_id)).num_elementos == 1
+    elements = (await db_session.scalars(select(ElementoBIM).where(ElementoBIM.modelo_id == model_id))).all()
+    assert len(elements) == 1
+    assert float(elements[0].volumen) == pytest.approx(2.4)
+    assert elements[0].malla_vertices
+
+
+@pytest.mark.asyncio
+async def test_failed_completion_rolls_back_program_and_all_service_commits(db_session, tenant_a_user):
+    from sqlalchemy import text
+    if engine_test.dialect.name != 'sqlite':
+        pytest.skip('SQLite failure injection; PostgreSQL locks covered separately')
+    tenant, user = tenant_a_user
+    exp, obj = await model(db_session, tenant, user)
+    db_session.add(ElementoBIM(modelo_id=obj.id, global_id=uuid4().hex,
+        express_id=1, tipo='IfcWall', area=16, volumen=2, longitud=4))
+    gen = GeneracionBIM4D5D(id=uuid4(), tenant_id=tenant.id,
+        modelo_id=obj.id, expediente_id=exp.id, dias_por_defecto=5)
+    db_session.add(gen)
+    job = registrar_trabajo(db_session, gen, 'BIM_4D', {
+        'fecha_inicio_iso':'2026-10-06T00:00:00+00:00', 'dias_por_defecto':5})
+    job_id, exp_id = job.id, exp.id
+    await db_session.commit()
+    await db_session.execute(text("CREATE TRIGGER reject_job_finish BEFORE UPDATE ON trabajos_proceso "
+        "WHEN NEW.estado='COMPLETADO' BEGIN SELECT RAISE(ABORT, 'Injected finish failure'); END"))
+    await db_session.commit()
+    try:
+        assert await ejecutar_trabajo(job_id, engine_test) == 'PENDIENTE'
+        assert list(await db_session.scalars(select(ProgramaObra).where(ProgramaObra.expediente_id == exp_id))) == []
+        await db_session.commit()
+    finally:
+        await db_session.execute(text('DROP TRIGGER reject_job_finish'))
+        await db_session.commit()
+    assert await ejecutar_trabajo(job_id, engine_test) == 'COMPLETADO'
+    assert len(list(await db_session.scalars(select(ProgramaObra).where(ProgramaObra.expediente_id == exp_id)))) == 1

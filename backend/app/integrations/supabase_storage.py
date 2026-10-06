@@ -111,6 +111,12 @@ class SupabaseStorage:
 
 # Wrappers listos para los dominios que ya los necesitan.
 def storage_bim() -> SupabaseStorage:
+    if settings.BIM_STORAGE_PROVIDER == 'filesystem':
+        if settings.is_production:
+            raise MegalodonException(ErrorCode.ARCHIVO_ERROR,
+                'El almacenamiento BIM filesystem solo está habilitado para desarrollo/pruebas')
+        from app.integrations.filesystem_storage import FilesystemBIMStorage
+        return FilesystemBIMStorage()
     return SupabaseStorage(settings.SUPABASE_BUCKET_BIM)
 
 

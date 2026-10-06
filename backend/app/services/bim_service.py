@@ -91,6 +91,7 @@ class BIMService:
         nombre: str,
         file_content: bytes,
         filename: str,
+        opciones_procesamiento: Optional[dict] = None,
         descripcion: Optional[str] = None,
         creado_por_id: Optional[UUID] = None,
     ) -> ModeloBIM:
@@ -124,6 +125,8 @@ class BIMService:
             actualizado_por_id=creado_por_id,
         )
         self.db.add(modelo)
+        from app.core.process_queue import registrar_trabajo
+        registrar_trabajo(self.db, modelo, 'BIM_IFC', opciones_procesamiento or {})
         try:
             await self.db.commit()
         except Exception:
@@ -475,6 +478,7 @@ class BIMService:
         modelo_id: UUID,
         expediente_id: UUID,
         dias_por_defecto: float,
+        fecha_inicio: datetime,
         creado_por_id: Optional[UUID] = None,
     ) -> "GeneracionBIM4D5D":
         """Crea el registro de seguimiento PENDIENTE para una corrida de
@@ -496,6 +500,9 @@ class BIMService:
             actualizado_por_id=creado_por_id,
         )
         self.db.add(generacion)
+        from app.core.process_queue import registrar_trabajo
+        registrar_trabajo(self.db, generacion, 'BIM_4D', {
+            'fecha_inicio_iso':fecha_inicio.isoformat(), 'dias_por_defecto':dias_por_defecto})
         await self.db.commit()
         await self.db.refresh(generacion)
         return generacion
@@ -533,7 +540,7 @@ class BIMService:
         su llamada a calcular_cpm al final -- en vez de reimplementar la
         creación de ActividadPrograma o el cálculo de ruta crítica. Este
         método nunca toca app/engines/programacion/cpm.py."""
-        from app.models.programacion import ActividadPrograma
+        from app.models.programacion import ActividadPrograma, ProgramaObra
         from app.models.bim import ElementoBIMActividad
         from app.services.programacion_service import ProgramacionService
 

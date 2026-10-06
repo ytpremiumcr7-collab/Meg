@@ -81,6 +81,8 @@ class ClashService:
             actualizado_por_id=creado_por_id,
         )
         self.db.add(analisis)
+        from app.core.process_queue import registrar_trabajo
+        registrar_trabajo(self.db, analisis, 'BIM_CLASH', {})
         await self.db.commit()
         await self.db.refresh(analisis)
         return analisis

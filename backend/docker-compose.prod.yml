@@ -188,6 +188,31 @@ services:
       release-gate:
         condition: service_completed_successfully
 
+  job-dispatcher:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql+asyncpg://megalodon:${POSTGRES_PASSWORD}@db:5432/megalodon
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      SECRET_KEY: ${SECRET_KEY}
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY}
+      ENVIRONMENT: production
+    command: python -m app.workers.job_dispatcher
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      release-gate:
+        condition: service_completed_successfully
+
   scheduler:
     build:
       context: .
