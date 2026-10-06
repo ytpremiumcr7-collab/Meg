@@ -53,7 +53,7 @@ async function login(page, email) {
   await page.getByPlaceholder('tu@correo.com').fill(email);
   await page.locator('input[type="password"]').fill(credentials.password);
   await page.getByRole('button',{name:'Entrar al Sistema'}).click();
-  await page.getByRole('button',{name:'Proyectos',exact:true}).waitFor({timeout:60000});
+  await page.getByRole('navigation').getByRole('button',{name:'Proyectos',exact:true}).waitFor({timeout:60000});
 }
 
 before(async () => {
@@ -79,7 +79,7 @@ test('user creates an obra, resumes an IFC job after restart, approves and expor
   const errors=[]; page.on('pageerror',e=>errors.push(e.message));
   try {
     await login(page,credentials.reviewer);
-    await page.getByRole('button',{name:'Proyectos',exact:true}).click();
+    await page.getByRole('navigation').getByRole('button',{name:'Proyectos',exact:true}).click();
     await page.getByRole('button',{name:'Nuevo',exact:true}).click();
     await page.getByLabel('Título del expediente').fill('Obra sintética de aceptación BIM');
     await page.getByLabel('Órgano', {exact:false}).fill('CI staging');
@@ -152,11 +152,37 @@ test('user creates an obra, resumes an IFC job after restart, approves and expor
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);
     await page.screenshot({path:join(evidence,'04-movil.png'),fullPage:true});
     assert.deepEqual(errors,[]);
+    // A genuine IFC contains one measurable wall and another without QTO/shape.
+    await page.setViewportSize({width:1440,height:1000});
+    await page.getByLabel('Subir archivo IFC').setInputFiles(credentials.partial_ifc);
+    await page.waitForFunction(()=>[...document.querySelectorAll('button')].some(b=>b.textContent==='2. Preparar presupuesto'&&!b.disabled),{},{timeout:60000});
+    await page.getByRole('button',{name:'2. Preparar presupuesto'}).click();
+    const missing=page.getByRole('region',{name:'Completar mediciones faltantes'});
+    await missing.waitFor();
+    // Select the m3 catalogue for this model too; captures must use its unit.
+    if (await page.getByPlaceholder('Buscar en catálogo (ej. muro, concreto)...').count()) {
+      await page.getByPlaceholder('Buscar en catálogo (ej. muro, concreto)...').fill('Muro de prueba');
+      await page.getByRole('button',{name:'Buscar concepto para IfcWall'}).click();
+      await page.getByRole('button',{name:/Muro de prueba sintética CI/}).click();
+    }
+    await page.getByPlaceholder('Fuente: contrato, convocatoria o análisis').fill('Prueba parcial: factores cero explícitos');
+    await page.getByRole('button',{name:'Generar presupuesto',exact:true}).click();
+    const budgetReview=page.getByRole('region',{name:'Revisión del presupuesto'});
+    await budgetReview.getByText(/Presupuesto PARCIAL: 1 de 2 elementos medidos/).waitFor();
+    await budgetReview.getByText('$300.00',{exact:true}).first().waitFor();
+    assert.equal(await budgetReview.getByRole('button',{name:'Confirmar cálculo'}).isDisabled(),true);
+    await page.screenshot({path:join(evidence,'06-presupuesto-parcial.png'),fullPage:true});
+    await missing.getByLabel('Cantidad faltante (m3)',{exact:true}).fill('1.6');
+    await missing.getByLabel('Referencia de la medición',{exact:true}).fill('Levantamiento de prueba revisado');
+    await page.getByRole('button',{name:'Generar presupuesto',exact:true}).click();
+    await budgetReview.getByText(/Mediciones completas: 2 de 2 elementos medidos/).waitFor();
+    await budgetReview.getByText('$500.00',{exact:true}).first().waitFor();
+    await page.screenshot({path:join(evidence,'07-mediciones-completadas.png'),fullPage:true});
     const readerContext=await browser.newContext({viewport:{width:1440,height:1000}});
     try {
       const readerPage=await readerContext.newPage();
       await login(readerPage,credentials.reader);
-      await readerPage.getByRole('button',{name:'Proyectos',exact:true}).click();
+      await readerPage.getByRole('navigation').getByRole('button',{name:'Proyectos',exact:true}).click();
       await readerPage.getByRole('button',{name:/Obra sintética de aceptación BIM/}).click();
       await readerPage.getByRole('button',{name:'Calculadora BIM',exact:true}).click();
       await readerPage.getByLabel('Subir archivo IFC').waitFor({state:'attached'});

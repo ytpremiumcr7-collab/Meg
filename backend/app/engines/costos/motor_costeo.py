@@ -115,6 +115,7 @@ class PresupuestoCosteo:
     nombre: str
     parametros: ParametrosCosteoSnapshot
     partidas: List[PartidaCosteo] = field(default_factory=list)
+    cobertura_bim: Optional[dict] = None
 
     @property
     def factor_indirecto(self) -> Decimal:
@@ -303,6 +304,23 @@ class MotorCosteo:
                     cell.data_type = 's'
 
         buffer = io.BytesIO()
+        if presupuesto.cobertura_bim is not None:
+            coverage = presupuesto.cobertura_bim
+            evidence = wb.create_sheet('Cobertura BIM', 0)
+            evidence.append(['MEDICIONES COMPLETAS' if coverage['completa'] else 'PRESUPUESTO PARCIAL: faltan mediciones BIM'])
+            evidence.append(['Modelo', coverage['modelo_id']])
+            evidence.append(['Elementos medidos', coverage['elementos_medidos'], 'Total', coverage['elementos_totales']])
+            evidence.append(['Elementos pendientes', ', '.join(coverage['elementos_pendientes'])])
+            evidence.append(['Elemento', 'Unidad', 'Cantidad capturada', 'Referencia', 'Usuario', 'Fecha'])
+            for capture in coverage['capturas']:
+                evidence.append([capture['elemento_id'], capture['unidad'], capture['cantidad'],
+                    capture['referencia'], capture['usuario_id'], capture['capturado_en']])
+            for row in evidence:
+                for cell in row:
+                    if isinstance(cell.value, str): cell.data_type = 's'
+            evidence.column_dimensions['A'].width = 65
+            evidence.column_dimensions['D'].width = 60
+            wb.active = 0
         wb.save(buffer)
         return buffer.getvalue()
 

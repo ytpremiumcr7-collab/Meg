@@ -25,8 +25,9 @@ export default function PresupuestoPanel({ expedienteId, nuevoId }: { expediente
     return () => { active = false; };
   }, [expedienteId, nuevoId]);
   const budget = items.find(p => p.id === selectedId);
+  const coverage = budget?.metadatos?.bim_cobertura;
   const pending = budget?.partidas.filter(p => !(p.cantidad > 0 && p.precio_unitario > 0 && p.importe > 0)) || [];
-  const complete = !!budget?.partidas.length && pending.length === 0 && budget.monto_total > 0;
+  const complete = coverage?.completa !== false && !!budget?.partidas.length && pending.length === 0 && budget.monto_total > 0;
   async function change(state: 'CALCULADO' | 'VALIDADO' | 'APROBADO') {
     if (!budget || busy) return;
     setBusy(true); setError('');
@@ -61,7 +62,8 @@ export default function PresupuestoPanel({ expedienteId, nuevoId }: { expediente
       </label>
       {budget && <>
         <div className="flex justify-between text-sm"><span role="status">Estado: {budget.estado}</span><strong>{money(budget.monto_total)}</strong></div>
-        {!complete && <p className="text-xs text-(--warning)">Faltan cantidades o precios en {pending.length} partida(s). Completa las correspondencias del catálogo antes de generar una nueva versión. La aprobación está bloqueada.</p>}
+        {coverage && <p role="status" className="text-xs">{coverage.completa ? 'Mediciones completas' : 'Presupuesto PARCIAL'}: {coverage.elementos_medidos} de {coverage.elementos_totales} elementos medidos. {coverage.capturas.length} capturas con referencia.</p>}
+        {!complete && <p className="text-xs text-(--warning)">Lo medido ya está costeado cuando tiene precio. Quedan {coverage?.elementos_pendientes.length || 0} elementos sin medición y {pending.length} partida(s) pendientes. Completa las mediciones arriba y asigna precios para generar una nueva versión. La aprobación está bloqueada.</p>}
         <div className="overflow-x-auto"><table className="w-full text-xs"><caption className="sr-only">Partidas del presupuesto</caption>
           <thead><tr><th className="text-left p-1">Concepto</th><th>Cantidad</th><th>Unidad</th><th>Precio</th><th>Importe</th></tr></thead>
           <tbody>{budget.partidas.map(p => <tr key={p.id} className="border-t border-(--border-subtle)">

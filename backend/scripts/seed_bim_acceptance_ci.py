@@ -43,6 +43,11 @@ async def main():
     if len(sys.argv) != 1:
         raise SystemExit('Unsupported acceptance seed arguments.')
     password = uuid4().hex
+    import ifcopenshell
+    document = ifcopenshell.open(str(Path(__file__).parents[1] / 'tests/fixtures/ifc/wall_millimetres.ifc'))
+    document.create_entity('IfcWall',GlobalId=ifcopenshell.guid.new(),Name='Faltante de medición CI')
+    partial_ifc = Path('/tmp/megalodon-partial-acceptance.ifc')
+    document.write(str(partial_ifc))
     async with AsyncSessionLocal() as db:
         tenant = Tenant(name='BIM acceptance (synthetic)', slug='bim-ci-'+uuid4().hex, plan='ENTERPRISE', is_active=True)
         db.add(tenant)
@@ -60,7 +65,8 @@ async def main():
         await EntitlementsService(db).sembrar_modulos_default()
         destination = Path(os.environ['BIM_ACCEPTANCE_CREDENTIALS'])
         destination.write_text(json.dumps({'reviewer':users[0].email, 'reader':users[1].email,
-            'password':password, 'catalog_description':'Muro de prueba sintética CI'}))
+            'password':password, 'catalog_description':'Muro de prueba sintética CI',
+            'partial_ifc':str(partial_ifc)}))
         destination.chmod(0o600)
     await engine.dispose()
 

@@ -182,7 +182,8 @@ async def test_partially_measurable_group_is_pending(db_session, tenant_a_user):
     await db_session.commit()
     budget = await BIMService(db_session, tenant.id).crear_presupuesto_desde_bim(
         modelo_id=obj.id, expediente_id=exp.id, parametros_costeo=PARAMS)
-    assert budget.partidas[0].cantidad == 0
+    assert [p.cantidad for p in budget.partidas] == [16, 0]
+    assert budget.metadatos['bim_cobertura']['completa'] is False
     assert budget.estado == 'BORRADOR'
 
 @pytest.mark.asyncio

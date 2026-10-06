@@ -26,7 +26,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, UploadFile, File, Form, Request
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -90,6 +90,13 @@ class MapeoPartida(BaseModel):
     partida_id: UUID
 
 
+class CantidadComplementaria(BaseModel):
+    elemento_id: UUID
+    unidad: str = Field(..., min_length=1, max_length=20)
+    cantidad: float = Field(..., gt=0, lt=1e14, allow_inf_nan=False)
+    referencia: str = Field(..., min_length=5, max_length=1000)
+
+
 class GenerarPresupuestoRequest(BaseModel):
     nombre: str = "Presupuesto desde BIM"
     parametros_costeo: ParametrosCosteoInput
@@ -98,6 +105,7 @@ class GenerarPresupuestoRequest(BaseModel):
     # insumos si lo trae); los que no, quedan como antes -- solo
     # cantidades, pendientes de costeo manual.
     mapeo_catalogo: Optional[Dict[str, UUID]] = None
+    cantidades_complementarias: List[CantidadComplementaria] = Field(default_factory=list)
 
 
 class AsignarZona4D(BaseModel):
@@ -305,6 +313,8 @@ async def generar_presupuesto_desde_bim(
         nombre=data.nombre,
         parametros_costeo=data.parametros_costeo.to_domain(),
         mapeo_catalogo=data.mapeo_catalogo,
+        cantidades_complementarias=[item.model_dump() for item in data.cantidades_complementarias],
+        creado_por_id=current_user.id,
     )
     return PresupuestoOut.model_validate(presupuesto)
 

@@ -982,6 +982,9 @@ export interface Presupuesto {
   factor_riesgo?: number | null;
   metadatos?: {
     parametros_costeo?: ParametrosCosteoSnapshot;
+    bim_cobertura?: { completa: boolean; elementos_totales: number; elementos_medidos: number;
+      elementos_pendientes: string[]; capturas: Array<{ elemento_id: string; unidad: string;
+        cantidad: number; referencia: string; usuario_id: string; capturado_en: string }> };
     [key: string]: unknown;
   } | null;
   zona_economica: string;
@@ -1603,6 +1606,7 @@ export class MegalodonClient {
          * catalogoApu.listar()); los que no, quedan solo con cantidades,
          * pendientes de costeo manual -- igual que antes. */
         mapeo_catalogo?: Record<string, string>;
+        cantidades_complementarias?: Array<{ elemento_id: string; unidad: string; cantidad: number; referencia: string }>;
       },
     ): Promise<Presupuesto> => {
       return this.request<Presupuesto>(

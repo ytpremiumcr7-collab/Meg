@@ -24,3 +24,23 @@ sin sustituir todo el frontend ni incorporar DWG en este bloque.
 
 Datos de aceptación sintéticos identificados como tales; no son catálogos ni
 precios de obra certificados. Supabase real requiere credenciales del entorno.
+
+## Costeo de grupos incompletos
+
+Un grupo incompleto conserva el subtotal de sus elementos medidos; los
+elementos sin la cantidad requerida forman una partida pendiente separada.
+El presupuesto guarda cobertura por modelo y permanece parcial/BORRADOR.
+Editar cantidades o recalcular no borra esa cobertura ni habilita aprobación.
+Excel y PDF muestran explícitamente el carácter parcial.
+
+Cada faltante puede completarse en pantalla en la unidad del APU con una
+referencia de medición. El servidor valida pertenencia al modelo/tenant,
+unidad, cantidad positiva finita y usuario responsable. Guarda usuario,
+fecha y referencia en la nueva versión sin modificar las cantidades IFC.
+Las capturas también alimentan el costo de las actividades 4D vinculadas.
+No se fabrican cantidades para elementos sin QTO ni geometría válida.
+
+No están certificados por este bloque: Supabase real sin credenciales,
+catálogos adjuntos ni publicaciones INEGI, todos los motores de topografía,
+interferencias, jurídico, fiscalización y Tezcatlipoca, ni carga de modelos
+grandes/múltiples usuarios en un despliegue completo.

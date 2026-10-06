@@ -22,7 +22,7 @@ except ModuleNotFoundError:  # pragma: no cover - compatibilidad de entorno
     logger = logging.getLogger(__name__)
 
 import tempfile
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, TYPE_CHECKING
 from uuid import UUID, uuid4
 from types import SimpleNamespace
@@ -316,6 +316,8 @@ class BIMService:
         nombre: str = "Presupuesto desde BIM",
         parametros_costeo: ParametrosCosteoSnapshot,
         mapeo_catalogo: Optional[Dict[str, UUID]] = None,
+        cantidades_complementarias: Optional[List[dict]] = None,
+        creado_por_id: Optional[UUID] = None,
     ) -> Presupuesto:
         """Agrupa los elementos ya cuantificados de un modelo BIM por tipo
         y crea un presupuesto con una partida por tipo.
@@ -369,58 +371,72 @@ class BIMService:
                     )
                 catalogos_resueltos[tipo] = concepto
 
-        partidas_data = []
-        orden_tipos = []
+        # A missing member never discards the measured cost of its siblings.
+        captures = {}
+        for item in cantidades_complementarias or []:
+            key = str(item['elemento_id'])
+            value = float(item['cantidad'])
+            reference = str(item.get('referencia', '')).strip()
+            if key in captures or not math.isfinite(value) or not 0 < value < 1e14 or len(reference) < 5:
+                raise MegalodonException(ErrorCode.BAD_REQUEST, 'Cantidad complementaria o referencia inválida')
+            captures[key] = {**item, 'cantidad':value, 'referencia':reference}
+        if captures and creado_por_id is None:
+            raise MegalodonException(ErrorCode.BAD_REQUEST, 'La captura requiere un usuario responsable')
+        if captures:
+            from app.models.user import User
+            actor = await self.db.get(User, creado_por_id)
+            if not actor or actor.tenant_id != self.tenant_id or not actor.is_active:
+                raise MegalodonException(ErrorCode.PERMISO_DENEGADO, 'Usuario de captura inválido', status_code=403)
+        used = set()
+        pending_ids, snapshots = [], []
+        partidas_data, grupos_partidas = [], []
         for tipo, elems in por_tipo.items():
-            concepto_apu = catalogos_resueltos.get(tipo)
-
-            if concepto_apu is None:
-                # Sin mapeo para este tipo: comportamiento original, solo
-                # cantidades, $0 honesto (ver nota abajo).
-                unidad = "m2" if tipo in TIPOS_POR_AREA else "pza" if tipo in TIPOS_POR_PIEZA else "m3"
-                cantidad = cantidad_bim(elems, unidad)
-
-                partidas_data.append({
-                    "descripcion": f"{tipo} (extraído de BIM, {len(elems)} elementos)",
-                    "unidad": unidad,
-                    # Zero explicitly marks an unavailable quantity; approval rejects it.
-                    "cantidad": round(cantidad, 4),
-                    # Sin "precio_unitario" ni "conceptos": esto es solo
-                    # cuantificación. El motor de costeo lo deja en $0.00
-                    # hasta que alguien capture el precio real (tabulador o
-                    # APU) -- es más honesto que inventar un valor.
-                })
-            else:
-                # 5D real: la unidad del concepto de catálogo manda -- NO
-                # el heurístico TIPOS_POR_AREA/TIPOS_POR_PIEZA (que es
-                # solo un default razonable sin mapeo). Si no calza con
-                # ninguna cantidad geométrica disponible, se falla claro
-                # en vez de adivinar -- p. ej. mandar área cuando el APU
-                # real es por m3 daría un importe incorrecto en silencio.
-                unidad_apu = (concepto_apu.unidad or "").lower()
-                cantidad = cantidad_bim(elems, unidad_apu)
-
-                partida_data: Dict[str, Any] = {
-                    "descripcion": f"{tipo} (extraído de BIM, {len(elems)} elementos) — {concepto_apu.descripcion}",
-                    "unidad": concepto_apu.unidad,
-                    "cantidad": round(cantidad, 4),
-                }
-                insumos_desglose = (concepto_apu.desglose or {}).get("insumos") or []
-                if insumos_desglose:
-                    partida_data["conceptos"] = [{
-                        "clave": concepto_apu.clave,
-                        "descripcion": concepto_apu.descripcion,
-                        "unidad": concepto_apu.unidad,
-                        "cantidad": 1.0,
-                        "insumos": insumos_desglose,
-                    }]
+            apu = catalogos_resueltos.get(tipo)
+            unit = ((apu.unidad or '').lower().strip() if apu else
+                    'm2' if tipo in TIPOS_POR_AREA else 'pza' if tipo in TIPOS_POR_PIEZA else 'm3')
+            field = {'m2':'area', 'm3':'volumen', 'm':'longitud', 'ml':'longitud'}.get(unit)
+            ready, missing, total = [], [], 0.0
+            for element in elems:
+                # Non-geometric catalogue units (kg, t, etc.) need an explicit
+                # reviewed measurement; geometry alone cannot supply mass.
+                value = 1.0 if unit == 'pza' else getattr(element, field) if field else None
+                valid = value is not None and math.isfinite(float(value)) and float(value) > 0
+                capture = captures.get(str(element.id))
+                if capture:
+                    if valid or capture['unidad'].lower().strip() != unit:
+                        raise MegalodonException(ErrorCode.BAD_REQUEST,
+                            'La captura solo completa cantidades faltantes en la unidad del concepto')
+                    used.add(str(element.id))
+                    value, valid = capture['cantidad'], True
+                    snapshots.append({'elemento_id':str(element.id), 'global_id':element.global_id,
+                        'unidad':unit, 'cantidad':value, 'referencia':capture['referencia'],
+                        'usuario_id':str(creado_por_id), 'capturado_en':datetime.now(timezone.utc).isoformat()})
+                if valid:
+                    ready.append(element)
+                    total += float(value)
                 else:
-                    # Tabulador: precio unitario tal cual, sin desglose
-                    # (mismo criterio que agregar_partida_desde_catalogo).
-                    partida_data["precio_unitario"] = float(concepto_apu.precio_unitario)
-                partidas_data.append(partida_data)
-
-            orden_tipos.append(tipo)
+                    missing.append(element)
+                    pending_ids.append(str(element.id))
+            for members, quantity, label in [(ready,total,'medidos'), (missing,0.0,'PENDIENTES DE MEDICIÓN')]:
+                if not members:
+                    continue
+                data = {'descripcion':f'{tipo} ({len(members)} elementos {label})' +
+                        (f' — {apu.descripcion}' if apu else ''),
+                        'unidad':apu.unidad if apu else unit, 'cantidad':round(quantity,4)}
+                if apu:
+                    breakdown = (apu.desglose or {}).get('insumos') or []
+                    if breakdown:
+                        data['conceptos'] = [{'clave':apu.clave,'descripcion':apu.descripcion,
+                            'unidad':apu.unidad,'cantidad':1.0,'insumos':breakdown}]
+                    else:
+                        data['precio_unitario'] = float(apu.precio_unitario)
+                partidas_data.append(data)
+                grupos_partidas.append(members)
+        if set(captures) != used:
+            raise MegalodonException(ErrorCode.BAD_REQUEST, 'Hay capturas para elementos ajenos al modelo o sin faltantes')
+        coverage = {'modelo_id':str(modelo_id), 'completa':not pending_ids,
+            'elementos_totales':len(elementos), 'elementos_medidos':len(elementos)-len(pending_ids),
+            'elementos_pendientes':pending_ids, 'capturas':snapshots}
 
         presupuesto_service = PresupuestoService(self.db, self.tenant_id)
         presupuesto = await presupuesto_service.crear_desde_costeo(
@@ -428,14 +444,16 @@ class BIMService:
             nombre=nombre,
             partidas_data=partidas_data,
             parametros_costeo=parametros_costeo,
+            creado_por_id=creado_por_id,
+            evidencia_bim=coverage,
         )
 
         partidas_result = await self.db.execute(
             select(Partida).join(Presupuesto, Presupuesto.id == Partida.presupuesto_id).join(ExpedienteObra, ExpedienteObra.id == Presupuesto.expediente_id).where(Partida.presupuesto_id == presupuesto.id, ExpedienteObra.tenant_id == self.tenant_id).order_by(Partida.numero)
         )
         partidas_creadas = list(partidas_result.scalars().all())
-        for tipo, partida in zip(orden_tipos, partidas_creadas):
-            for e in por_tipo[tipo]:
+        for members, partida in zip(grupos_partidas, partidas_creadas, strict=True):
+            for e in members:
                 e.partida_id = partida.id
 
         await self.db.commit()
@@ -566,10 +584,20 @@ class BIMService:
         # zona), para no sobre-contar entre actividades de zonas distintas.
         partida_ids = {e.partida_id for e in elementos if e.partida_id}
         precios_por_partida: Dict[UUID, tuple] = {}
+        capturas_por_elemento = {}
+        presupuesto_por_partida = {}
         if partida_ids:
             result_p = await self.db.execute(select(Partida).join(Presupuesto, Presupuesto.id == Partida.presupuesto_id).join(ExpedienteObra, ExpedienteObra.id == Presupuesto.expediente_id).where(Partida.id.in_(partida_ids), ExpedienteObra.tenant_id == self.tenant_id))
-            for p in result_p.scalars().all():
-                precios_por_partida[p.id] = (float(p.precio_unitario or 0), (p.unidad or "").lower())
+            linked_parts = result_p.scalars().all()
+            for p in linked_parts:
+                precios_por_partida[p.id] = (float(p.precio_unitario or 0), (p.unidad or "").lower().strip())
+                presupuesto_por_partida[p.id] = p.presupuesto_id
+            budgets = (await self.db.scalars(select(Presupuesto).where(
+                Presupuesto.id.in_({p.presupuesto_id for p in linked_parts}),
+                Presupuesto.tenant_id == self.tenant_id))).all()
+            for budget in budgets:
+                for capture in (budget.metadatos or {}).get('bim_cobertura', {}).get('capturas', []):
+                    capturas_por_elemento[(budget.id,capture['elemento_id'],capture['unidad'])] = float(capture['cantidad'])
 
         # `dias_por_defecto` funciona como base configurable. La duración
         # final se ajusta por tamaño del grupo y por la magnitud geométrica
@@ -594,7 +622,10 @@ class BIMService:
             for e in elems:
                 if e.partida_id and e.partida_id in precios_por_partida:
                     precio_unit, unidad = precios_por_partida[e.partida_id]
-                    if unidad == "m2":
+                    captura = capturas_por_elemento.get((presupuesto_por_partida[e.partida_id],str(e.id),unidad))
+                    if captura is not None:
+                        costo += precio_unit * captura
+                    elif unidad == "m2":
                         costo += precio_unit * float(e.area or 0)
                     elif unidad == "m3":
                         costo += precio_unit * float(e.volumen or 0)

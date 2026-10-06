@@ -29,7 +29,8 @@ def partidas_pendientes(partidas) -> list[int]:
 
 
 def presupuesto_completo(presupuesto) -> bool:
-    return bool(presupuesto.partidas and not partidas_pendientes(presupuesto.partidas)
+    coverage = (getattr(presupuesto, "metadatos", None) or {}).get("bim_cobertura", {})
+    return bool(coverage.get("completa", True) and presupuesto.partidas and not partidas_pendientes(presupuesto.partidas)
                 and presupuesto.monto_total and presupuesto.monto_total > 0)
 
 
@@ -84,6 +85,7 @@ class PresupuestoService(BaseService[Presupuesto]):
         parametros_costeo: ParametrosCosteoSnapshot,
         zona_economica: str = "CENTRO",
         creado_por_id: Optional[UUID] = None,
+        evidencia_bim: Optional[dict] = None,
     ) -> Presupuesto:
         """Crea presupuesto desde datos de costeo con cálculo completo.
 
@@ -268,8 +270,10 @@ class PresupuestoService(BaseService[Presupuesto]):
             "factor_impuesto": parametros_costeo.factor_impuesto,
             "factor_riesgo": parametros_costeo.factor_riesgo,
             "zona_economica": zona_economica,
-            "metadatos": {"parametros_costeo": parametros_costeo.to_dict(), "catalogo_libro": referencias},
-            "estado": (EstadoPresupuesto.CALCULADO.value if presupuesto_completo(presupuesto_costeo)
+            "metadatos": {"parametros_costeo": parametros_costeo.to_dict(), "catalogo_libro": referencias,
+                          **({"bim_cobertura": evidencia_bim} if evidencia_bim is not None else {})},
+            "estado": (EstadoPresupuesto.CALCULADO.value if presupuesto_completo(presupuesto_costeo) and
+                (evidencia_bim is None or evidencia_bim["completa"])
                 else EstadoPresupuesto.BORRADOR.value),
             "tenant_id": self.tenant_id,
             "creado_por_id": creado_por_id,
@@ -511,7 +515,9 @@ class PresupuestoService(BaseService[Presupuesto]):
 
         presupuesto_costeo = PresupuestoCosteo(
             identificador=presupuesto.identificador,
-            nombre=presupuesto.nombre,
+            nombre=(presupuesto.nombre + " [PARCIAL: faltan mediciones BIM]"
+                    if not (presupuesto.metadatos or {}).get("bim_cobertura", {}).get("completa", True)
+                    else presupuesto.nombre),
             partidas=partidas_costeo,
             parametros=self._parametros_desde_orm(presupuesto),
         )
@@ -537,6 +543,7 @@ class PresupuestoService(BaseService[Presupuesto]):
         # dejar una aprobación "vieja" apuntando a montos que ya no son
         # los que están en pantalla.
         nuevo_estado = (EstadoPresupuesto.CALCULADO.value if presupuesto_completo(presupuesto_costeo)
+            and (presupuesto.metadatos or {}).get('bim_cobertura', {}).get('completa', True)
             else EstadoPresupuesto.BORRADOR.value)
 
         await self.update(
@@ -565,9 +572,12 @@ class PresupuestoService(BaseService[Presupuesto]):
 
         presupuesto_costeo = PresupuestoCosteo(
             identificador=presupuesto.identificador,
-            nombre=presupuesto.nombre,
+            nombre=(presupuesto.nombre + " [PARCIAL: faltan mediciones BIM]"
+                    if not (presupuesto.metadatos or {}).get("bim_cobertura", {}).get("completa", True)
+                    else presupuesto.nombre),
             partidas=partidas_costeo,
             parametros=self._parametros_desde_orm(presupuesto),
+            cobertura_bim=(presupuesto.metadatos or {}).get("bim_cobertura"),
         )
         presupuesto_costeo = self.motor_costeo.calcular_presupuesto(presupuesto_costeo)
 
@@ -622,9 +632,12 @@ class PresupuestoService(BaseService[Presupuesto]):
 
         presupuesto_costeo = PresupuestoCosteo(
             identificador=presupuesto.identificador,
-            nombre=presupuesto.nombre,
+            nombre=(presupuesto.nombre + " [PARCIAL: faltan mediciones BIM]"
+                    if not (presupuesto.metadatos or {}).get("bim_cobertura", {}).get("completa", True)
+                    else presupuesto.nombre),
             partidas=partidas_costeo,
             parametros=self._parametros_desde_orm(presupuesto),
+            cobertura_bim=(presupuesto.metadatos or {}).get("bim_cobertura"),
         )
         presupuesto_costeo = self.motor_costeo.calcular_presupuesto(presupuesto_costeo)
 
@@ -836,6 +849,9 @@ class PresupuestoService(BaseService[Presupuesto]):
         actualizado_por_id: Optional[UUID] = None,
     ) -> Presupuesto:
         presupuesto = await self._reconstruir_partidas_desde_db(presupuesto_id, expediente_id, bloquear=True)
+        if (presupuesto.metadatos or {}).get('bim_cobertura'):
+            raise MegalodonException(ErrorCode.PRESUPUESTO_ERROR,
+                'Corrija las mediciones por elemento en BIM y genere una nueva versión; la cantidad agregada conserva su evidencia.')
         partida = next((p for p in presupuesto.partidas if str(p.id) == str(partida_id)), None)
         if not partida:
             raise MegalodonException(
@@ -854,6 +870,9 @@ class PresupuestoService(BaseService[Presupuesto]):
         actualizado_por_id: Optional[UUID] = None,
     ) -> Presupuesto:
         presupuesto = await self._reconstruir_partidas_desde_db(presupuesto_id, expediente_id, bloquear=True)
+        if (presupuesto.metadatos or {}).get('bim_cobertura'):
+            raise MegalodonException(ErrorCode.PRESUPUESTO_ERROR,
+                'Las partidas BIM conservan la cobertura del modelo; genere una nueva versión para corregirlas.')
         partida = next((p for p in presupuesto.partidas if str(p.id) == str(partida_id)), None)
         if not partida:
             raise MegalodonException(

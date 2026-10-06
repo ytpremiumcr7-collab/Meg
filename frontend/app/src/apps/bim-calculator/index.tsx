@@ -7,6 +7,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import PresupuestoPanel from './PresupuestoPanel';
+import CantidadesComplementarias, { faltantesDeMedicion, type CapturaCantidad } from './CantidadesComplementarias';
 import { abrirModulo } from '@/lib/navigation';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { permisosBim } from '@/lib/bim-permissions';
@@ -186,6 +187,8 @@ function IFCPanel() {
   const [factorUtilidad, setFactorUtilidad] = useState(0);
   const [factorImpuesto, setFactorImpuesto] = useState(0);
   const [referenciaParametros, setReferenciaParametros] = useState('');
+  const [capturasCantidad, setCapturasCantidad] = useState<Record<string,CapturaCantidad>>({});
+  useEffect(() => { setCapturasCantidad({}); }, [modelo?.id]);
 
   useEffect(() => {
     if (!expedienteActivo) { setPresupuestosDisponibles([]); return; }
@@ -389,10 +392,21 @@ function IFCPanel() {
     try {
       const mapeoPayload: Record<string, string> = {};
       for (const [tipo, concepto] of Object.entries(mapeoCatalogo)) mapeoPayload[tipo] = concepto.id;
+      const cantidadesComplementarias = faltantesDeMedicion(elementos,
+        Object.fromEntries(Object.entries(mapeoCatalogo).map(([tipo,concepto])=>[tipo,concepto.unidad])))
+        .flatMap(({elemento,unidad}) => {
+          const capture = capturasCantidad[elemento.id];
+          if (!capture || capture.unidad !== unidad || (!capture.cantidad && !capture.referencia)) return [];
+          const quantity = Number(capture.cantidad);
+          if (!Number.isFinite(quantity) || quantity <= 0 || capture.referencia.trim().length < 5)
+            throw new Error('Completa la cantidad y una referencia de al menos cinco caracteres en cada medición capturada.');
+          return [{elemento_id:elemento.id,unidad,cantidad:quantity,referencia:capture.referencia.trim()}];
+        });
 
       const presupuesto = await megalodonClient.bim.generarPresupuesto(expedienteActivo.id, modelo.id, {
         nombre: `Presupuesto desde ${modelo.nombre}`,
         mapeo_catalogo: Object.keys(mapeoPayload).length > 0 ? mapeoPayload : undefined,
+        cantidades_complementarias: cantidadesComplementarias,
         parametros_costeo: {
           factor_indirecto: factorIndirecto, factor_utilidad: factorUtilidad,
           factor_impuesto: factorImpuesto, factor_riesgo: 0,
@@ -988,6 +1002,10 @@ function IFCPanel() {
                       </div>
                     );
                   })}
+                  <CantidadesComplementarias
+                    faltantes={faltantesDeMedicion(elementos, Object.fromEntries(Object.entries(mapeoCatalogo).map(([tipo,concepto])=>[tipo,concepto.unidad])))}
+                    capturas={capturasCantidad} disabled={!canWrite || generandoPresupuestoReal}
+                    onChange={(id,value)=>setCapturasCantidad(previous=>({...previous,[id]:value}))} />
                   <div className="flex items-center gap-2 mt-1 text-[10px]" style={{ color: 'var(--text-muted)' }}>
                     <label className="flex items-center gap-1">Indirectos
                       <input type="number" step={1} min={0} max={100} value={Math.round(factorIndirecto * 100)}
