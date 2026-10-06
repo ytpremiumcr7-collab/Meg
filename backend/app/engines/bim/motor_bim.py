@@ -22,6 +22,7 @@ el navegador (WebGL/Three.js), este motor solo prepara los datos.
 """
 from dataclasses import dataclass, field
 import logging
+import math
 from typing import Dict, List, Optional, Any
 
 import ifcopenshell
@@ -104,10 +105,12 @@ class MotorBIM:
         # Muchos archivos (sobre todo de Revit) declaran milímetros, no
         # metros. Sin este factor, volúmenes salen ~1,000,000,000x mal y
         # áreas ~1,000,000x mal, silenciosamente.
-        try:
-            self._escala_longitud = ifcopenshell.util.unit.calculate_unit_scale(self.modelo)
-        except Exception:
-            self._escala_longitud = 1.0
+        unit = ifcopenshell.util.unit.get_project_unit(self.modelo, "LENGTHUNIT")
+        if unit is None:
+            raise MegalodonException(ErrorCode.IFC_INVALIDO, "El IFC no declara su unidad de longitud")
+        self._escala_longitud = ifcopenshell.util.unit.get_unit_scale(unit)
+        if not math.isfinite(self._escala_longitud) or self._escala_longitud <= 0:
+            raise MegalodonException(ErrorCode.IFC_INVALIDO, "Unidad de longitud IFC inválida")
 
         return self.modelo
 
@@ -128,13 +131,11 @@ class MotorBIM:
 
         tipos = tipos_elementos or TIPOS_DEFAULT
         escala = self._escala_longitud
-        escala_area = escala * escala
-        escala_vol = escala * escala * escala
 
         for tipo in tipos:
             for entidad in self.modelo.by_type(tipo):
                 try:
-                    elem = self._procesar_elemento(entidad, tipo, escala, escala_area, escala_vol, extraer_malla)
+                    elem = self._procesar_elemento(entidad, tipo, extraer_malla)
                     elementos.append(elem)
 
                     resumen.setdefault(tipo, {"cantidad": 0, "volumen_total": 0.0, "area_total": 0.0})
@@ -187,8 +188,18 @@ class MotorBIM:
             )
         return None
 
+    def _cantidad_si(self, data: dict, unit_type: str) -> float:
+        quantity = self.modelo.by_id(data["id"])
+        unit = ifcopenshell.util.unit.get_property_unit(quantity, self.modelo)
+        if unit is None or getattr(unit, "UnitType", None) != unit_type:
+            raise ValueError(f"Cantidad {quantity.Name} sin unidad dimensional válida: {unit_type}")
+        value = float(data["value"]) * ifcopenshell.util.unit.get_unit_scale(unit)
+        if not math.isfinite(value) or value < 0:
+            raise ValueError(f"Cantidad {quantity.Name} no finita o negativa")
+        return value
+
     def _procesar_elemento(
-        self, entidad, tipo: str, escala: float, escala_area: float, escala_vol: float, extraer_malla: bool
+        self, entidad, tipo: str, extraer_malla: bool
     ) -> ElementoBIMExtraido:
         propiedades: Dict[str, Any] = {}
         volumen_qto = area_qto = longitud_qto = None
@@ -204,22 +215,22 @@ class MotorBIM:
                 for prop_name, prop_value in pset_data.items():
                     propiedades[f"{pset_name}.{prop_name}"] = prop_value
 
-            qtos = ifcopenshell.util.element.get_psets(entidad, qtos_only=True)
+            qtos = ifcopenshell.util.element.get_psets(entidad, qtos_only=True, verbose=True)
             for qto_data in qtos.values():
                 if volumen_qto is None:
                     for clave in CLAVES_VOLUMEN:
                         if clave in qto_data:
-                            volumen_qto = float(qto_data[clave]) * escala_vol
+                            volumen_qto = self._cantidad_si(qto_data[clave], "VOLUMEUNIT")
                             break
                 if area_qto is None:
                     for clave in CLAVES_AREA:
                         if clave in qto_data:
-                            area_qto = float(qto_data[clave]) * escala_area
+                            area_qto = self._cantidad_si(qto_data[clave], "AREAUNIT")
                             break
                 if longitud_qto is None:
                     for clave in CLAVES_LONGITUD:
                         if clave in qto_data:
-                            longitud_qto = float(qto_data[clave]) * escala
+                            longitud_qto = self._cantidad_si(qto_data[clave], "LENGTHUNIT")
                             break
         except Exception as exc:
             logger.warning(
@@ -240,7 +251,8 @@ class MotorBIM:
                 geometry = shape.geometry
                 verts_crudos = geometry.verts
                 caras = list(geometry.faces)
-                verts = [v * escala for v in verts_crudos] if escala != 1.0 else list(verts_crudos)
+                # create_shape returns SI metres with convert-back-units=False.
+                verts = list(verts_crudos)
 
                 if extraer_malla:
                     malla = MallaElemento(vertices=verts, caras=caras)
@@ -250,7 +262,7 @@ class MotorBIM:
                     bbox = [min(xs), min(ys), min(zs), max(xs), max(ys), max(zs)]
 
                 try:
-                    volumen_geom = ifcopenshell.util.shape.get_volume(geometry) * escala_vol
+                    volumen_geom = ifcopenshell.util.shape.get_volume(geometry)
                 except Exception as exc:
                     logger.warning(
                         "bim_volume_geom_failed",
@@ -263,7 +275,7 @@ class MotorBIM:
                     # el área de una cara específica (ej. no equivale al
                     # "lado visible" de un muro). Se marca la fuente para
                     # que costeo sepa que es una aproximación geométrica.
-                    area_geom = ifcopenshell.util.shape.get_area(geometry) * escala_area
+                    area_geom = ifcopenshell.util.shape.get_area(geometry)
                 except Exception as exc:
                     logger.warning(
                         "bim_area_geom_failed",
