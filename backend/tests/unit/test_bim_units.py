@@ -34,3 +34,21 @@ def test_qto_uses_independent_area_volume_units_and_explicit_override(tmp_path):
     assert element.area == pytest.approx(6)
     assert element.longitud == pytest.approx(2)
     assert element.fuente_volumen == 'QTO_IFC'
+
+
+def test_invalid_volume_unit_preserves_element_other_quantities_and_geometry(tmp_path):
+    model = ifcopenshell.open(str(FIXTURES / 'wall_millimetres_qto.ifc'))
+    quantity = model.by_type('IfcQuantityVolume')[0]
+    quantity.Unit = ifcopenshell.api.run('unit.add_si_unit', model, unit_type='AREAUNIT')
+    path = tmp_path / 'invalid-unit.ifc'
+    model.write(str(path))
+    motor = MotorBIM(); motor.cargar_ifc(str(path))
+    result = motor.cuantificar(['IfcWall'])
+    assert not result.errores
+    assert len(result.elementos) == 1
+    elem = result.elementos[0]
+    assert elem.volumen == pytest.approx(2.4)
+    assert elem.fuente_volumen == 'GEOMETRIA_CALCULADA'
+    assert elem.area == pytest.approx(6)
+    assert elem.longitud == pytest.approx(2)
+    assert elem.propiedades['_errores_qto']

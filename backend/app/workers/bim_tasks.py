@@ -106,8 +106,8 @@ def procesar_ifc(
                 from sqlalchemy import select
                 from app.models.base import EstadoProceso
                 async with AsyncSessionLocal() as db:
-                    modelo = (await db.execute(select(ModeloBIM).where(ModeloBIM.id == UUID(modelo_id), ModeloBIM.expediente_id == UUID(expediente_id), ModeloBIM.tenant_id == UUID(tenant_id)))).scalar_one_or_none()
-                    if modelo:
+                    modelo = (await db.execute(select(ModeloBIM).where(ModeloBIM.id == UUID(modelo_id), ModeloBIM.expediente_id == UUID(expediente_id), ModeloBIM.tenant_id == UUID(tenant_id)).with_for_update())).scalar_one_or_none()
+                    if modelo and modelo.estado_procesamiento != EstadoProceso.COMPLETADO.value:
                         modelo.estado_procesamiento = EstadoProceso.ERROR.value
                         modelo.error_procesamiento = error_message[:500]
                         await db.commit()

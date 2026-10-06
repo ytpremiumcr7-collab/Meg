@@ -101,10 +101,7 @@ class MotorBIM:
         except Exception as e:
             raise MegalodonException(ErrorCode.IFC_INVALIDO, f"Error al cargar IFC: {str(e)}")
 
-        # BUG ORIGINAL: nunca se consideraba la unidad de longitud del IFC.
-        # Muchos archivos (sobre todo de Revit) declaran milímetros, no
-        # metros. Sin este factor, volúmenes salen ~1,000,000,000x mal y
-        # áreas ~1,000,000x mal, silenciosamente.
+        # Length scale applies to raw IFC elevations; geometry already uses SI.
         unit = ifcopenshell.util.unit.get_project_unit(self.modelo, "LENGTHUNIT")
         if unit is None:
             raise MegalodonException(ErrorCode.IFC_INVALIDO, "El IFC no declara su unidad de longitud")
@@ -182,9 +179,7 @@ class MotorBIM:
         except Exception as exc:
             logger.warning(
                 "bim_container_read_failed",
-                entity_id=getattr(entidad, "id", None),
-                entity_type=getattr(entidad, "is_a", lambda: "unknown")(),
-                error=str(exc),
+                extra={"entity_id": entidad.id(), "entity_type": entidad.is_a(), "error": str(exc)},
             )
         return None
 
@@ -216,28 +211,24 @@ class MotorBIM:
                     propiedades[f"{pset_name}.{prop_name}"] = prop_value
 
             qtos = ifcopenshell.util.element.get_psets(entidad, qtos_only=True, verbose=True)
-            for qto_data in qtos.values():
-                if volumen_qto is None:
-                    for clave in CLAVES_VOLUMEN:
-                        if clave in qto_data:
-                            volumen_qto = self._cantidad_si(qto_data[clave], "VOLUMEUNIT")
-                            break
-                if area_qto is None:
-                    for clave in CLAVES_AREA:
-                        if clave in qto_data:
-                            area_qto = self._cantidad_si(qto_data[clave], "AREAUNIT")
-                            break
-                if longitud_qto is None:
-                    for clave in CLAVES_LONGITUD:
-                        if clave in qto_data:
-                            longitud_qto = self._cantidad_si(qto_data[clave], "LENGTHUNIT")
-                            break
+            quantities = {}
+            for field, keys, unit_type in (("volumen", CLAVES_VOLUMEN, "VOLUMEUNIT"),
+                                          ("area", CLAVES_AREA, "AREAUNIT"),
+                                          ("longitud", CLAVES_LONGITUD, "LENGTHUNIT")):
+                for qto_data in qtos.values():
+                    for key in keys:
+                        if key not in qto_data or field in quantities:
+                            continue
+                        try:
+                            quantities[field] = self._cantidad_si(qto_data[key], unit_type)
+                        except (ValueError, TypeError, KeyError) as exc:
+                            propiedades.setdefault("_errores_qto", []).append(str(exc))
+                            logger.warning("bim_quantity_invalid", extra={"entity_id": entidad.id(), "error": str(exc)})
+            volumen_qto, area_qto, longitud_qto = (quantities.get(k) for k in ("volumen", "area", "longitud"))
         except Exception as exc:
             logger.warning(
                 "bim_psets_read_failed",
-                entity_id=getattr(entidad, "id", None),
-                entity_type=getattr(entidad, "is_a", lambda: "unknown")(),
-                error=str(exc),
+                extra={"entity_id": entidad.id(), "entity_type": entidad.is_a(), "error": str(exc)},
             )
 
         # 2) Geometría real: sirve de respaldo para volumen/área cuando el
@@ -266,9 +257,7 @@ class MotorBIM:
                 except Exception as exc:
                     logger.warning(
                         "bim_volume_geom_failed",
-                        entity_id=getattr(entidad, "id", None),
-                        entity_type=getattr(entidad, "is_a", lambda: "unknown")(),
-                        error=str(exc),
+                        extra={"entity_id": entidad.id(), "entity_type": entidad.is_a(), "error": str(exc)},
                     )
                 try:
                     # OJO: esto es área de superficie TOTAL del sólido, no
@@ -279,9 +268,7 @@ class MotorBIM:
                 except Exception as exc:
                     logger.warning(
                         "bim_area_geom_failed",
-                        entity_id=getattr(entidad, "id", None),
-                        entity_type=getattr(entidad, "is_a", lambda: "unknown")(),
-                        error=str(exc),
+                        extra={"entity_id": entidad.id(), "entity_type": entidad.is_a(), "error": str(exc)},
                     )
             except Exception as e:
                 propiedades["_error_geometria"] = str(e)

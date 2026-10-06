@@ -23,6 +23,16 @@ from app.engines.costos.parametros import ParametrosCosteoSnapshot, verificar_sn
 from app.core.errors import MegalodonException, ErrorCode
 
 
+def partidas_pendientes(partidas) -> list[int]:
+    return [p.numero for p in partidas if any(v is None or v <= 0
+        for v in (p.cantidad, p.precio_unitario, p.importe))]
+
+
+def presupuesto_completo(presupuesto) -> bool:
+    return bool(presupuesto.partidas and not partidas_pendientes(presupuesto.partidas)
+                and presupuesto.monto_total and presupuesto.monto_total > 0)
+
+
 class PresupuestoService(BaseService[Presupuesto]):
     """Servicio de presupuestos con motor de costeo integrado."""
 
@@ -259,8 +269,7 @@ class PresupuestoService(BaseService[Presupuesto]):
             "factor_riesgo": parametros_costeo.factor_riesgo,
             "zona_economica": zona_economica,
             "metadatos": {"parametros_costeo": parametros_costeo.to_dict(), "catalogo_libro": referencias},
-            "estado": (EstadoPresupuesto.CALCULADO.value if presupuesto_costeo.partidas and all(
-                p.cantidad > 0 and p.precio_unitario > 0 for p in presupuesto_costeo.partidas)
+            "estado": (EstadoPresupuesto.CALCULADO.value if presupuesto_completo(presupuesto_costeo)
                 else EstadoPresupuesto.BORRADOR.value),
             "tenant_id": self.tenant_id,
             "creado_por_id": creado_por_id,
@@ -527,8 +536,7 @@ class PresupuestoService(BaseService[Presupuesto]):
         # vuelva a validar/aprobar contra los números nuevos, en vez de
         # dejar una aprobación "vieja" apuntando a montos que ya no son
         # los que están en pantalla.
-        nuevo_estado = (EstadoPresupuesto.CALCULADO.value if presupuesto_costeo.partidas and all(
-            p.cantidad > 0 and p.precio_unitario > 0 for p in presupuesto_costeo.partidas)
+        nuevo_estado = (EstadoPresupuesto.CALCULADO.value if presupuesto_completo(presupuesto_costeo)
             else EstadoPresupuesto.BORRADOR.value)
 
         await self.update(
@@ -589,10 +597,8 @@ class PresupuestoService(BaseService[Presupuesto]):
             )
         if nuevo_estado in (EstadoPresupuesto.CALCULADO.value, EstadoPresupuesto.VALIDADO.value,
                             EstadoPresupuesto.APROBADO.value):
-            pendientes = [p.numero for p in presupuesto.partidas
-                          if not p.cantidad or p.cantidad <= 0 or not p.precio_unitario
-                          or p.precio_unitario <= 0 or not p.importe or p.importe <= 0]
-            if not presupuesto.partidas or pendientes or not presupuesto.monto_total or presupuesto.monto_total <= 0:
+            pendientes = partidas_pendientes(presupuesto.partidas)
+            if not presupuesto_completo(presupuesto):
                 raise MegalodonException(ErrorCode.PRESUPUESTO_ERROR,
                     "Presupuesto incompleto: capture cantidades y precios antes de validar o aprobar",
                     details={"partidas_pendientes": pendientes})

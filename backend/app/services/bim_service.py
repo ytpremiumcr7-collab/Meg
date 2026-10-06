@@ -136,11 +136,14 @@ class BIMService:
         await self.db.refresh(modelo)
         return modelo
 
-    async def _validar_modelo_en_expediente(self, modelo_id: UUID, expediente_id: UUID) -> ModeloBIM:
+    async def _validar_modelo_en_expediente(self, modelo_id: UUID, expediente_id: UUID, *, bloquear: bool = False) -> ModeloBIM:
         """Obtiene el modelo y verifica que pertenezca al expediente de la URL.
         Levanta 404 si no existe o si el expediente no coincide (no 403, para
         no revelar que el modelo existe bajo otro expediente)."""
-        modelo = (await self.db.execute(select(ModeloBIM).where(ModeloBIM.id == modelo_id, ModeloBIM.expediente_id == expediente_id, ModeloBIM.tenant_id == self.tenant_id))).scalar_one_or_none()
+        query = select(ModeloBIM).where(ModeloBIM.id == modelo_id, ModeloBIM.expediente_id == expediente_id, ModeloBIM.tenant_id == self.tenant_id)
+        if bloquear:
+            query = query.with_for_update().execution_options(populate_existing=True)
+        modelo = (await self.db.execute(query)).scalar_one_or_none()
         if not modelo or str(modelo.expediente_id) != str(expediente_id) or (self.tenant_id is not None and str(modelo.tenant_id) != str(self.tenant_id)):
             raise MegalodonException(
                 ErrorCode.DOCUMENTO_NO_ENCONTRADO,
@@ -170,6 +173,7 @@ class BIMService:
         if not modelo:
             raise MegalodonException(ErrorCode.DOCUMENTO_NO_ENCONTRADO, f"Modelo BIM {modelo_id} no encontrado")
 
+        savepoint = await self.db.begin_nested()
         modelo.estado_procesamiento = EstadoProceso.EN_PROCESO.value
         modelo.tamano_bytes = len(file_content)
         # Keep the aggregate lock until the replacement and summary commit together.
@@ -191,6 +195,8 @@ class BIMService:
 
             resultado = self.motor.cuantificar(tipos_elementos, extraer_malla=extraer_malla)
 
+            if resultado.errores:
+                raise MegalodonException(ErrorCode.BIM_ERROR, "; ".join(resultado.errores[:20]))
             if not resultado.elementos:
                 raise MegalodonException(ErrorCode.BIM_ERROR, "El IFC no contiene elementos cuantificables")
             global_ids = [e.global_id for e in resultado.elementos]
@@ -225,8 +231,9 @@ class BIMService:
 
             modelo.error_procesamiento = "; ".join(resultado.errores[:20])[:2000] if resultado.errores else None
 
+            await self.db.flush()
+            await savepoint.commit()
             await self.db.commit()
-            await self.db.refresh(modelo)
             return modelo
 
         except Exception as e:
@@ -236,7 +243,11 @@ class BIMService:
             # caller/worker decide reintentar), pero ahora también queda
             # en logs con contexto de qué modelo falló.
             logger.exception("bim_service.procesar_ifc: fallo procesando IFC", modelo_id=str(modelo_id), error=str(e))
-            await self.db.rollback()
+            if self.db.get_nested_transaction() is None:
+                # The outer commit failed; its lock is gone. Never overwrite a newer success.
+                await self.db.rollback()
+                raise
+            await savepoint.rollback()
             modelo = (await self.db.execute(select(ModeloBIM).where(ModeloBIM.id == modelo_id, ModeloBIM.tenant_id == self.tenant_id).with_for_update())).scalar_one()
             modelo.estado_procesamiento = EstadoProceso.ERROR.value
             modelo.error_procesamiento = str(e)[:2000]
@@ -274,7 +285,7 @@ class BIMService:
 
         mapeos: [{"elemento_id": UUID, "partida_id": UUID}, ...]
         """
-        await self._validar_modelo_en_expediente(modelo_id, expediente_id)
+        await self._validar_modelo_en_expediente(modelo_id, expediente_id, bloquear=True)
         validated = []
         for m in mapeos:
             elem = (await self.db.execute(select(ElementoBIM).where(
@@ -319,7 +330,7 @@ class BIMService:
         que cada catalogo_apu_id del mapeo pertenezca al mismo tenant que
         el expediente (ver nota de seguridad en
         PresupuestoService.agregar_partida_desde_catalogo)."""
-        await self._validar_modelo_en_expediente(modelo_id, expediente_id)
+        await self._validar_modelo_en_expediente(modelo_id, expediente_id, bloquear=True)
         from app.services.presupuesto_service import PresupuestoService
         from app.models.catalogo_apu import CatalogoAPU
 
@@ -437,7 +448,7 @@ class BIMService:
         [{"elemento_id": UUID, "zona_4d": str}, ...]. Mismo estilo que
         mapear_a_partidas: sin zona_4d asignada, generar_actividades_4d
         cae de vuelta a `nivel`."""
-        await self._validar_modelo_en_expediente(modelo_id, expediente_id)
+        await self._validar_modelo_en_expediente(modelo_id, expediente_id, bloquear=True)
 
         elemento_ids = [a["elemento_id"] for a in asignaciones]
         result = await self.db.execute(

@@ -209,3 +209,75 @@ async def test_database_rejects_cross_expediente_mapping_postgres(db_session, te
     with pytest.raises(IntegrityError, match='BIM: partida fuera'):
         await db_session.flush()
     await db_session.rollback()
+
+@pytest.mark.asyncio
+async def test_failed_reprocessing_preserves_previous_elements(db_session, tenant_a_user):
+    tenant, user = tenant_a_user
+    exp, obj = await model(db_session, tenant, user)
+    svc = BIMService(db_session, tenant.id)
+    content = (Path(__file__).parents[1] / 'fixtures/ifc/wall_metres.ifc').read_bytes()
+    await svc.procesar_ifc(modelo_id=obj.id, file_content=content)
+    before = await svc.listar_elementos(obj.id, exp.id, incluir_malla=True)
+    model_id, exp_id = obj.id, exp.id
+    with pytest.raises(MegalodonException):
+        await svc.procesar_ifc(modelo_id=model_id, file_content=b'not an IFC')
+    after = await svc.listar_elementos(model_id, exp_id, incluir_malla=True)
+    assert after[0].id == before[0].id
+    assert after[0].volumen == before[0].volumen
+    assert after[0].malla_vertices == before[0].malla_vertices
+
+@pytest.mark.asyncio
+async def test_flush_failure_keeps_aggregate_and_records_error(db_session, tenant_a_user):
+    from sqlalchemy import text
+    if db_session.get_bind().dialect.name != 'sqlite':
+        pytest.skip('SQLite trigger injects a real persistence failure')
+    tenant, user = tenant_a_user
+    exp, obj = await model(db_session, tenant, user)
+    svc = BIMService(db_session, tenant.id)
+    content = (Path(__file__).parents[1] / 'fixtures/ifc/wall_metres.ifc').read_bytes()
+    await svc.procesar_ifc(modelo_id=obj.id, file_content=content)
+    model_id, exp_id = obj.id, exp.id
+    before = (await svc.listar_elementos(model_id, exp_id, incluir_malla=True))[0]
+    await db_session.execute(text("CREATE TRIGGER test_bim_fail BEFORE UPDATE ON elementos_bim BEGIN SELECT RAISE(ABORT, 'test persistence error'); END"))
+    await db_session.commit()
+    try:
+        from sqlalchemy.exc import IntegrityError
+        with pytest.raises(IntegrityError):
+            await svc.procesar_ifc(modelo_id=model_id, file_content=content)
+        after = (await svc.listar_elementos(model_id, exp_id, incluir_malla=True))[0]
+        assert after.id == before.id and after.malla_vertices == before.malla_vertices
+        persisted = await db_session.get(ModeloBIM, model_id)
+        assert persisted.estado_procesamiento == 'ERROR'
+    finally:
+        await db_session.execute(text('DROP TRIGGER test_bim_fail'))
+        await db_session.commit()
+
+@pytest.mark.asyncio
+async def test_mapping_locks_budget_identity_until_commit_postgres(db_session, tenant_a_user):
+    from sqlalchemy import text
+    from sqlalchemy.exc import DBAPIError, IntegrityError
+    from tests.conftest import AsyncSessionLocalTest
+    if db_session.get_bind().dialect.name != 'postgresql':
+        pytest.skip('PostgreSQL row-lock and constraint-trigger test')
+    tenant, user = tenant_a_user
+    exp, obj = await model(db_session, tenant, user)
+    other = make_expediente(tenant, user)
+    db_session.add(other); await db_session.flush()
+    budget = Presupuesto(tenant_id=tenant.id, expediente_id=exp.id, identificador=uuid4().hex,
+        nombre='Budget', factor_indirecto=0, factor_utilidad=0, factor_impuesto=0)
+    db_session.add(budget); await db_session.flush()
+    part = Partida(tenant_id=tenant.id, presupuesto_id=budget.id, numero=1,
+        descripcion='Wall',unidad='m2',cantidad=1,precio_unitario=10,importe=10)
+    element = ElementoBIM(modelo_id=obj.id, global_id=uuid4().hex, express_id=1, tipo='IfcWall')
+    db_session.add_all([part,element]); await db_session.commit()
+    ids = dict(part=str(part.id), element=str(element.id), budget=str(budget.id), other=str(other.id))
+    async with AsyncSessionLocalTest() as linking, AsyncSessionLocalTest() as moving:
+        await linking.execute(text('UPDATE elementos_bim SET partida_id=:part WHERE id=:element'), ids)
+        await moving.execute(text("SET LOCAL lock_timeout='300ms'"))
+        with pytest.raises(DBAPIError, match='lock timeout'):
+            await moving.execute(text('UPDATE presupuestos SET expediente_id=:other WHERE id=:budget'), ids)
+        await moving.rollback()
+        await linking.commit()
+        with pytest.raises(IntegrityError, match='BIM: partida fuera'):
+            await moving.execute(text('UPDATE presupuestos SET expediente_id=:other WHERE id=:budget'), ids)
+        await moving.rollback()
