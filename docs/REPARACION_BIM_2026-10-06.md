@@ -26,3 +26,18 @@ La revisión Build en dos ejes detectó escaneo global y ausencia de bloqueo en 
 CAD: cs06.dwg se convirtió con LibreDWG y se abrió con ezdxf. 4.164 entidades de modelspace, 33 capas, $INSUNITS=4 (milímetros declarados), DXF AC1018; audit estructural con cero errores. LibreDWG advierte clases DIMASSOC inestables: la conversión necesita contraste visual antes de considerarse equivalente al original. Todavía no hay importación DWG a cantidades BIM.
 
 Prueba PostgreSQL local: pgserver descargó binarios, pero no pudo crear el usuario de servicio por las restricciones del entorno. No se afirma validación local de triggers PostgreSQL ni de PostGIS. Los nuevos tests PostgreSQL quedan incluidos para CI.
+
+
+## Dependencias detectadas por la auditoría corregida
+
+La primera ejecución real del nuevo CI encontró avisos en dnspython 2.4.2, PyNaCl 1.5.0 y source-map-js 1.2.1. Se actualiza la fuente de dependencias y los locks: dnspython 2.8.0, PyNaCl 1.6.2 y source-map-js 1.2.2. Se repiten chequeo de compatibilidad, pip-audit sobre uv.lock exportado, npm audit, tests backend, sesión frontend y build. No se añaden exclusiones de avisos.
+
+## Standards
+
+Revisión final: sin bloqueos concretos tras corregir alcance y bloqueo de triggers, rollback de savepoint, error tardío del worker y criterio compartido de completitud. La prueba concurrente PostgreSQL se incluye y espera ejecución.
+
+## Spec
+
+Revisión final: sin nuevas desviaciones concretas. Se conservan unidades, identidad y enlaces en reprocesado/fallos; acceso y límites se aplican del lado servidor. DWG sigue siendo evidencia de una conversión a DXF, no una importación a BIM. PostgreSQL/PostGIS y storage externo siguen sujetos a validación de infraestructura.
+
+Resultado final de revisión: 0 bloqueos pendientes en Standards y 0 en Spec; permanece pendiente la acreditación de infraestructura.
