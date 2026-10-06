@@ -17,5 +17,6 @@ class TrabajoProceso(Base, UUIDMixin, TenantMixin):
     proxima_publicacion: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     error_publicacion: Mapped[str | None] = mapped_column(String(500))
     error: Mapped[str | None] = mapped_column(String(500))
+    id_ejecucion: Mapped[UUID | None] = mapped_column(DBUUID(as_uuid=True))
     __table_args__ = (UniqueConstraint('tipo', 'entidad_id', name='uq_trabajo_tipo_entidad'),
         Index('ix_trabajos_proceso_publicacion', 'estado', 'proxima_publicacion'))

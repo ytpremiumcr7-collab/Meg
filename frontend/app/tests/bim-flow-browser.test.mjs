@@ -126,6 +126,11 @@ test('user creates an obra, resumes an IFC job after restart, approves and expor
       assert.ok(bytes.length>500);
       assert.equal(bytes.subarray(0,format==='PDF'?4:2).toString(),format==='PDF'?'%PDF':'PK');
     }
+    // The target must still open correctly when it falls outside the first 20 programs.
+    const fixtures=start('schedule-fixtures',join(backend,'.venv/bin/python'),
+      ['-m','scripts.seed_bim_acceptance_ci','--programs-for',model.expediente_id],backend);
+    const [fixtureExit]=await once(fixtures,'exit');
+    assert.equal(fixtureExit,0);
     await page.getByRole('button',{name:'3. Crear cronograma'}).click();
     await page.locator('input[type="date"]').fill('2026-10-06');
     await page.getByRole('button',{name:'Generar cronograma 4D',exact:true}).click();
@@ -133,7 +138,9 @@ test('user creates an obra, resumes an IFC job after restart, approves and expor
     await page.reload(); // 4D history is recovered too, not only transient component state.
     await page.getByRole('button',{name:'3. Crear cronograma'}).click();
     await page.getByRole('button',{name:'Abrir cronograma en Programación'}).click();
-    await page.getByText(/Cronograma 4D/).first().waitFor();
+    const scheduleId=new URL(page.url()).searchParams.get('programa');
+    assert.ok(scheduleId);
+    await page.waitForFunction(id=>document.querySelector('select[aria-label="Cronograma de esta obra"]')?.value===id,scheduleId);
     await page.screenshot({path:join(evidence,'03-cronograma.png'),fullPage:true});
     await page.setViewportSize({width:390,height:844});
     await page.getByRole('button',{name:'Calculadora BIM',exact:true}).click();
@@ -142,6 +149,17 @@ test('user creates an obra, resumes an IFC job after restart, approves and expor
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);
     await page.screenshot({path:join(evidence,'04-movil.png'),fullPage:true});
     assert.deepEqual(errors,[]);
+    const readerContext=await browser.newContext({viewport:{width:1440,height:1000}});
+    try {
+      const readerPage=await readerContext.newPage();
+      await login(readerPage,credentials.reader);
+      await readerPage.getByRole('button',{name:'Proyectos',exact:true}).click();
+      await readerPage.getByRole('button',{name:/Obra sintética de aceptación BIM/}).click();
+      await readerPage.getByRole('button',{name:'Calculadora BIM',exact:true}).click();
+      await readerPage.getByLabel('Subir archivo IFC').waitFor({state:'attached'});
+      assert.equal(await readerPage.getByLabel('Subir archivo IFC').isDisabled(),true);
+      await readerPage.screenshot({path:join(evidence,'05-solo-lectura.png'),fullPage:true});
+    } finally { await readerContext.close(); }
   } finally {
     await context.tracing.stop({path:join(evidence,'bim-flow-trace.zip')});
     await context.close();

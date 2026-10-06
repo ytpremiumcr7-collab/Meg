@@ -48,12 +48,24 @@ async def publicar_pendientes(db_engine=engine, *, enviar=_enviar, limite=20):
             async with AsyncSession(bind=connection, expire_on_commit=False) as db:
                 now = datetime.now(timezone.utc)
                 job = await db.scalar(select(TrabajoProceso).where(
-                    TrabajoProceso.estado.in_(['PENDIENTE', 'ENVIADO']),
+                    TrabajoProceso.estado.in_(['PENDIENTE', 'ENVIADO', 'EJECUTANDO']),
                     TrabajoProceso.proxima_publicacion <= now
                 ).order_by(TrabajoProceso.proxima_publicacion).limit(1)
                   .with_for_update(skip_locked=True))
                 if job is None:
                     break
+                if job.intentos >= MAX_INTENTOS:
+                    job.estado = 'ERROR'
+                    job.error = 'Se agotaron los intentos de procesamiento. Revisa el archivo y vuelve a intentar.'
+                    try:
+                        entity, state_field, error_field = await _entidad(db, job)
+                    except MegalodonException:
+                        logger.warning('process_entity_deleted', extra={'job_id':str(job.id)})
+                    else:
+                        setattr(entity, state_field, 'ERROR')
+                        setattr(entity, error_field, job.error)
+                    await db.flush()
+                    continue
                 try:
                     await asyncio.to_thread(enviar, str(job.id))
                 except Exception:
@@ -107,6 +119,33 @@ async def _procesar(db, job, entity):
 async def ejecutar_trabajo(trabajo_id, db_engine=engine):
     """Lock delivery and commit exactly one domain result, including restarts."""
     job_id = UUID(str(trabajo_id))
+    token = uuid4()
+    # Persist the start independently: SIGKILL/timeout must consume an attempt.
+    async with db_engine.begin() as connection:
+        if connection.dialect.name == 'sqlite':
+            await connection.exec_driver_sql('BEGIN IMMEDIATE')
+        async with AsyncSession(bind=connection, expire_on_commit=False) as db:
+            job = await db.scalar(select(TrabajoProceso).where(
+                TrabajoProceso.id == job_id).with_for_update())
+            if job is None:
+                return 'ELIMINADO'
+            if job.estado in ('COMPLETADO', 'ERROR'):
+                return job.estado
+            due = job.proxima_publicacion
+            if due.tzinfo is None:
+                due = due.replace(tzinfo=timezone.utc)
+            if job.estado == 'EJECUTANDO' and due > datetime.now(timezone.utc):
+                return 'EN_PROCESO'
+            if job.intentos >= MAX_INTENTOS:
+                # Dispatcher finalizes and exposes the exhausted delivery.
+                job.proxima_publicacion = datetime.now(timezone.utc)
+                await db.flush()
+                return 'PENDIENTE'
+            job.intentos += 1
+            job.estado = 'EJECUTANDO'
+            job.id_ejecucion = token
+            job.proxima_publicacion = datetime.now(timezone.utc) + timedelta(seconds=PLAZO_ENTREGA)
+            await db.flush()
     try:
         async with db_engine.begin() as connection:
             if connection.dialect.name == 'sqlite':
@@ -119,6 +158,8 @@ async def ejecutar_trabajo(trabajo_id, db_engine=engine):
                     return 'ELIMINADO'
                 if job.estado in ('COMPLETADO', 'ERROR'):
                     return job.estado
+                if job.id_ejecucion != token:
+                    return 'EN_PROCESO'
                 entity, state_field, error_field = await _entidad(db, job)
                 if getattr(entity, state_field) != 'COMPLETADO':
                     setattr(entity, state_field, 'EN_PROCESO')
@@ -126,7 +167,6 @@ async def ejecutar_trabajo(trabajo_id, db_engine=engine):
                 setattr(entity, state_field, 'COMPLETADO')
                 setattr(entity, error_field, None)
                 job.estado = 'COMPLETADO'
-                job.intentos += 1
                 job.error = None
                 await db.commit()
                 return 'COMPLETADO'
@@ -141,7 +181,8 @@ async def ejecutar_trabajo(trabajo_id, db_engine=engine):
                     TrabajoProceso.id == job_id).with_for_update())
                 if job is None or job.estado in ('COMPLETADO', 'ERROR'):
                     return job.estado if job else 'ELIMINADO'
-                job.intentos += 1
+                if job.id_ejecucion != token:
+                    return job.estado
                 deterministic = isinstance(exc, MegalodonException) and exc.code != ErrorCode.ARCHIVO_ERROR
                 final = deterministic or job.intentos >= MAX_INTENTOS
                 job.estado = 'ERROR' if final else 'PENDIENTE'
@@ -151,7 +192,7 @@ async def ejecutar_trabajo(trabajo_id, db_engine=engine):
                 try:
                     entity, state_field, error_field = await _entidad(db, job)
                 except MegalodonException:
-                    pass
+                    logger.warning('process_entity_deleted', extra={'job_id':str(job_id)})
                 else:
                     setattr(entity, state_field, 'ERROR' if final else 'PENDIENTE')
                     setattr(entity, error_field, job.error)

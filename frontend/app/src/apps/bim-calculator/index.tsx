@@ -9,6 +9,7 @@ import { useState, useEffect, useRef } from 'react';
 import PresupuestoPanel from './PresupuestoPanel';
 import { abrirModulo } from '@/lib/navigation';
 import { useAuthStore } from '@/stores/useAuthStore';
+import { permisosBim } from '@/lib/bim-permissions';
 import { Building2, Plus, Trash2, Calculator, Download, HardHat, Upload, Loader2, AlertCircle, FolderKanban, Box, FileWarning, ShieldAlert, CheckCircle2, AlertTriangle, Layers, Search, Link2 } from 'lucide-react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Bounds } from '@react-three/drei';
@@ -143,7 +144,7 @@ function ElementoMesh({
 function IFCPanel() {
   const requestId = useRef(0);
   const role = useAuthStore(s => s.user?.role);
-  const canWrite = ['admin', 'superadmin', 'tecnico', 'revisor'].includes(role || '');
+  const { canWrite } = permisosBim(role);
   const [modelos, setModelos] = useState<ModeloBIM[]>([]);
   const [nuevoPresupuestoId, setNuevoPresupuestoId] = useState('');
   const [trabajos, setTrabajos] = useState<Awaited<ReturnType<typeof megalodonClient.bim.listarTrabajos>>>([]);
@@ -553,6 +554,11 @@ function IFCPanel() {
           <button className="p-2 rounded bg-(--surface-elevated)" disabled={!elementos.length} onClick={() => setTabDerecho('cronograma4d')}>3. Crear cronograma</button>
         </nav>
         {procesando && <p role="status">Preparando el modelo… Puedes salir y volver: el trabajo seguirá guardado.</p>}
+        {modelo?.estado_procesamiento === 'ERROR' && canWrite && !trabajos.some(j => j.tipo === 'BIM_IFC') &&
+          <button className="p-2 border rounded border-(--border-subtle)" onClick={() =>
+            void megalodonClient.bim.reprocesarModelo(expedienteActivo.id, modelo.id).then(cargarModelo).catch(e => setError(e.message))}>
+            Volver a procesar todos los elementos y su geometría
+          </button>}
         {!canWrite && <p>Tu cuenta permite consultar esta obra. Un técnico puede cargar o modificar el modelo.</p>}
         {trabajos.filter(j => j.estado !== 'COMPLETADO').map(j => <div key={j.id} className="flex gap-2 items-center" role="status">
           <span>{j.tipo === 'BIM_IFC' ? 'Modelo' : j.tipo === 'BIM_4D' ? 'Cronograma' : 'Interferencias'}: {j.estado === 'ERROR' ? 'Requiere atención' : 'En preparación'}. {j.mensaje || 'Continuará automáticamente.'}</span>
@@ -1087,9 +1093,10 @@ function IFCPanel() {
                     {generacion4D?.estado === 'COMPLETADO' && (
                       <p className="text-[10px] mt-1.5" style={{ color: 'var(--text-secondary)' }}>
                         Listo: {generacion4D.num_actividades_generadas} actividad(es) creadas (agrupado por {generacion4D.agrupar_por}). Ábrelas en Programación para secuenciarlas y calcular la ruta crítica.
-                        <button className="block p-2 mt-2 rounded bg-(--accent-gold) text-(--void)" onClick={() => abrirModulo('programacion-obra')}>Abrir cronograma en Programación</button>
+                        <button className="block p-2 mt-2 rounded bg-(--accent-gold) text-(--void)" onClick={() => abrirModulo('programacion-obra', generacion4D.programa_id || undefined)}>Abrir cronograma en Programación</button>
                       </p>
                     )}
+                    {generacion4D?.estado === 'ERROR' && !error4D && <p role="alert" className="text-xs text-(--danger)">{generacion4D.error} Revisa fecha y duración para generar otro cronograma.</p>}
                     {error4D && (
                       <p className="text-[10px] mt-1.5 flex items-center gap-1" style={{ color: 'var(--danger)' }}>
                         <AlertCircle size={10} /> {error4D}

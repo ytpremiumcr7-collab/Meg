@@ -210,7 +210,7 @@ jobs:
       OTEL_EXPORTER_OTLP_ENDPOINT: ""
       SUPABASE_URL: ""
       SUPABASE_SERVICE_KEY: ""
-      BIM_ACCEPTANCE_CREDENTIALS: ${{ runner.temp }}/bim-acceptance.json
+      BIM_ACCEPTANCE_CREDENTIALS: /tmp/megalodon-bim-acceptance.json
       BIM_EVIDENCE_DIR: ${{ github.workspace }}/bim-browser-evidence
       VITE_API_URL: http://127.0.0.1:8000
     steps:

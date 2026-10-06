@@ -1504,6 +1504,8 @@ export class MegalodonClient {
   };
 
   bim = {
+    reprocesarModelo: async (expedienteId: string, modeloId: string): Promise<ModeloBIM> =>
+      this.request('POST', `/bim/${expedienteId}/modelos/${modeloId}/reprocesar`, {tipos_elementos:null, extraer_malla:true}),
     listarTrabajos: async (expedienteId: string, modeloId: string): Promise<Array<{
       id: string; tipo: string; entidad_id: string; estado: string; intentos: number; mensaje: string | null;
     }>> => this.request('GET', `/bim/${expedienteId}/modelos/${modeloId}/trabajos`),

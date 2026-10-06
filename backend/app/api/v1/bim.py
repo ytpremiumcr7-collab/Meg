@@ -24,7 +24,8 @@ from datetime import datetime
 from typing import Dict, List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, UploadFile, File, Form
+from fastapi import APIRouter, Depends, UploadFile, File, Form, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -224,12 +225,17 @@ async def subir_modelo_bim(
 async def descargar_modelo_bim(
     expediente_id: UUID,
     modelo_id: UUID,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user), _rate_limit: bool = Depends(rate_limit_standard),
 ):
     """URL firmada temporal para descargar el IFC original desde
     Supabase Storage directamente (no pasa por el backend)."""
     service = BIMService(db, tenant_id=current_user.tenant_id)
+    if settings.BIM_STORAGE_PROVIDER == 'filesystem':
+        await service._validar_modelo_en_expediente(modelo_id, expediente_id)
+        return {'url': str(request.url_for('descargar_ifc_local', expediente_id=str(expediente_id),
+            modelo_id=str(modelo_id))), 'expira_en_segundos': 0}
     url = await service.url_descarga_modelo(modelo_id, expediente_id=expediente_id)
     return {"url": url, "expira_en_segundos": 3600}
 
@@ -501,3 +507,52 @@ async def listar_generaciones_bim(expediente_id: UUID, modelo_id: UUID,
     return (await db.scalars(select(GeneracionBIM4D5D).where(
         GeneracionBIM4D5D.modelo_id == modelo_id, GeneracionBIM4D5D.tenant_id == current_user.tenant_id)
         .order_by(GeneracionBIM4D5D.created_at.desc()).limit(100))).all()
+
+
+@router.get('/{expediente_id}/modelos/{modelo_id}/archivo')
+async def descargar_ifc_local(expediente_id: UUID, modelo_id: UUID,
+    db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    if settings.BIM_STORAGE_PROVIDER != 'filesystem' or settings.is_production:
+        raise MegalodonException(ErrorCode.DOCUMENTO_NO_ENCONTRADO, 'Archivo no encontrado', status_code=404)
+    from app.integrations.filesystem_storage import FilesystemBIMStorage
+    model = await BIMService(db, current_user.tenant_id)._validar_modelo_en_expediente(modelo_id, expediente_id)
+    path = FilesystemBIMStorage().path(model.ruta_archivo)
+    if not path.is_file():
+        raise MegalodonException(ErrorCode.DOCUMENTO_NO_ENCONTRADO, 'Archivo no encontrado', status_code=404)
+    return FileResponse(path, media_type='application/x-step', filename='original.ifc')
+
+
+class ReprocesarModeloRequest(BaseModel):
+    tipos_elementos: Optional[List[str]] = None
+    extraer_malla: bool = True
+
+
+@router.post('/{expediente_id}/modelos/{modelo_id}/reprocesar', response_model=ModeloBIMOut)
+async def reprocesar_modelo(expediente_id: UUID, modelo_id: UUID, data: ReprocesarModeloRequest,
+    db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
+    _rate_limit: bool = Depends(rate_limit_strict)):
+    from datetime import timezone
+    from app.models.process_job import TrabajoProceso
+    from app.core.process_queue import registrar_trabajo
+    query = select(TrabajoProceso).where(TrabajoProceso.tenant_id == current_user.tenant_id,
+        TrabajoProceso.entidad_id == modelo_id, TrabajoProceso.tipo == 'BIM_IFC')
+    job = await db.scalar(query.with_for_update())
+    model = await BIMService(db, current_user.tenant_id)._validar_modelo_en_expediente(
+        modelo_id, expediente_id, bloquear=True)
+    if job is None:
+        # A concurrent legacy request may have created the intent while we
+        # waited for the model. Never acquire a job lock after a model lock.
+        if await db.scalar(query) is not None:
+            raise MegalodonException(ErrorCode.BIM_ERROR, 'Ya se registró el procesamiento; actualiza el modelo', status_code=409)
+    if job is not None and job.estado not in ('ERROR', 'COMPLETADO'):
+        raise MegalodonException(ErrorCode.BIM_ERROR, 'El modelo ya está en procesamiento', status_code=409)
+    params = data.model_dump()
+    if job is None:
+        registrar_trabajo(db, model, 'BIM_IFC', params)
+    else:
+        job.parametros, job.estado, job.intentos = params, 'PENDIENTE', 0
+        job.error = job.error_publicacion = job.id_ejecucion = None
+        job.proxima_publicacion = datetime.now(timezone.utc)
+    model.estado_procesamiento, model.error_procesamiento = 'PENDIENTE', None
+    await db.commit()
+    return model

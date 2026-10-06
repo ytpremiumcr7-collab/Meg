@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { megalodonClient } from '@/lib/api-client';
 import type { Presupuesto } from '@/lib/megalodon-client';
 import { useAuthStore } from '@/stores/useAuthStore';
+import { permisosBim } from '@/lib/bim-permissions';
 
 const money = (value: number) => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(value);
 const buttonClass = 'px-3 py-2 rounded-md text-xs border border-(--border-subtle) disabled:opacity-40 disabled:cursor-not-allowed';
@@ -12,8 +13,7 @@ export default function PresupuestoPanel({ expedienteId, nuevoId }: { expediente
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const role = useAuthStore(s => s.user?.role);
-  const canWrite = ['admin', 'superadmin', 'tecnico', 'revisor'].includes(role || '');
-  const canApprove = ['admin', 'superadmin', 'revisor'].includes(role || '');
+  const { canWrite, canApprove } = permisosBim(role);
   useEffect(() => {
     let active = true;
     setError('');

@@ -122,7 +122,8 @@ def inventory(conn):
         return result, versions[0][0]
 
 
-def projection_query(table, columns, migrated=False, source_transforms=False, historical_profile_ids=None):
+def projection_query(table, columns, migrated=False, source_transforms=False, historical_profile_ids=None,
+                     recover_lost_jobs=False, has_jobs=False):
     expressions = []
     for original, kind in columns:
         name = RENAMES.get(table, {}).get(original, original) if migrated else original
@@ -134,6 +135,18 @@ def projection_query(table, columns, migrated=False, source_transforms=False, hi
             expression = sql.SQL('{}::numeric(18,8)').format(expression)
         if source_transforms and table == "jurisdiction_profiles" and original == "templates":
             expression = expected_templates_expression()
+        legacy_jobs = {'modelos_bim':('BIM_IFC','estado_procesamiento','error_procesamiento'),
+                       'generaciones_bim_4d5d':('BIM_4D','estado','error'),
+                       'analisis_clash':('BIM_CLASH','estado','error')}
+        if recover_lost_jobs and table in legacy_jobs:
+            kind, state, error = legacy_jobs[table]
+            if original in (state, error):
+                missing = (sql.SQL('NOT EXISTS (SELECT 1 FROM trabajos_proceso j WHERE j.entidad_id={}.id AND j.tipo={})')
+                           .format(sql.Identifier(table),sql.Literal(kind)) if has_jobs else sql.SQL('true'))
+                replacement = ('ERROR' if original == state else
+                    'Trabajo anterior sin orden durable. Revise los parámetros y vuelva a solicitarlo.')
+                expression = sql.SQL("CASE WHEN {} IN ('PENDIENTE','EN_PROCESO') AND {} THEN {} ELSE {} END").format(
+                    sql.Identifier(state),missing,sql.Literal(replacement),expression)
         if (not migrated and original in UTC_COLUMNS.get(table, ())
                 and kind == "timestamp without time zone"):
             expression = sql.SQL("({} AT TIME ZONE 'UTC')").format(expression)
@@ -149,7 +162,8 @@ def projection_query(table, columns, migrated=False, source_transforms=False, hi
     """).format(sql.SQL(", ").join(expressions), sql.Identifier("public", table), where)
 
 
-def fingerprints(conn, tables, migrated=False, source_transforms=False, historical_profile_ids=None):
+def fingerprints(conn, tables, migrated=False, source_transforms=False, historical_profile_ids=None,
+                 recover_lost_jobs=False):
     result = {}
     for number, (table, columns) in enumerate(tables.items()):
         h, count = hashlib.sha256(), 0
@@ -157,7 +171,8 @@ def fingerprints(conn, tables, migrated=False, source_transforms=False, historic
         # real historical database. Duplicate rows participate in the digest.
         with conn.cursor(name=f"rehearsal_rows_{number}") as cursor:
             cursor.itersize = 1000
-            cursor.execute(projection_query(table, columns, migrated, source_transforms, historical_profile_ids))
+            cursor.execute(projection_query(table, columns, migrated, source_transforms, historical_profile_ids,
+                                            recover_lost_jobs, 'trabajos_proceso' in tables))
             for (row,) in cursor:
                 h.update(row.encode("utf-8") + b"\n")
                 count += 1
@@ -208,10 +223,12 @@ def run_rehearsal(backup, uri, env):
     with read_snapshot(uri, env) as conn:
         tables, revision = inventory(conn)
         require(revision in {HISTORICAL, '20260930_identity_authority', '20261001_indices_materiales',
-                            '20261001_indices_revision', HEAD},
+                            '20261001_indices_revision', '20261006_bim_integridad',
+                            '20261006_trabajos_durables', HEAD},
                 "Backup revision outside the reviewed migration interval")
         before = fingerprints(conn, tables)
-        expected = fingerprints(conn, tables, source_transforms=True) if revision == HISTORICAL else before
+        expected = (fingerprints(conn, tables, source_transforms=revision == HISTORICAL,
+                                 recover_lost_jobs=True) if revision != HEAD else before)
         with conn.cursor() as cursor:
             cursor.execute("SELECT id::text FROM public.jurisdiction_profiles ORDER BY id")
             profile_ids = [row[0] for row in cursor]
@@ -227,11 +244,12 @@ def run_rehearsal(backup, uri, env):
         indices_tables = {'series_indices_costos', 'observaciones_indices_costos',
                          'vinculos_indices_insumos', 'retiros_indices_costos', 'cargas_indices_costos'}
         expected_tables |= indices_tables
+        expected_tables.add('trabajos_proceso')
         require(target == HEAD and set(current) == expected_tables, "Unexpected revision or historical table changes")
-        for table in indices_tables - set(tables):
+        for table in (indices_tables | {'trabajos_proceso'}) - set(tables):
             with conn.cursor() as cursor:
                 cursor.execute(sql.SQL('SELECT count(*) FROM {}').format(sql.Identifier('public', table)))
-                require(cursor.fetchone()[0] == 0, 'Historical upgrade must not invent index observations or mappings')
+                require(cursor.fetchone()[0] == 0, 'Historical upgrade must not invent observations, mappings or job parameters')
         after = fingerprints(conn, tables, migrated=revision != HEAD,
                              historical_profile_ids=profile_ids if revision == HISTORICAL else None)
         compare(expected, after)

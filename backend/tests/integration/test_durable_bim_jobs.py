@@ -47,14 +47,17 @@ async def test_redelivery_creates_exactly_one_real_program(db_session, tenant_a_
     if engine_test.dialect.name == 'postgresql':
         import asyncio
         # Independent connections execute duplicate deliveries concurrently.
-        assert await asyncio.gather(ejecutar_trabajo(job_id, engine_test),
-            ejecutar_trabajo(job_id, engine_test)) == ['COMPLETADO', 'COMPLETADO']
+        results = await asyncio.gather(ejecutar_trabajo(job_id, engine_test),
+            ejecutar_trabajo(job_id, engine_test))
+        assert 'COMPLETADO' in results
+        assert set(results) <= {'COMPLETADO', 'EN_PROCESO'}
     else:
         assert await ejecutar_trabajo(job_id, engine_test) == 'COMPLETADO'
         assert await ejecutar_trabajo(job_id, engine_test) == 'COMPLETADO'
     db_session.expire_all()
     generation = await db_session.get(GeneracionBIM4D5D, gen_id)
     assert generation.estado == 'COMPLETADO'
+    assert (await db_session.get(TrabajoProceso, job_id)).estado == 'COMPLETADO'
     programs = (await db_session.scalars(select(ProgramaObra).where(
         ProgramaObra.expediente_id == exp_id))).all()
     assert len(programs) == 1
@@ -138,3 +141,44 @@ async def test_failed_completion_rolls_back_program_and_all_service_commits(db_s
         await db_session.commit()
     assert await ejecutar_trabajo(job_id, engine_test) == 'COMPLETADO'
     assert len(list(await db_session.scalars(select(ProgramaObra).where(ProgramaObra.expediente_id == exp_id)))) == 1
+
+
+@pytest.mark.asyncio
+async def test_expired_worker_is_bounded_and_visible(db_session, tenant_a_user):
+    tenant, user = tenant_a_user
+    exp, obj = await model(db_session, tenant, user)
+    job = registrar_trabajo(db_session, obj, 'BIM_IFC', {})
+    job.estado = 'EJECUTANDO'
+    job.intentos = 3
+    job.proxima_publicacion = datetime.now(timezone.utc)
+    await db_session.commit()
+    delivered = []
+    await publicar_pendientes(engine_test, enviar=delivered.append)
+    await db_session.refresh(job)
+    await db_session.refresh(obj)
+    assert str(job.id) not in delivered
+    assert job.estado == obj.estado_procesamiento == 'ERROR'
+    assert 'agotaron' in job.error
+
+
+@pytest.mark.asyncio
+async def test_local_original_download_is_authenticated_and_tenant_scoped(async_client, db_session,
+    tenant_a_user, tenant_b_user, auth_headers, tmp_path, monkeypatch):
+    from app.config import settings
+    from app.services.bim_service import BIMService
+    from tests.conftest import _login
+    monkeypatch.setattr(settings, 'BIM_STORAGE_PROVIDER', 'filesystem')
+    monkeypatch.setattr(settings, 'BIM_LOCAL_STORAGE_PATH', str(tmp_path))
+    tenant, user = tenant_a_user
+    exp, _ = await model(db_session, tenant, user)
+    original = b'ISO-10303-21; real stored bytes'
+    uploaded = await BIMService(db_session, tenant.id).crear_modelo(
+        expediente_id=exp.id, nombre='Original', file_content=original, filename='original.ifc')
+    path = f'/api/v1/bim/{exp.id}/modelos/{uploaded.id}'
+    download = await async_client.get(path+'/descarga', headers=auth_headers)
+    assert download.status_code == 200
+    file = await async_client.get(download.json()['url'], headers=auth_headers)
+    assert file.status_code == 200 and file.content == original
+    assert download.json()['expira_en_segundos'] == 0
+    other_headers = await _login(async_client, tenant_b_user[1].email)
+    assert (await async_client.get(path+'/archivo', headers=other_headers)).status_code == 404

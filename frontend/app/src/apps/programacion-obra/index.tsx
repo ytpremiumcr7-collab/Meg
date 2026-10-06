@@ -240,9 +240,17 @@ export default function ProgramacionObra() {
     setLoading(true);
     setError('');
     try {
+      const solicitado = new URLSearchParams(window.location.search).get('programa');
       const lista = await megalodonClient.programacion.listar(expedienteId);
+      if (solicitado && !lista.some(p => p.id === solicitado)) {
+        const detalle = await megalodonClient.programacion.obtener(expedienteId, solicitado);
+        lista.unshift(detalle.programa);
+      }
       setProgramas(lista);
-      if (!programaId && lista.length > 0) setProgramaId(lista[0].id);
+      setProgramaId(previous => {
+        if (solicitado && lista.some(p => p.id === solicitado)) return solicitado;
+        return lista.some(p => p.id === previous) ? previous : lista[0]?.id || null;
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudieron cargar los programas');
     } finally {
@@ -336,6 +344,7 @@ export default function ProgramacionObra() {
         <div className="flex items-center gap-2">
           {programas.length > 0 && (
             <select
+              aria-label="Cronograma de esta obra"
               value={programaId || ''}
               onChange={(e) => { setProgramaId(e.target.value); setSelectedId(null); }}
               className="h-8 bg-[#12121A] border border-[#2A2A3E] rounded-md px-2 text-xs text-[#E8E4DC] outline-hidden"
