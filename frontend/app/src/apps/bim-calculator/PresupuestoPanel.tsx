@@ -63,6 +63,14 @@ export default function PresupuestoPanel({ expedienteId, nuevoId }: { expediente
       {budget && <>
         <div className="flex justify-between text-sm"><span role="status">Estado: {budget.estado}</span><strong>{money(budget.monto_total)}</strong></div>
         {coverage && <p role="status" className="text-xs">{coverage.completa ? 'Mediciones completas' : 'Presupuesto PARCIAL'}: {coverage.elementos_medidos} de {coverage.elementos_totales} elementos medidos. {coverage.capturas.length} capturas con referencia.</p>}
+        {!!coverage?.capturas.length && <details className="text-xs space-y-2">
+          <summary className="cursor-pointer">Ver fuentes de las cantidades capturadas</summary>
+          {coverage.capturas.map(capture => <div key={capture.elemento_id} className="p-2 rounded bg-(--surface-elevated) break-words">
+            <p>{capture.cantidad} {capture.unidad} · {capture.referencia}</p>
+            <p className="text-(--text-muted) break-all">Elemento: {capture.elemento_id}</p>
+            <p className="text-(--text-muted) break-all">Usuario: {capture.usuario_id} · {new Date(capture.capturado_en).toLocaleString('es-MX')}</p>
+          </div>)}
+        </details>}
         {!complete && <p className="text-xs text-(--warning)">Lo medido ya está costeado cuando tiene precio. Quedan {coverage?.elementos_pendientes.length || 0} elementos sin medición y {pending.length} partida(s) pendientes. Completa las mediciones arriba y asigna precios para generar una nueva versión. La aprobación está bloqueada.</p>}
         <div className="overflow-x-auto"><table className="w-full text-xs"><caption className="sr-only">Partidas del presupuesto</caption>
           <thead><tr><th className="text-left p-1">Concepto</th><th>Cantidad</th><th>Unidad</th><th>Precio</th><th>Importe</th></tr></thead>
