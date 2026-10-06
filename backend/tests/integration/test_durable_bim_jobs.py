@@ -14,6 +14,49 @@ from tests.integration.test_bim_regressions import model
 
 
 @pytest.mark.asyncio
+async def test_killed_executor_consumes_attempt_and_recovers_without_duplicate(db_session, tenant_a_user):
+    import asyncio
+    import os
+    import subprocess
+    import sys
+    tenant, user = tenant_a_user
+    exp, obj = await model(db_session, tenant, user)
+    db_session.add(ElementoBIM(modelo_id=obj.id, global_id=uuid4().hex,
+        express_id=1, tipo='IfcWall', area=16, volumen=2, longitud=4))
+    gen = GeneracionBIM4D5D(id=uuid4(), tenant_id=tenant.id,
+        modelo_id=obj.id, expediente_id=exp.id, dias_por_defecto=5)
+    db_session.add(gen)
+    job = registrar_trabajo(db_session, gen, 'BIM_4D', {
+        'fecha_inicio_iso':'2026-10-06T00:00:00+00:00','dias_por_defecto':5})
+    job_id, exp_id = job.id, exp.id
+    await db_session.commit()
+    # Kill a separate process during domain execution, after its durable start.
+    code = '''import asyncio, os, signal
+import app.models
+from app.core import process_queue
+async def crash(*args):
+    os.kill(os.getpid(), signal.SIGKILL)
+process_queue._procesar = crash
+asyncio.run(process_queue.ejecutar_trabajo(os.environ['CRASH_JOB_ID']))
+'''
+    result = await asyncio.to_thread(subprocess.run, [sys.executable,'-c',code],
+        env=dict(os.environ,CRASH_JOB_ID=str(job_id),
+                 DATABASE_URL=engine_test.url.render_as_string(hide_password=False)),
+        capture_output=True,timeout=20)
+    assert result.returncode == -9
+    db_session.expire_all()
+    job = await db_session.get(TrabajoProceso,job_id)
+    assert job.intentos == 1 and job.estado == 'EJECUTANDO'
+    assert not list(await db_session.scalars(select(ProgramaObra).where(ProgramaObra.expediente_id == exp_id)))
+    job.proxima_publicacion = datetime.now(timezone.utc)
+    await db_session.commit()
+    assert await ejecutar_trabajo(job_id,engine_test) == 'COMPLETADO'
+    db_session.expire_all()
+    assert (await db_session.get(TrabajoProceso,job_id)).intentos == 2
+    assert len(list(await db_session.scalars(select(ProgramaObra).where(ProgramaObra.expediente_id == exp_id)))) == 1
+
+
+@pytest.mark.asyncio
 async def test_job_and_generation_rollback_together(db_session, tenant_a_user):
     tenant, user = tenant_a_user
     exp, obj = await model(db_session, tenant, user)
