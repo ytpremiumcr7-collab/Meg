@@ -88,8 +88,9 @@ function NuevoExpedienteForm({ onClose }: { onClose: () => void }) {
         <div className="space-y-3">
           {CAMPOS_REQUERIDOS.map((campo) => (
             <div key={campo.key}>
-              <label className="block text-[11px] text-[#8A8578] mb-1">{campo.label} *</label>
+              <label htmlFor={`expediente-${campo.key}`} className="block text-[11px] text-[#8A8578] mb-1">{campo.label} *</label>
               <input
+                id={`expediente-${campo.key}`}
                 value={form[campo.key] || ''}
                 onChange={(e) => set(campo.key, e.target.value)}
                 placeholder={campo.placeholder}
@@ -123,8 +124,9 @@ function NuevoExpedienteForm({ onClose }: { onClose: () => void }) {
 
           {CAMPOS_OPCIONALES.map((campo) => (
             <div key={campo.key}>
-              <label className="block text-[11px] text-[#8A8578] mb-1">{campo.label}</label>
+              <label htmlFor={`expediente-${campo.key}`} className="block text-[11px] text-[#8A8578] mb-1">{campo.label}</label>
               <input
+                id={`expediente-${campo.key}`}
                 value={form[campo.key] || ''}
                 onChange={(e) => set(campo.key, e.target.value)}
                 placeholder={campo.placeholder}

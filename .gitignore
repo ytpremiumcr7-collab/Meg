@@ -22,3 +22,6 @@ htmlcov/
 
 # Private datasets are mounted at runtime, never committed.
 backend/data/private/
+bim-browser-evidence/
+frontend/app/bim-browser-evidence/
+backend/storage/bim/

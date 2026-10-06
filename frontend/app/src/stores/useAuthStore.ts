@@ -39,7 +39,7 @@ export const useAuthStore = create<AuthState>((set) => ({
         try {
           const backendUser = await megalodonClient.auth.me();
           set({ user: { id: backendUser.id, name: backendUser.full_name,
-            username: backendUser.email, isGuest: false }, isAuthenticated: true });
+            username: backendUser.email, isGuest: false, role: backendUser.role }, isAuthenticated: true });
           const { useEntitlementsStore } = await import('./useEntitlementsStore');
           void useEntitlementsStore.getState().cargar();
         } catch { set({ user: null, isAuthenticated: false }); }
@@ -59,6 +59,7 @@ export const useAuthStore = create<AuthState>((set) => ({
         name: backendUser.full_name,
         username: backendUser.email,
         isGuest: false,
+        role: backendUser.role,
       };
       set({
         user,

@@ -32,7 +32,7 @@ export default function TopBar({ title }: TopBarProps) {
 
   return (
     <header
-      className="flex items-center justify-between h-16 px-6 shrink-0 border-b"
+      className="flex items-center justify-between h-16 px-3 sm:px-6 shrink-0 border-b"
       style={{ background: 'var(--surface)', borderColor: 'var(--border-subtle)' }}
     >
       <div className="flex items-center gap-3">
@@ -44,7 +44,7 @@ export default function TopBar({ title }: TopBarProps) {
           style={{ background: 'rgba(90,158,111,0.12)', color: 'var(--success)' }}
         >
           <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--success)' }} />
-          Sistema Óptimo
+          Sesión activa
         </span>
       </div>
 

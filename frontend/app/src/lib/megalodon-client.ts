@@ -1504,6 +1504,13 @@ export class MegalodonClient {
   };
 
   bim = {
+    listarTrabajos: async (expedienteId: string, modeloId: string): Promise<Array<{
+      id: string; tipo: string; entidad_id: string; estado: string; intentos: number; mensaje: string | null;
+    }>> => this.request('GET', `/bim/${expedienteId}/modelos/${modeloId}/trabajos`),
+    reintentarTrabajo: async (expedienteId: string, modeloId: string, trabajoId: string) =>
+      this.request('POST', `/bim/${expedienteId}/modelos/${modeloId}/trabajos/${trabajoId}/reintentar`),
+    listarGeneraciones: async (expedienteId: string, modeloId: string): Promise<GeneracionBIM4D5D[]> =>
+      this.request('GET', `/bim/${expedienteId}/modelos/${modeloId}/generaciones-4d5d`),
     /** Modelos de un expediente, más reciente primero -- para elegir cuál
      * mostrar sin tener que ya saber su modelo_id de antemano. */
     listarModelos: async (expedienteId: string): Promise<ModeloBIM[]> => {

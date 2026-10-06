@@ -44,8 +44,14 @@ async def test_redelivery_creates_exactly_one_real_program(db_session, tenant_a_
         'fecha_inicio_iso':'2026-10-06T00:00:00+00:00', 'dias_por_defecto':5})
     job_id, gen_id, exp_id = job.id, gen.id, exp.id
     await db_session.commit()
-    assert await ejecutar_trabajo(job_id, engine_test) == 'COMPLETADO'
-    assert await ejecutar_trabajo(job_id, engine_test) == 'COMPLETADO'
+    if engine_test.dialect.name == 'postgresql':
+        import asyncio
+        # Independent connections execute duplicate deliveries concurrently.
+        assert await asyncio.gather(ejecutar_trabajo(job_id, engine_test),
+            ejecutar_trabajo(job_id, engine_test)) == ['COMPLETADO', 'COMPLETADO']
+    else:
+        assert await ejecutar_trabajo(job_id, engine_test) == 'COMPLETADO'
+        assert await ejecutar_trabajo(job_id, engine_test) == 'COMPLETADO'
     db_session.expire_all()
     generation = await db_session.get(GeneracionBIM4D5D, gen_id)
     assert generation.estado == 'COMPLETADO'
