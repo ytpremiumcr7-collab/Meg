@@ -223,7 +223,7 @@ function IFCPanel() {
     const current = ++requestId.current;
     setProcesando(true); setError(''); setModelo(selected); setElementos([]);
     setSeleccionado(null); setNivelFiltro('__todos__'); setGeneracion4D(null);
-    setMapeoCatalogo({}); setResultadosCatalogo({}); setBusquedaCatalogo({});
+    setMapeoCatalogo({}); setResultadosCatalogo({}); setBusquedaCatalogo({}); setErroresCatalogo({});
     setAnalisis(null); setClashes([]); setClashesResaltados(new Set()); setTrabajos([]);
     try {
       const ready = ['COMPLETADO', 'ERROR'].includes(selected.estado_procesamiento)
@@ -312,6 +312,7 @@ function IFCPanel() {
   // --- 5D: mapeo de tipos a catálogo real (precio real, no inventado) ---
   const [busquedaCatalogo, setBusquedaCatalogo] = useState<Record<string, string>>({});
   const [resultadosCatalogo, setResultadosCatalogo] = useState<Record<string, CatalogoAPUOut[]>>({});
+  const [erroresCatalogo, setErroresCatalogo] = useState<Record<string, string>>({});
   const [buscandoCatalogo, setBuscandoCatalogo] = useState<string | null>(null);
   const [mapeoCatalogo, setMapeoCatalogo] = useState<Record<string, CatalogoAPUOut>>({});
   const [generandoPresupuestoReal, setGenerandoPresupuestoReal] = useState(false);
@@ -371,11 +372,13 @@ function IFCPanel() {
     const q = busquedaCatalogo[tipo]?.trim();
     if (!q) return;
     setBuscandoCatalogo(tipo);
+    setErroresCatalogo(prev => ({ ...prev, [tipo]: '' }));
     try {
       const { items } = await megalodonClient.catalogoApu.listar({ q, limit: 8 });
       setResultadosCatalogo((prev) => ({ ...prev, [tipo]: items }));
-    } catch {
+    } catch (e) {
       setResultadosCatalogo((prev) => ({ ...prev, [tipo]: [] }));
+      setErroresCatalogo(prev => ({ ...prev, [tipo]: e instanceof Error ? e.message : 'No se pudo consultar el catálogo. Intenta buscar de nuevo.' }));
     } finally {
       setBuscandoCatalogo(null);
     }
@@ -994,7 +997,8 @@ function IFCPanel() {
                                 ))}
                               </div>
                             )}
-                            {buscandoCatalogo !== tipo && busquedaCatalogo[tipo] && (resultadosCatalogo[tipo]?.length === 0) && (
+                            {erroresCatalogo[tipo] && <p role="alert" className="text-[11px] mt-1" style={{ color: 'var(--danger)' }}>{erroresCatalogo[tipo]}</p>}
+                            {!erroresCatalogo[tipo] && buscandoCatalogo !== tipo && busquedaCatalogo[tipo] && (resultadosCatalogo[tipo]?.length === 0) && (
                               <p className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>Sin resultados.</p>
                             )}
                           </>

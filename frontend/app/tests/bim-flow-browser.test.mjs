@@ -112,7 +112,11 @@ test('user creates an obra, resumes an IFC job after restart, approves and expor
     assert.equal(elements[0].volumen,2.4); assert.ok(elements[0].malla_vertices.length>0);
     await page.getByRole('button',{name:'2. Preparar presupuesto'}).click();
     await page.getByPlaceholder('Buscar en catálogo (ej. muro, concreto)...').fill('Muro de prueba');
-    await page.getByRole('button',{name:'Buscar concepto para IfcWall'}).click();
+    const [catalogResponse]=await Promise.all([
+      page.waitForResponse(r=>r.url().includes('/api/v1/catalogo-apu?')&&r.request().method()==='GET'),
+      page.getByRole('button',{name:'Buscar concepto para IfcWall'}).click(),
+    ]);
+    assert.equal(catalogResponse.status(),200);
     await page.getByRole('button',{name:/Muro de prueba sintética CI/}).click();
     await page.getByPlaceholder('Fuente: contrato, convocatoria o análisis').fill('Prueba sintética CI: factores cero explícitos');
     await page.getByRole('button',{name:'Generar presupuesto',exact:true}).click();
@@ -165,7 +169,11 @@ test('user creates an obra, resumes an IFC job after restart, approves and expor
     // Select the m3 catalogue for this model too; captures must use its unit.
     if (await page.getByPlaceholder('Buscar en catálogo (ej. muro, concreto)...').count()) {
       await page.getByPlaceholder('Buscar en catálogo (ej. muro, concreto)...').fill('Muro de prueba');
-      await page.getByRole('button',{name:'Buscar concepto para IfcWall'}).click();
+      const [catalogResponse]=await Promise.all([
+        page.waitForResponse(r=>r.url().includes('/api/v1/catalogo-apu?')&&r.request().method()==='GET'),
+        page.getByRole('button',{name:'Buscar concepto para IfcWall'}).click(),
+      ]);
+      assert.equal(catalogResponse.status(),200);
       await page.getByRole('button',{name:/Muro de prueba sintética CI/}).click();
     }
     await page.getByPlaceholder('Fuente: contrato, convocatoria o análisis').fill('Prueba parcial: factores cero explícitos');

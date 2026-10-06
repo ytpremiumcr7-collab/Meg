@@ -8,6 +8,7 @@ Schemas de catálogo APU.
 """
 from typing import Optional, List
 from datetime import datetime
+from uuid import UUID
 from pydantic import BaseModel, Field
 
 from app.models.catalogo_apu import TipoConceptoAPU, UnidadMedida
@@ -27,7 +28,7 @@ class CatalogoAPUCreate(BaseModel):
 
 
 class CatalogoAPUOut(BaseModel):
-    id: str
+    id: UUID
     clave: str
     descripcion: str
     tipo: str
