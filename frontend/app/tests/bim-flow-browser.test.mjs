@@ -21,7 +21,10 @@ const env = { ...process.env, CORS_ALLOWED_ORIGINS: JSON.stringify([origin]),
 
 function start(name, command, args, cwd) {
   const log = createWriteStream(join(evidence, `${name}.log`), { flags:'a' });
-  const process = spawn(command, args, { cwd, env, stdio:['ignore',log,log] });
+  const process = spawn(command, args, { cwd, env, stdio:['ignore','pipe','pipe'] });
+  process.stdout.pipe(log, {end:false});
+  process.stderr.pipe(log, {end:false});
+  process.on('close',()=>log.end());
   process.on('error', e => log.write(String(e)));
   processes.push(process);
   return process;
