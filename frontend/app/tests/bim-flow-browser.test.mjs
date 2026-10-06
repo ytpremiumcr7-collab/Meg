@@ -205,7 +205,7 @@ test('user creates an obra, resumes an IFC job after restart, approves and expor
     const [projectsExit]=await once(projects,'exit');
     assert.equal(projectsExit,0);
     await page.goto(origin+'/?app=megalodon-costos');
-    await page.getByRole('button',{name:'Presupuestos',exact:true}).click();
+    await page.getByRole('button',{name:'Presupuesto',exact:true}).click();
     await page.getByRole('button',{name:'Actualizar material',exact:true}).click();
     await page.getByText('Catálogos en la base conectada',{exact:true}).click();
     await page.getByText('CI sintético: catálogo de aceptación',{exact:false}).waitFor();
