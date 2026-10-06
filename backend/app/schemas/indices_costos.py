@@ -153,6 +153,18 @@ class ActualizacionPrecioInput(Estricto):
     observacion_destino_id: UUID
 
 
+class SeleccionPublicacionInput(Estricto):
+    vinculo_id: UUID
+    fecha_corte: date = Field(default_factory=lambda: datetime.now(UTC).date())
+
+    @field_validator('fecha_corte')
+    @classmethod
+    def corte_observado(cls, value):
+        if value > datetime.now(UTC).date():
+            raise ValueError('La fecha de corte no puede ser futura')
+        return value
+
+
 class RetiroIndiceCreate(Estricto):
     observacion_id: UUID | None = None
     vinculo_id: UUID | None = None

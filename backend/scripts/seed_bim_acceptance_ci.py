@@ -3,7 +3,7 @@ import asyncio
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -19,6 +19,8 @@ async def main():
     from app.models.base import AsyncSessionLocal, engine
     from app.models.user import Tenant, User, UserRole
     from app.models.catalogo_apu import CatalogoAPU
+    from app.models.catalogo_conceptos import CatalogoFuente, ConceptoCatalogo, InsumoCatalogo
+    from app.models.indices_costos import SerieIndiceCosto, ObservacionIndiceCosto, VinculoIndiceInsumo
     from app.services.auth_service import AuthService
     from app.services.entitlements_service import EntitlementsService
     if len(sys.argv) == 3 and sys.argv[1] == '--programs-for':
@@ -60,12 +62,40 @@ async def main():
         db.add(CatalogoAPU(tenant_id=tenant.id, clave='CI-WALL-ONLY',
             descripcion='Muro de prueba sintética CI', tipo='CONCEPTO', unidad='m3',
             precio_unitario=125, fuente='CI_SYNTHETIC_NOT_MARKET_PRICE'))
+        fuente = CatalogoFuente(nombre='CI sintético: catálogo de aceptación', tipo='CUSTOM',
+            vigencia_inicio='2020-01-01', vigencia_fin='2020-12-31', moneda='MXN', activo=True)
+        db.add(fuente); await db.flush()
+        material = InsumoCatalogo(fuente_id=fuente.id, clave='CI-INDEXED',
+            descripcion='Material sintético indexado CI', tipo='MATERIAL', unidad='kg',
+            precio_unitario=100, incluye_iva=False, activo=True)
+        db.add(material)
+        db.add(ConceptoCatalogo(fuente_id=fuente.id, clave='CI-CATALOG',
+            descripcion='Concepto sintético CI', unidad='kg', precio_unitario=100, activo=True))
+        evidencia = {'url':'https://example.invalid/ci-no-oficial.pdf', 'sha256':'a'*64,
+            'localizador':'Fixture sintética; no es publicación INEGI ni precio de mercado'}
+        serie = SerieIndiceCosto(codigo='CI-NOT-OFFICIAL', version_metodologia='TEST-1',
+            nombre='Índice sintético CI', region='NACIONAL', condiciones_precio='Material sintético sin IVA',
+            periodo_referencia='enero 2020=100', evidencia=evidencia, registrado_por=str(users[0].id))
+        db.add(serie); await db.flush()
+        for mes, valor, publicado, doc in [(date(2020,1,1),100,date(2020,2,10),'a'),
+                                          (date(2020,8,1),115,date(2020,9,10),'b')]:
+            db.add(ObservacionIndiceCosto(serie_id=serie.id, mes=mes, valor=valor,
+                publicado_el=publicado, documento_sha256=doc*64,
+                evidencia={**evidencia,'sha256':doc*64}, registrado_por=str(users[0].id)))
+        vinculo = VinculoIndiceInsumo(tenant_id=tenant.id, insumo_id=material.id,
+            serie_id=serie.id, mes_base=date(2020,1,1), precio_original=100,
+            insumo_original={'clave':material.clave,'descripcion':material.descripcion,
+                'unidad':'kg','tipo':'MATERIAL','moneda':'MXN'},
+            fundamento='Correspondencia sintética exclusivamente para aceptación CI',
+            evidencia=evidencia, revisado_por=str(users[0].id))
+        db.add(vinculo)
         await db.commit()
         await EntitlementsService(db).sembrar_planes_default()
         await EntitlementsService(db).sembrar_modulos_default()
         destination = Path(os.environ['BIM_ACCEPTANCE_CREDENTIALS'])
         destination.write_text(json.dumps({'reviewer':users[0].email, 'reader':users[1].email,
             'password':password, 'catalog_description':'Muro de prueba sintética CI',
+            'indexed_material':str(vinculo.id),
             'partial_ifc':str(partial_ifc)}))
         destination.chmod(0o600)
     await engine.dispose()

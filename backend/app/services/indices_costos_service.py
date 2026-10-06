@@ -1,15 +1,15 @@
 """Registro revisado y resolución de precios con versiones explícitas."""
-from decimal import Decimal
+from decimal import Decimal, localcontext
 from uuid import UUID
 
-from sqlalchemy import or_, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ErrorCode, MegalodonException
 from app.engines.costos.indices import actualizar_precio, sellar_snapshot
 from app.engines.costos.ingesta_inegi import revisar_archivo
-from app.models.catalogo_conceptos import CatalogoFuente, InsumoCatalogo
+from app.models.catalogo_conceptos import CatalogoFuente, ConceptoCatalogo, InsumoCatalogo
 from app.models.indices_costos import (
     ObservacionIndiceCosto,
     CargaIndiceCosto,
@@ -27,6 +27,7 @@ from app.schemas.indices_costos import (
     CargaINEGIInput,
     ContratoINEGI,
     VinculoIndiceCreate,
+    SeleccionPublicacionInput,
 )
 
 
@@ -198,6 +199,41 @@ class IndicesCostosService:
         rows = await self.db.scalars(select(SerieIndiceCosto).order_by(SerieIndiceCosto.codigo, SerieIndiceCosto.id).offset(skip).limit(limit))
         return [serializar(row) for row in rows]
 
+    async def inventario(self, skip: int, limit: int):
+        # Each aggregate stays separate: joining concepts and inputs would multiply counts.
+        conceptos = select(ConceptoCatalogo.fuente_id,
+            func.count().label('total'),
+            func.sum(case((ConceptoCatalogo.activo.is_(True), 1), else_=0)).label('activos')
+        ).group_by(ConceptoCatalogo.fuente_id).subquery()
+        insumos = select(InsumoCatalogo.fuente_id,
+            func.count().label('total'),
+            func.sum(case((InsumoCatalogo.activo.is_(True), 1), else_=0)).label('activos'),
+            func.sum(case((InsumoCatalogo.activo.is_(True)
+                & (InsumoCatalogo.tipo == 'MATERIAL') & InsumoCatalogo.incluye_iva.is_(False)
+                & (InsumoCatalogo.precio_unitario > 0), 1), else_=0)).label('materiales')
+        ).group_by(InsumoCatalogo.fuente_id).subquery()
+        rows = (await self.db.execute(select(CatalogoFuente,
+            func.coalesce(conceptos.c.total, 0), func.coalesce(conceptos.c.activos, 0),
+            func.coalesce(insumos.c.total, 0), func.coalesce(insumos.c.activos, 0),
+            func.coalesce(insumos.c.materiales, 0)
+        ).outerjoin(conceptos, conceptos.c.fuente_id == CatalogoFuente.id)
+         .outerjoin(insumos, insumos.c.fuente_id == CatalogoFuente.id)
+         .order_by(CatalogoFuente.nombre, CatalogoFuente.id).offset(skip).limit(limit))).all()
+        fuentes = [{**serializar(fuente), 'conceptos': conceptos_total,
+                    'conceptos_activos': conceptos_activos, 'insumos': insumos_total,
+                    'insumos_activos': insumos_activos,
+                    'materiales_sin_iva_mxn': materiales if fuente.activo and fuente.moneda == 'MXN' else 0}
+                   for fuente, conceptos_total, conceptos_activos, insumos_total, insumos_activos, materiales in rows]
+        retirados = select(RetiroIndiceCosto.vinculo_id).where(RetiroIndiceCosto.vinculo_id.is_not(None))
+        vinculos = await self.db.scalar(select(func.count()).select_from(VinculoIndiceInsumo).where(
+            VinculoIndiceInsumo.tenant_id == self.usuario.tenant_id,
+            VinculoIndiceInsumo.id.not_in(retirados)))
+        return {'total_fuentes': await self.db.scalar(select(func.count()).select_from(CatalogoFuente)),
+                'total_conceptos': await self.db.scalar(select(func.count()).select_from(ConceptoCatalogo)),
+                'total_insumos': await self.db.scalar(select(func.count()).select_from(InsumoCatalogo)),
+                'vinculos_activos_tenant': vinculos, 'fuentes': fuentes,
+                'skip': skip, 'limit': limit, 'revision_documental_certificada': False}
+
     async def listar_observaciones(self, serie_id: UUID, skip: int, limit: int):
         await self._serie(serie_id)
         retired = select(RetiroIndiceCosto.observacion_id).where(RetiroIndiceCosto.observacion_id.is_not(None))
@@ -231,6 +267,39 @@ class IndicesCostosService:
             if row is None:
                 raise _error(ErrorCode.NOT_FOUND, 'Observación no encontrada')
         return await self._guardar(RetiroIndiceCosto(**data.model_dump(), registrado_por=str(self.usuario.id)))
+
+    async def seleccionar_publicacion(self, data: SeleccionPublicacionInput) -> dict:
+        vinculo = await self._vinculo(data.vinculo_id)
+        retiradas = select(RetiroIndiceCosto.observacion_id).where(
+            RetiroIndiceCosto.observacion_id.is_not(None))
+        consulta = select(ObservacionIndiceCosto).where(
+            ObservacionIndiceCosto.serie_id == vinculo.serie_id,
+            ObservacionIndiceCosto.publicado_el <= data.fecha_corte,
+            ObservacionIndiceCosto.id.not_in(retiradas))
+
+        async def elegir(mes_base: bool):
+            filtro = (ObservacionIndiceCosto.mes == vinculo.mes_base if mes_base
+                      else ObservacionIndiceCosto.mes >= vinculo.mes_base)
+            rows = list((await self.db.scalars(consulta.where(filtro).order_by(
+                ObservacionIndiceCosto.mes.desc(), ObservacionIndiceCosto.publicado_el.desc()
+            ).limit(2).with_for_update(read=True))).all())
+            if not rows:
+                raise _error(ErrorCode.NOT_FOUND, 'Falta una publicación disponible a la fecha de corte')
+            if len(rows) == 2 and (rows[0].mes, rows[0].publicado_el) == (rows[1].mes, rows[1].publicado_el):
+                raise _error(ErrorCode.CONFLICT,
+                    'Hay ediciones simultáneas: revisar y seleccionar explícitamente la evidencia')
+            return rows[0]
+
+        base, destino = await elegir(True), await elegir(False)
+        solicitud = ActualizacionPrecioInput(vinculo_id=vinculo.id,
+            observacion_base_id=base.id, observacion_destino_id=destino.id)
+        snapshot = await self.resolver(solicitud)
+        with localcontext() as context:
+            context.prec = 50
+            variacion = ((Decimal(destino.valor) / Decimal(base.valor) - 1) * 100).quantize(Decimal('0.0001'))
+        return {'fecha_corte': data.fecha_corte.isoformat(),
+                'solicitud': solicitud.model_dump(mode='json'), 'snapshot': snapshot,
+                'variacion_porcentaje': str(variacion)}
 
     async def resolver(self, data: ActualizacionPrecioInput) -> dict:
         vinculo = await self._vinculo(data.vinculo_id)

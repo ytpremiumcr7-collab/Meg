@@ -189,6 +189,20 @@ test('user creates an obra, resumes an IFC job after restart, approves and expor
     await budgetReview.getByText(/Mediciones completas: 2 de 2 elementos medidos/).waitFor();
     await budgetReview.getByText('$500.00',{exact:true}).first().waitFor();
     await page.screenshot({path:join(evidence,'07-mediciones-completadas.png'),fullPage:true});
+    await page.goto(origin+'/?app=megalodon-costos');
+    await page.getByRole('button',{name:'Actualizar material',exact:true}).click();
+    await page.getByText('Catálogos en la base conectada',{exact:true}).click();
+    await page.getByText('CI sintético: catálogo de aceptación',{exact:false}).waitFor();
+    await page.getByLabel('Material revisado',{exact:true}).selectOption(credentials.indexed_material);
+    await page.getByLabel('Fecha de corte de publicaciones',{exact:true}).fill('2020-09-10');
+    await page.getByRole('button',{name:'Usar última publicación disponible',exact:true}).click();
+    await page.getByText('Variación observada: 15.0000% · corte 2020-09-10.',{exact:true}).waitFor();
+    await page.getByText('Original: $100.0000 MXN · Estimado: $115.00 MXN/kg sin IVA.',{exact:true}).waitFor();
+    await page.screenshot({path:join(evidence,'08-catalogos-indices.png'),fullPage:true});
+    await page.goto(origin+'/?app=legl-consultor');
+    await page.getByText('969 artículos consultables · ver cobertura',{exact:true}).click();
+    await page.getByText('Documentos sin artículos consultables: Manual Comité Adquisiciones.',{exact:true}).waitFor();
+    await page.screenshot({path:join(evidence,'09-cobertura-corpus.png'),fullPage:true});
     const readerContext=await browser.newContext({viewport:{width:1440,height:1000}});
     try {
       const readerPage=await readerContext.newPage();

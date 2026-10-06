@@ -907,6 +907,33 @@ export interface EvidenciaIndice {
   localizador: string;
 }
 
+export interface InventarioCatalogos {
+  total_fuentes: number;
+  total_conceptos: number;
+  total_insumos: number;
+  vinculos_activos_tenant: number;
+  revision_documental_certificada: false;
+  fuentes: Array<{
+    id: string; nombre: string; activo: boolean; moneda: string | null;
+    vigencia_inicio: string; vigencia_fin: string;
+    conceptos: number; conceptos_activos: number;
+    insumos: number; insumos_activos: number; materiales_sin_iva_mxn: number;
+  }>;
+}
+
+export interface CoberturaCorpus {
+  sha256: string;
+  total_articulos_consultables: number;
+  vigencia_certificada: false;
+  alcance: string;
+  documentos_sin_articulos: string[];
+  documentos: Array<{
+    nombre: string; articulos_segmentados: number; articulos_consultables: number;
+    conteo_declarado: number; conteo_declarado_coincide: boolean;
+    numeros_no_segmentados: number[];
+  }>;
+}
+
 export interface ObservacionIndice {
   id: string;
   serie_id: string;
@@ -1394,12 +1421,20 @@ export class MegalodonClient {
   };
 
   indicesCostos = {
+    inventario: (skip = 0): Promise<InventarioCatalogos> =>
+      this.request('GET', `/indices-costos/inventario?skip=${skip}&limit=50`),
     vinculos: (skip = 0): Promise<VinculoIndice[]> =>
       this.request('GET', `/indices-costos/vinculos?skip=${skip}&limit=50`),
     observaciones: (serieId: string, skip = 0): Promise<ObservacionIndice[]> =>
       this.request('GET', `/indices-costos/observaciones?${new URLSearchParams({ serie_id: serieId, skip: String(skip), limit: '500' })}`),
     calcular: (solicitud: SolicitudActualizacionPrecio): Promise<ActualizacionPrecioSnapshot> =>
       this.request('POST', '/indices-costos/calcular', solicitud),
+    seleccionarPublicacion: (vinculoId: string, fechaCorte: string): Promise<{
+      fecha_corte: string; solicitud: SolicitudActualizacionPrecio;
+      snapshot: ActualizacionPrecioSnapshot; variacion_porcentaje: string;
+    }> => this.request('POST', '/indices-costos/seleccionar-publicacion', {
+      vinculo_id: vinculoId, fecha_corte: fechaCorte,
+    }),
   };
 
   presupuestos = {
@@ -2731,6 +2766,7 @@ export class MegalodonClient {
   // ═══════════════════════════════════════════════════════════════════════
 
   legal = {
+    cobertura: (): Promise<CoberturaCorpus> => this.request('GET', '/legal/cobertura'),
     // BUG ORIGINAL: legal_consultor.py declara query/ley/fase/monto/mensaje
     // como parámetros escalares sueltos (sin modelo Pydantic de body), así
     // que FastAPI los espera como query params -- pero aquí se mandaban

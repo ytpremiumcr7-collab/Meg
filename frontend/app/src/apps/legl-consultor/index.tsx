@@ -19,6 +19,7 @@ import { megalodonClient } from '@/lib/api-client';
 import ComparadorArticulos from './components/ComparadorArticulos';
 import CalculadoraPlazos from './components/CalculadoraPlazos';
 import ChecklistGenerator from './components/ChecklistGenerator';
+import CoberturaCorpusPanel from './components/CoberturaCorpusPanel';
 
 interface Mensaje {
   id: string;
@@ -132,6 +133,7 @@ export default function LeglConsultorApp() {
           </button>
         </div>
 
+        <CoberturaCorpusPanel />
         {/* Área de mensajes — estilo conversación */}
         <div ref={scrollRef} className="flex-1 overflow-y-auto p-5 space-y-4">
           {mensajes.map((msg, idx) => (

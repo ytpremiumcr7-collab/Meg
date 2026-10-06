@@ -10,6 +10,7 @@ Motor de Busqueda Legal Inteligente — Sin IA
 """
 
 import json
+import hashlib
 import re
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
@@ -92,8 +93,9 @@ class MotorBusquedaLegal:
     def _load_corpus(self):
         if not self.corpus_path.exists():
             raise FileNotFoundError(f"Corpus no encontrado: {self.corpus_path}")
-        with open(self.corpus_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        raw = self.corpus_path.read_bytes()
+        self.corpus_sha256 = hashlib.sha256(raw).hexdigest()
+        data = json.loads(raw)
         for ley_name, ley_data in data.items():
             if isinstance(ley_data, dict) and "articulos" in ley_data:
                 self.corpus[ley_name] = {
@@ -237,13 +239,36 @@ class MotorBusquedaLegal:
 
     def listar_leyes(self):
         self._ensure_loaded()
-        return [
+        leyes = [
             {"id": "laassp", "nombre": "Ley de Adquisiciones, Arrendamientos y Servicios del Sector Publico", "siglas": "LAASSP", "articulos": 119},
             {"id": "lopsrm", "nombre": "Ley de Obras Publicas y Servicios Relacionados con las Mismas", "siglas": "LOPSRM", "articulos": 133},
             {"id": "lgra", "nombre": "Ley General de Responsabilidades Administrativas", "siglas": "LGRA", "articulos": 229},
             {"id": "reglamento_laassp", "nombre": "Reglamento de la LAASSP", "siglas": "Reglamento LAASSP", "articulos": 193},
             {"id": "reglamento_lopsrm", "nombre": "Reglamento de la LOPSRM", "siglas": "Reglamento LOPSRM", "articulos": 295},
         ]
+        return [{**ley, "articulos": len(self.corpus[ley['siglas']]['articulos'])}
+                for ley in leyes if ley['siglas'] in self.corpus]
+
+    def cobertura(self):
+        """Cobertura de búsqueda; un salto no demuestra ausencia en la norma."""
+        self._ensure_loaded()
+        documentos = []
+        for nombre, ley in self.corpus.items():
+            articulos = ley['articulos']
+            numeros = {int(n) for n in articulos if n.isdigit()}
+            documentos.append({
+                'nombre': nombre, 'articulos_segmentados': len(articulos),
+                'articulos_consultables': sum(bool(a['texto'].strip()) for a in articulos.values()),
+                'conteo_declarado': ley['total'],
+                'conteo_declarado_coincide': ley['total'] == len(articulos),
+                'numeros_no_segmentados': sorted(set(range(1, max(numeros, default=0) + 1)) - numeros),
+            })
+        return {'sha256': self.corpus_sha256,
+                'total_articulos_consultables': sum(d['articulos_consultables'] for d in documentos),
+                'documentos': documentos,
+                'documentos_sin_articulos': [d['nombre'] for d in documentos if not d['articulos_consultables']],
+                'vigencia_certificada': False,
+                'alcance': 'Artículos del corpus local consultados por LEGL; no incluye textos DOF separados ni reglas de automatización'}
 
     def listar_categorias(self):
         return [

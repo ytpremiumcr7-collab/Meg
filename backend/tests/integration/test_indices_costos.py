@@ -72,6 +72,64 @@ async def indices(async_client, db_session, tenant_a_user):
 
 
 @pytest.mark.asyncio
+async def test_ultima_publicacion_respeta_corte_y_preserva_original(async_client, indices):
+    ref, auth = indices['refs'][0], indices['auth']
+    for corte, precio, mes in [('2020-08-31', '20.00', '2020-01-01'),
+                               ('2020-09-10', '22.00', '2020-08-01')]:
+        response = await async_client.post(BASE + '/seleccionar-publicacion', headers=auth,
+            json={'vinculo_id': ref['vinculo_id'], 'fecha_corte': corte})
+        assert response.status_code == 200, response.text
+        result = response.json()
+        assert result['snapshot']['precio_actualizado'] == precio
+        assert result['snapshot']['destino']['mes'] == mes
+        assert result['snapshot']['precio_original'].startswith('20')
+        explicit = await async_client.post(BASE + '/calcular', headers=auth, json=result['solicitud'])
+        assert explicit.json()['sha256'] == result['snapshot']['sha256']
+    assert result['variacion_porcentaje'] == '10.0000'
+    assert (await async_client.post(BASE + '/seleccionar-publicacion', headers=auth,
+        json={'vinculo_id': ref['vinculo_id'], 'fecha_corte': '2020-02-01'})).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_seleccion_ambigua_retiro_y_aislamiento(async_client, indices, tenant_b_user):
+    ref, auth = indices['refs'][0], indices['auth']
+    original = (await async_client.post(BASE + '/calcular', headers=auth, json=ref)).json()
+    observation = await async_client.post(BASE + '/observaciones', headers=indices['global_auth'], json={
+        'serie_id': original['serie']['id'], 'medida': 'NIVEL', 'mes': '2020-08-01',
+        'valor': '111', 'publicado_el': '2020-09-10', 'evidencia': {
+            'url': 'https://example.invalid/otra.pdf', 'sha256': 'c' * 64,
+            'localizador': 'Publicación contradictoria de prueba controlada'}})
+    assert observation.status_code == 201, observation.text
+    body = {'vinculo_id': ref['vinculo_id'], 'fecha_corte': '2020-09-10'}
+    assert (await async_client.post(BASE + '/seleccionar-publicacion', headers=auth, json=body)).status_code == 409
+    other = await _login(async_client, tenant_b_user[1].email)
+    assert (await async_client.post(BASE + '/seleccionar-publicacion', headers=other, json=body)).status_code == 404
+    retired = await async_client.post(BASE + '/retiros', headers=indices['global_auth'], json={
+        'observacion_id': observation.json()['id'], 'motivo': 'Retiro documentado de edición contradictoria de prueba'})
+    assert retired.status_code == 201, retired.text
+    result = await async_client.post(BASE + '/seleccionar-publicacion', headers=auth, json=body)
+    assert result.status_code == 200, result.text
+    assert result.json()['snapshot']['precio_actualizado'] == '22.00'
+    assert (await async_client.post(BASE + '/seleccionar-publicacion', headers=auth,
+        json={**body, 'fecha_corte': '2099-01-01'})).status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_inventario_cuenta_fuentes_sin_certificarlas_y_aisla_vinculos(async_client, indices, tenant_b_user):
+    response = await async_client.get(BASE + '/inventario', headers=indices['auth'])
+    assert response.status_code == 200, response.text
+    result = response.json()
+    source = next(f for f in result['fuentes'] if f['nombre'] == 'CONTROLADO NO OFICIAL')
+    assert source['insumos'] == 2 and source['materiales_sin_iva_mxn'] == 2
+    assert result['vinculos_activos_tenant'] == 2
+    assert result['revision_documental_certificada'] is False
+    other = await _login(async_client, tenant_b_user[1].email)
+    response = await async_client.get(BASE + '/inventario', headers=other)
+    assert response.json()['vinculos_activos_tenant'] == 0
+    assert response.json()['total_insumos'] == result['total_insumos']
+
+
+@pytest.mark.asyncio
 async def test_indices_apu_guardado_recalculo_excel_y_retiro(async_client, indices, db_session):
     refs, auth = indices['refs'], indices['auth']
     for referencia, precio in zip(refs, ('22.00', '45.00'), strict=True):

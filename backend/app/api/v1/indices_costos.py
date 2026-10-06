@@ -16,6 +16,7 @@ from app.schemas.indices_costos import (
     SerieIndiceCreate,
     VinculoIndiceCreate,
     CargaINEGIInput,
+    SeleccionPublicacionInput,
 )
 from app.engines.costos.ingesta_inegi import MAX_ARCHIVO
 from app.services.indices_costos_service import IndicesCostosService
@@ -35,6 +36,12 @@ async def crear_serie(data: SerieIndiceCreate, service: Annotated[IndicesCostosS
 @router.get('/series', dependencies=[Depends(rate_limit_standard)])
 async def listar_series(service: Annotated[IndicesCostosService, Depends(servicio)], skip: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=500)):
     return await service.listar_series(skip, limit)
+
+
+@router.get('/inventario', dependencies=[Depends(rate_limit_standard)])
+async def inventario(service: Annotated[IndicesCostosService, Depends(servicio)],
+                     skip: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100)):
+    return await service.inventario(skip, limit)
 
 
 @router.post('/observaciones', status_code=201, dependencies=[Depends(rate_limit_strict)])
@@ -60,6 +67,12 @@ async def listar_vinculos(service: Annotated[IndicesCostosService, Depends(servi
 @router.post('/calcular', dependencies=[Depends(rate_limit_standard)])
 async def calcular(data: ActualizacionPrecioInput, service: Annotated[IndicesCostosService, Depends(servicio)]):
     return await service.resolver(data)
+
+
+@router.post('/seleccionar-publicacion', dependencies=[Depends(rate_limit_standard)])
+async def seleccionar_publicacion(data: SeleccionPublicacionInput,
+                                  service: Annotated[IndicesCostosService, Depends(servicio)]):
+    return await service.seleccionar_publicacion(data)
 
 
 @router.post('/retiros', status_code=201, dependencies=[Depends(rate_limit_strict)])

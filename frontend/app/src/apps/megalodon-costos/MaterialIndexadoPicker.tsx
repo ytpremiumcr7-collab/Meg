@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { megalodonClient } from '@/lib/api-client';
 import type { ActualizacionPrecioSnapshot, ObservacionIndice, SolicitudActualizacionPrecio, VinculoIndice } from '@/lib/megalodon-client';
+import { InventarioCatalogosPanel } from './InventarioCatalogosPanel';
 
 export function MaterialIndexadoPicker({ onSelect }: {
   onSelect: (snapshot: ActualizacionPrecioSnapshot, solicitud: SolicitudActualizacionPrecio, cantidad: number) => void;
@@ -16,6 +17,11 @@ export function MaterialIndexadoPicker({ onSelect }: {
   const [calculando, setCalculando] = useState(false);
   const [error, setError] = useState('');
   const [snapshot, setSnapshot] = useState<ActualizacionPrecioSnapshot | null>(null);
+  const [fechaCorte, setFechaCorte] = useState(() => {
+    const hoy = new Date();
+    return `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}-${String(hoy.getDate()).padStart(2, '0')}`;
+  });
+  const [variacion, setVariacion] = useState<string | null>(null);
   const vinculo = vinculos.find(v => v.id === vinculoId);
 
   useEffect(() => {
@@ -30,7 +36,7 @@ export function MaterialIndexadoPicker({ onSelect }: {
 
   useEffect(() => {
     let cancelado = false;
-    setObservaciones([]); setBaseId(''); setDestinoId(''); setSnapshot(null);
+    setObservaciones([]); setBaseId(''); setDestinoId(''); setSnapshot(null); setVariacion(null);
     if (!vinculo) return;
     setCargando(true); setError('');
     void (async () => {
@@ -48,15 +54,26 @@ export function MaterialIndexadoPicker({ onSelect }: {
 
   const solicitud = { vinculo_id: vinculoId, observacion_base_id: baseId, observacion_destino_id: destinoId };
   const calcular = async () => {
-    setCalculando(true); setError(''); setSnapshot(null);
+    setCalculando(true); setError(''); setSnapshot(null); setVariacion(null);
     try { setSnapshot(await megalodonClient.indicesCostos.calcular(solicitud)); }
     catch (e) { setError(e instanceof Error ? e.message : 'No se pudo confirmar el precio.'); }
+    finally { setCalculando(false); }
+  };
+  const ultimaPublicacion = async () => {
+    setCalculando(true); setError(''); setSnapshot(null); setVariacion(null);
+    try {
+      const result = await megalodonClient.indicesCostos.seleccionarPublicacion(vinculoId, fechaCorte);
+      setObservaciones(items => [...new Map([...items, result.snapshot.base, result.snapshot.destino].map(o => [o.id, o])).values()]);
+      setBaseId(result.solicitud.observacion_base_id); setDestinoId(result.solicitud.observacion_destino_id);
+      setSnapshot(result.snapshot); setVariacion(result.variacion_porcentaje);
+    } catch (e) { setError(e instanceof Error ? e.message : 'No se pudo seleccionar la publicación.'); }
     finally { setCalculando(false); }
   };
   const clase = 'bg-[#12121A] border border-[#2A2A3E] rounded p-2 text-xs text-[#E8E4DC]';
   const etiqueta = (o: ObservacionIndice) => `${o.mes.slice(0, 7)} · nivel ${o.valor} · publicado ${o.publicado_el} · captura ${o.revision_captura} · ${o.id.slice(0, 8)}`;
 
   return <div className="p-3 space-y-3 border-b border-[#2A2A3E] text-xs text-[#E8E4DC]">
+    <InventarioCatalogosPanel />
     <p>Estimación por material, usando una correspondencia revisada y niveles publicados. Los precios del catálogo se conservan.</p>
     {error && <p role="alert" className="text-[#F08080]">{error}</p>}
     {cargando && <p role="status">Consultando evidencia…</p>}
@@ -75,6 +92,12 @@ export function MaterialIndexadoPicker({ onSelect }: {
     </label>
     {vinculo && <>
       <p>{vinculo.fundamento}</p>
+      <label className="block">Publicaciones disponibles hasta
+        <input aria-label="Fecha de corte de publicaciones" type="date" className={`${clase} ml-2`} value={fechaCorte} disabled={calculando}
+          onChange={e => { setFechaCorte(e.target.value); setSnapshot(null); setVariacion(null); }} />
+      </label>
+      <button className={clase} disabled={!fechaCorte || cargando || calculando} onClick={() => void ultimaPublicacion()}>Usar última publicación disponible</button>
+      <p>Se calcula hasta el último mes publicado de esta serie. Consulta las ediciones abajo para elegir una publicación específica.</p>
       <div className="grid grid-cols-2 gap-2">
         <label>Edición del nivel base<select aria-label="Edición del nivel base" className={`${clase} block w-full`} value={baseId} disabled={cargando || calculando}
           onChange={e => { setBaseId(e.target.value); setSnapshot(null); }}>
@@ -92,6 +115,9 @@ export function MaterialIndexadoPicker({ onSelect }: {
     {snapshot && <div className="space-y-2">
       <p>Original: ${snapshot.precio_original} MXN · Estimado: ${snapshot.precio_actualizado} MXN/{snapshot.vinculo.insumo_original.unidad} sin IVA.</p>
       <p>{snapshot.serie.nombre} · {snapshot.serie.region} · {snapshot.base.mes.slice(0, 7)} → {snapshot.destino.mes.slice(0, 7)}</p>
+      {variacion !== null && <p>Variación observada: {variacion}% · corte {fechaCorte}.</p>}
+      <p>Publicación destino: {snapshot.destino.publicado_el}.</p>
+      <a className="underline" href={snapshot.destino.evidencia.url} target="_blank" rel="noopener noreferrer">Consultar fuente de la publicación</a>
       <label>Cantidad <input aria-label="Cantidad de material" className={clase} type="number" min="0.0001" step="0.0001" value={cantidad} onChange={e => setCantidad(Number(e.target.value))} /></label>
       <button className={clase} disabled={!Number.isFinite(cantidad) || cantidad <= 0 || calculando} onClick={() => onSelect(snapshot, solicitud, cantidad)}>Añadir material al presupuesto</button>
     </div>}
