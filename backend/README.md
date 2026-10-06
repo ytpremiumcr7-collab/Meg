@@ -52,7 +52,17 @@ uvicorn app.main:app --reload
 
 # 7. Iniciar worker (en otra terminal)
 celery -A app.workers.celery_app worker --loglevel=info
+
+# 8. Publicar y recuperar trabajos guardados (otra terminal)
+python -m app.workers.job_dispatcher
 ```
+
+El flujo BIM necesita API, worker y publicador activos. Los trabajos quedan en
+PostgreSQL; el publicador vuelve a enviarlos cuando Redis se recupera. El
+almacenamiento `filesystem` guarda IFC reales en `storage/bim` para pruebas
+locales/staging. En producción configura `BIM_STORAGE_PROVIDER=supabase` y las
+credenciales del almacenamiento. Conserva juntos el respaldo de PostgreSQL y
+los archivos originales para poder recuperar una obra.
 
 ## Documentación API
 

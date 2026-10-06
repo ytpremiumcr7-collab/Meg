@@ -19,6 +19,8 @@ services:
       - CELERY_RESULT_BACKEND=redis://redis:6379/2
       - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
       - ENVIRONMENT=${ENVIRONMENT:-development}
+      - BIM_STORAGE_PROVIDER=${BIM_STORAGE_PROVIDER:-filesystem}
+      - BIM_LOCAL_STORAGE_PATH=/app/storage/bim
     volumes:
       - ./uploads:/app/uploads
       - ./storage:/app/storage
@@ -39,6 +41,9 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/1
       - CELERY_RESULT_BACKEND=redis://redis:6379/2
       - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - BIM_STORAGE_PROVIDER=${BIM_STORAGE_PROVIDER:-filesystem}
+      - BIM_LOCAL_STORAGE_PATH=/app/storage/bim
     volumes:
       - ./uploads:/app/uploads
       - ./storage:/app/storage
@@ -57,6 +62,9 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/1
       - CELERY_RESULT_BACKEND=redis://redis:6379/2
       - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - BIM_STORAGE_PROVIDER=${BIM_STORAGE_PROVIDER:-filesystem}
+      - BIM_LOCAL_STORAGE_PATH=/app/storage/bim
     volumes:
       - ./uploads:/app/uploads
       - ./storage:/app/storage
