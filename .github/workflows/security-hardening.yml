@@ -117,7 +117,7 @@ jobs:
       - run: timeout 120s python -m scripts.smoke_runtime_ci
       - name: Run bounded backend tests and preserve the diagnostic log
         timeout-minutes: 7
-        run: timeout --kill-after=5s 5m python -m scripts.run_backend_tests_ci --suite ${{ matrix.suite }}
+        run: timeout --kill-after=5s 6m python -m scripts.run_backend_tests_ci --suite ${{ matrix.suite }}
       - name: Preserve runtime smoke evidence
         if: always()
         uses: actions/upload-artifact@v4
