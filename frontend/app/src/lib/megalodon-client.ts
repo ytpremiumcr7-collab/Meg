@@ -901,6 +901,15 @@ export interface SolicitudActualizacionPrecio {
   observacion_destino_id: string;
 }
 
+export class MegalodonApiError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+    this.name = 'MegalodonApiError';
+  }
+}
+
 export interface EvidenciaIndice {
   url: string;
   sha256: string;
@@ -1295,7 +1304,7 @@ export class MegalodonClient {
       const error = await response.json().catch(() => ({
         message: `HTTP ${response.status}: ${response.statusText}`,
       }));
-      throw new Error(error.message || `HTTP ${response.status}`);
+      throw new MegalodonApiError(error.message || `HTTP ${response.status}`, response.status);
     }
 
     if (response.status === 204) {

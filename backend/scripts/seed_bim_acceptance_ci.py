@@ -23,7 +23,7 @@ async def main():
     from app.models.indices_costos import SerieIndiceCosto, ObservacionIndiceCosto, VinculoIndiceInsumo
     from app.services.auth_service import AuthService
     from app.services.entitlements_service import EntitlementsService
-    if len(sys.argv) == 3 and sys.argv[1] == '--programs-for':
+    if len(sys.argv) == 3 and sys.argv[1] in ('--programs-for', '--projects-after'):
         from sqlalchemy import select
         from app.models.expediente import ExpedienteObra
         from app.services.programacion_service import ProgramacionService
@@ -33,6 +33,14 @@ async def main():
             obra = await db.get(ExpedienteObra, UUID(sys.argv[2]))
             if not user or not obra or obra.tenant_id != user.tenant_id:
                 raise SystemExit('Acceptance obra ownership required.')
+            if sys.argv[1] == '--projects-after':
+                db.add_all([ExpedienteObra(tenant_id=user.tenant_id, responsable_id=user.id,
+                    identificador=f'CI-PAGE-{uuid4().hex[:16]}', titulo=f'Expediente posterior CI {number}',
+                    organo='CI sintético', unidad_administrativa='CI', serie_documental='CI',
+                    subserie_documental='CI') for number in range(100)])
+                await db.commit()
+                await engine.dispose()
+                return
             service = ProgramacionService(db, user.tenant_id)
             for number in range(21):
                 await service.crear_programa(expediente_id=obra.id,nombre=f'Programa previo {number}',

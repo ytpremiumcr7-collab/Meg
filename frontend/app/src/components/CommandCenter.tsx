@@ -13,13 +13,17 @@ import Home from './Home';
 import CommandPalette from './CommandPalette';
 import { useAppRegistry } from '@/stores/useAppRegistry';
 import { useRecentAppsStore } from '@/stores/useRecentAppsStore';
+import { useExpedienteStore } from '@/stores/useExpedienteStore';
 
 const appModules = import.meta.glob('../apps/*/index.tsx') as Record<
   string,
   () => Promise<{ default: React.ComponentType }>
 >;
+const loadedApps = new Map<string, React.ComponentType>();
 
 function getAppComponent(appId: string) {
+  const loaded = loadedApps.get(appId);
+  if (loaded) return loaded;
   const path = `../apps/${appId}/index.tsx`;
   const loader = appModules[path];
   if (!loader) {
@@ -29,7 +33,9 @@ function getAppComponent(appId: string) {
       </div>
     );
   }
-  return lazy(loader);
+  const component = lazy(loader);
+  loadedApps.set(appId, component);
+  return component;
 }
 
 export default function CommandCenter() {
@@ -39,6 +45,9 @@ export default function CommandCenter() {
   });
   const { getApp } = useAppRegistry();
   const registerRecent = useRecentAppsStore((s) => s.register);
+  const cargarExpedientes = useExpedienteStore(s => s.cargarExpedientes);
+  const errorExpedientes = useExpedienteStore(s => s.error);
+  useEffect(() => { void cargarExpedientes(); }, [cargarExpedientes]);
   const activeApp = activeId !== 'inicio' ? getApp(activeId) : null;
   const title = activeId === 'inicio' ? 'Inicio' : activeApp?.name || activeId;
 
@@ -67,6 +76,10 @@ export default function CommandCenter() {
 
       <div className="flex flex-col flex-1 min-w-0">
         <TopBar title={title} />
+        {errorExpedientes && <div role="alert" className="px-4 py-2 text-sm text-red-300 bg-red-950/40">
+          No se pudo recuperar el expediente: {errorExpedientes}
+          <button className="ml-3 underline" onClick={() => void cargarExpedientes()}>Reintentar</button>
+        </div>}
 
         <main className="flex-1 min-h-0 relative">
           <AnimatePresence mode="wait">

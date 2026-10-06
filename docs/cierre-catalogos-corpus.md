@@ -20,3 +20,7 @@ La cobertura del corpus se calcula sobre los archivos efectivamente consultados.
 Informa textos sin segmentar, saltos y huellas; no certifica vigencia normativa ni
 convierte artículos extraídos en reglas ejecutables. Los textos DOF almacenados por
 separado no se cuentan como artículos consultables en LEGL.
+
+El recorrido real debe abrir Costos tras recargar sin errores de render ni pérdida
+del expediente seleccionado. La selección se consulta por identidad cuando queda
+fuera de la primera página; un error de red no se interpreta como eliminación.

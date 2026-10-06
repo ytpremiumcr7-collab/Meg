@@ -189,7 +189,23 @@ test('user creates an obra, resumes an IFC job after restart, approves and expor
     await budgetReview.getByText(/Mediciones completas: 2 de 2 elementos medidos/).waitFor();
     await budgetReview.getByText('$500.00',{exact:true}).first().waitFor();
     await page.screenshot({path:join(evidence,'07-mediciones-completadas.png'),fullPage:true});
+    const readerContext=await browser.newContext({viewport:{width:1440,height:1000}});
+    try {
+      const readerPage=await readerContext.newPage();
+      await login(readerPage,credentials.reader);
+      await readerPage.getByRole('navigation').getByRole('button',{name:'Proyectos',exact:true}).click();
+      await readerPage.getByRole('button',{name:/Obra sintética de aceptación BIM/}).click();
+      await readerPage.getByRole('button',{name:'Calculadora BIM',exact:true}).click();
+      await readerPage.getByLabel('Subir archivo IFC').waitFor({state:'attached'});
+      assert.equal(await readerPage.getByLabel('Subir archivo IFC').isDisabled(),true);
+      await readerPage.screenshot({path:join(evidence,'05-solo-lectura.png'),fullPage:true});
+    } finally { await readerContext.close(); }
+    const projects = start('project-fixtures', join(backend,'.venv/bin/python'),
+      ['-m','scripts.seed_bim_acceptance_ci','--projects-after',model.expediente_id],backend);
+    const [projectsExit]=await once(projects,'exit');
+    assert.equal(projectsExit,0);
     await page.goto(origin+'/?app=megalodon-costos');
+    await page.getByRole('button',{name:'Presupuestos',exact:true}).click();
     await page.getByRole('button',{name:'Actualizar material',exact:true}).click();
     await page.getByText('Catálogos en la base conectada',{exact:true}).click();
     await page.getByText('CI sintético: catálogo de aceptación',{exact:false}).waitFor();
@@ -203,17 +219,8 @@ test('user creates an obra, resumes an IFC job after restart, approves and expor
     await page.getByText('969 artículos consultables · ver cobertura',{exact:true}).click();
     await page.getByText('Documentos sin artículos consultables: Manual Comité Adquisiciones.',{exact:true}).waitFor();
     await page.screenshot({path:join(evidence,'09-cobertura-corpus.png'),fullPage:true});
-    const readerContext=await browser.newContext({viewport:{width:1440,height:1000}});
-    try {
-      const readerPage=await readerContext.newPage();
-      await login(readerPage,credentials.reader);
-      await readerPage.getByRole('navigation').getByRole('button',{name:'Proyectos',exact:true}).click();
-      await readerPage.getByRole('button',{name:/Obra sintética de aceptación BIM/}).click();
-      await readerPage.getByRole('button',{name:'Calculadora BIM',exact:true}).click();
-      await readerPage.getByLabel('Subir archivo IFC').waitFor({state:'attached'});
-      assert.equal(await readerPage.getByLabel('Subir archivo IFC').isDisabled(),true);
-      await readerPage.screenshot({path:join(evidence,'05-solo-lectura.png'),fullPage:true});
-    } finally { await readerContext.close(); }
+    assert.deepEqual(errors,[]);
+
   } finally {
     await page.screenshot({path:join(evidence,'last-screen.png'),fullPage:true}).catch(()=>{});
     await context.tracing.stop({path:join(evidence,'bim-flow-trace.zip')});

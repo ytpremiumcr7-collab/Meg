@@ -8,6 +8,7 @@
 import { create } from 'zustand';
 import type { User } from '@/types';
 import { megalodonClient } from '@/lib/api-client';
+import { useExpedienteStore } from './useExpedienteStore';
 
 interface AuthState {
   user: User | null;
@@ -83,6 +84,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       return;
     }
     megalodonClient.setToken('');
+    useExpedienteStore.getState().limpiar();
     set({
       user: null,
       isAuthenticated: false,

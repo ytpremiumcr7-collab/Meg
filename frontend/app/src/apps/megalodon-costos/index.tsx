@@ -1269,14 +1269,16 @@ function ResumenTab() {
     return () => { cancelado = true; };
   }, [expedienteActivo?.id]);
 
-  const activities = useMegalodonStore(s => {
-    const validations = s.validationResults.slice(-3).map(v => ({
+  const validationResults = useMegalodonStore(s => s.validationResults);
+  const calculationResults = useMegalodonStore(s => s.calculationResults);
+  const activities = useMemo(() => {
+    const validations = validationResults.slice(-3).map(v => ({
       time: new Date(v.timestamp).toLocaleString('es-MX', { hour: '2-digit', minute: '2-digit' }),
       action: `Validacion ejecutada — ${v.rulesPassed}/${v.rulesChecked} reglas aprobadas`,
       user: 'Sistema',
       type: (v.overall === 'PASS' ? 'success' : v.overall === 'WARNING' ? 'warning' : 'error') as 'success' | 'warning' | 'error' | 'info',
     }));
-    const calculations = s.calculationResults.slice(-2).map(c => ({
+    const calculations = calculationResults.slice(-2).map(c => ({
       time: new Date(c.timestamp).toLocaleString('es-MX', { hour: '2-digit', minute: '2-digit' }),
       action: c.summary,
       user: 'Sistema',
@@ -1285,7 +1287,7 @@ function ResumenTab() {
     return [...validations, ...calculations].length > 0
       ? [...validations, ...calculations].slice(0, 6)
       : [{ time: 'Ahora', action: expedienteActivo ? `Trabajando en ${expedienteActivo.titulo}` : 'Bienvenido a Megalodon CostOS — abre o crea un proyecto', user: 'Sistema', type: 'info' as const }];
-  });
+  }, [validationResults, calculationResults, expedienteActivo?.titulo]);
 
   if (!expedienteActivo) {
     return (
