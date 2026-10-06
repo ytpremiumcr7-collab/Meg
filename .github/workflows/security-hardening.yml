@@ -64,6 +64,10 @@ jobs:
   backend-integration:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [core, api, procurement]
     services:
       postgres:
         image: postgis/postgis:16-3.4
@@ -113,16 +117,17 @@ jobs:
       - run: timeout 120s python -m scripts.smoke_runtime_ci
       - name: Run bounded backend tests and preserve the diagnostic log
         timeout-minutes: 7
-        run: timeout --kill-after=5s 5m python -m scripts.run_backend_tests_ci
+        run: timeout --kill-after=5s 5m python -m scripts.run_backend_tests_ci --suite ${{ matrix.suite }}
       - name: Preserve runtime smoke evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: runtime-smoke-${{ github.run_id }}
+          name: runtime-smoke-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suite }}
           path: |
             backend/runtime-smoke-report.json
             backend/runtime-smoke-server.log
             backend/backend-integration.log
+            backend/backend-integration.xml
           if-no-files-found: ignore
           retention-days: 14
 
