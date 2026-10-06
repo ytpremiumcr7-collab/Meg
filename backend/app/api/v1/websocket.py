@@ -18,7 +18,9 @@ from fastapi.security import OAuth2PasswordBearer
 
 from app.config import settings
 from app.core.task_ownership import verify_task_owner
-from app.core.token_revocation import is_jti_revoked
+from app.models.base import AsyncSessionLocal
+from app.services.auth_service import AuthService
+from app.core.errors import MegalodonException
 from app.core.deps import SESSION_COOKIE_NAME
 from app.workers.celery_app import celery_app
 
@@ -62,31 +64,29 @@ class _TokenWS(NamedTuple):
 
 
 async def _validar_token_ws(token: str) -> Optional[_TokenWS]:
-    """Decodifica y valida un JWT para WebSocket: firma, expiración Y
-    revocación. Devuelve (user_id, tenant_id) si es válido, o None si no.
-    Comparte la política de la API HTTP: un token revocado no autentica
-    nada, tampoco un WebSocket. El tenant_id sale del propio claim del
-    access token (ver AuthService.create_access_token), el mismo que usa
-    el resto de la API vía get_current_user -- no hay que ir a la base
-    de datos para esto."""
-    import jwt
-    from jwt.exceptions import PyJWTError
-
+    """Resolve current identity with the exact same access-token policy as HTTP."""
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-    except PyJWTError:
+        async with AsyncSessionLocal() as db:
+            user = await AuthService(db).get_current_user_from_token(token)
+            return _TokenWS(str(user.id), str(user.tenant_id))
+    except MegalodonException:
         return None
 
-    user_id = payload.get("sub")
-    tenant_id = payload.get("tenant_id")
-    if not user_id or not tenant_id:
-        return None
 
-    jti = payload.get("jti")
-    if jti and await is_jti_revoked(jti, token_kind="access"):
-        return None
-
-    return _TokenWS(user_id=user_id, tenant_id=tenant_id)
+async def _receive_authenticated(websocket: WebSocket, token: str, auth: _TokenWS):
+    """Recheck idle sockets every 30s and each received message; fail closed."""
+    while True:
+        if await _validar_token_ws(token) != auth:
+            await websocket.close(code=4001, reason="Sesión expirada o revocada")
+            raise WebSocketDisconnect(code=4001)
+        try:
+            data = await asyncio.wait_for(websocket.receive_json(), timeout=30)
+        except asyncio.TimeoutError:
+            continue
+        if await _validar_token_ws(token) != auth:
+            await websocket.close(code=4001, reason="Sesión expirada o revocada")
+            raise WebSocketDisconnect(code=4001)
+        return data
 
 # Gestor de conexiones activas
 class ConnectionManager:
@@ -220,11 +220,9 @@ async def websocket_progreso(websocket: WebSocket, token: Optional[str] = None):
     3. Servidor envía progreso: {"type": "progress", "task_id": "...", "progress": 45, "status": "..."}
     4. Cliente envía: {"action": "unsubscribe", "task_id": "..."}
     """
-    # (nota: no se toca la base de datos más allá de la revocación, así
-    # que no hace falta sesión. Los imports de sessionmaker/engine/User/
-    # select que había antes nunca se usaban.)
     cookie_token = websocket.cookies.get(SESSION_COOKIE_NAME)
-    auth = await _validar_token_ws(cookie_token or token or "")
+    auth_token = token or cookie_token or ""
+    auth = await _validar_token_ws(auth_token)
     if not auth:
         await websocket.close(code=4001, reason="Token inválido, expirado o revocado")
         return
@@ -235,7 +233,7 @@ async def websocket_progreso(websocket: WebSocket, token: Optional[str] = None):
     try:
         while True:
             # Recibir mensajes del cliente
-            data = await websocket.receive_json()
+            data = await _receive_authenticated(websocket, auth_token, auth)
             action = data.get("action")
             task_id = data.get("task_id")
 
@@ -325,7 +323,8 @@ async def websocket_notificaciones(websocket: WebSocket, token: Optional[str] = 
     WebSocket para notificaciones push del sistema.
     """
     cookie_token = websocket.cookies.get(SESSION_COOKIE_NAME)
-    auth = await _validar_token_ws(cookie_token or token or "")
+    auth_token = token or cookie_token or ""
+    auth = await _validar_token_ws(auth_token)
     if not auth:
         await websocket.close(code=4001, reason="Token inválido, expirado o revocado")
         return
@@ -335,7 +334,7 @@ async def websocket_notificaciones(websocket: WebSocket, token: Optional[str] = 
 
     try:
         while True:
-            data = await websocket.receive_json()
+            data = await _receive_authenticated(websocket, auth_token, auth)
 
             if data.get("action") == "ping":
                 await websocket.send_json({

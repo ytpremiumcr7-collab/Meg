@@ -29,8 +29,9 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_user, get_db, verificar_expediente_tenant
+from app.core.deps import get_current_user, get_db, verificar_expediente_tenant, module_access, require_approval_role
 from app.core.errors import MegalodonException, ErrorCode
+from app.core.process_queue import encolar_proceso
 from app.config import settings
 from app.models.base import EstadoProceso
 from app.services.bim_service import BIMService
@@ -44,7 +45,7 @@ from app.utils.upload_limits import read_upload_with_limit
 # nota completa en app.core.deps.verificar_expediente_tenant. Todas las
 # rutas de este archivo cuelgan de /{expediente_id}/..., así que se
 # aplica una sola vez a nivel router.
-router = APIRouter(dependencies=[Depends(verificar_expediente_tenant)])
+router = APIRouter(dependencies=[Depends(verificar_expediente_tenant), Depends(module_access("bim-calculator"))])
 
 
 class ModeloBIMOut(BaseModel):
@@ -222,7 +223,8 @@ async def subir_modelo_bim(
     await db.refresh(modelo)
 
     from app.workers.bim_tasks import procesar_ifc
-    procesar_ifc.delay(
+    await encolar_proceso(db, modelo, procesar_ifc,
+        estado_field="estado_procesamiento", error_field="error_procesamiento",
         modelo_id=str(modelo.id),
         expediente_id=str(expediente_id),
         tenant_id=str(current_user.tenant_id),
@@ -356,7 +358,7 @@ async def generar_4d5d(
     )
 
     from app.workers.bim_tasks import generar_4d5d_desde_bim
-    generar_4d5d_desde_bim.delay(
+    await encolar_proceso(db, generacion, generar_4d5d_desde_bim,
         generacion_id=str(generacion.id),
         modelo_id=str(modelo_id),
         expediente_id=str(expediente_id),
@@ -415,7 +417,7 @@ async def ejecutar_clash_detection(
     )
 
     from app.workers.bim_tasks import analizar_clash
-    analizar_clash.delay(analisis_id=str(analisis.id), tenant_id=str(current_user.tenant_id))
+    await encolar_proceso(db, analisis, analizar_clash, analisis_id=str(analisis.id), tenant_id=str(current_user.tenant_id))
 
     return analisis
 

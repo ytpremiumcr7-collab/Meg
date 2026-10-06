@@ -28,9 +28,9 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - run: uv sync --frozen --extra dev
       - run: echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
-      - run: pip check
-      - run: pip install pip-audit
-      - run: pip-audit --strict
+      - run: uv pip check --python .venv/bin/python
+      - run: uv export --frozen --extra dev --no-emit-project --format requirements-txt > /tmp/megalodon-audit.txt
+      - run: uvx pip-audit --strict --disable-pip --no-deps -r /tmp/megalodon-audit.txt
 
   sast:
     runs-on: ubuntu-latest

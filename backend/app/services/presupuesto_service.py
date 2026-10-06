@@ -30,6 +30,14 @@ class PresupuestoService(BaseService[Presupuesto]):
         super().__init__(Presupuesto, db, tenant_id=tenant_id, tenant_required=True)
         self.motor_costeo = MotorCosteo()
 
+    async def _registrar_corrida(self) -> None:
+        from app.models.user import Tenant
+        from app.services.entitlements_service import EntitlementsService
+        tenant = (await self.db.execute(select(Tenant).where(
+            Tenant.id == self.tenant_id).with_for_update())).scalar_one()
+        await EntitlementsService(self.db).verificar_y_registrar_uso(
+            tenant, "corridas_costeo", auto_commit=False)
+
     async def listar_por_expediente(
         self, expediente_id: UUID, skip: int = 0, limit: int = 20,
     ) -> List[Presupuesto]:
@@ -230,6 +238,8 @@ class PresupuestoService(BaseService[Presupuesto]):
         # Calcular
         presupuesto_costeo = self.motor_costeo.calcular_presupuesto(presupuesto_costeo)
 
+        await self._registrar_corrida()
+
         # Crear en DB
         presupuesto = Presupuesto(**{
             "id": presupuesto_id,
@@ -249,7 +259,9 @@ class PresupuestoService(BaseService[Presupuesto]):
             "factor_riesgo": parametros_costeo.factor_riesgo,
             "zona_economica": zona_economica,
             "metadatos": {"parametros_costeo": parametros_costeo.to_dict(), "catalogo_libro": referencias},
-            "estado": EstadoPresupuesto.CALCULADO.value,
+            "estado": (EstadoPresupuesto.CALCULADO.value if presupuesto_costeo.partidas and all(
+                p.cantidad > 0 and p.precio_unitario > 0 for p in presupuesto_costeo.partidas)
+                else EstadoPresupuesto.BORRADOR.value),
             "tenant_id": self.tenant_id,
             "creado_por_id": creado_por_id,
             "actualizado_por_id": creado_por_id,
@@ -455,6 +467,8 @@ class PresupuestoService(BaseService[Presupuesto]):
         )
         self.motor_costeo.calcular_presupuesto(presupuesto_costeo)
 
+        await self._registrar_corrida()
+
         for p_orm, p_costeo in zip(presupuesto.partidas, presupuesto_costeo.partidas):
             p_orm.precio_unitario = p_costeo.precio_unitario
             p_orm.importe = p_costeo.importe
@@ -495,6 +509,8 @@ class PresupuestoService(BaseService[Presupuesto]):
 
         presupuesto_costeo = self.motor_costeo.calcular_presupuesto(presupuesto_costeo)
 
+        await self._registrar_corrida()
+
         # Actualizar también el importe/precio_unitario de cada partida,
         # por si cambiaron insumos desde la última vez.
         for p_orm, p_costeo in zip(presupuesto.partidas, presupuesto_costeo.partidas):
@@ -511,9 +527,9 @@ class PresupuestoService(BaseService[Presupuesto]):
         # vuelva a validar/aprobar contra los números nuevos, en vez de
         # dejar una aprobación "vieja" apuntando a montos que ya no son
         # los que están en pantalla.
-        nuevo_estado = presupuesto.estado
-        if presupuesto.estado in (EstadoPresupuesto.VALIDADO.value, EstadoPresupuesto.APROBADO.value):
-            nuevo_estado = EstadoPresupuesto.CALCULADO.value
+        nuevo_estado = (EstadoPresupuesto.CALCULADO.value if presupuesto_costeo.partidas and all(
+            p.cantidad > 0 and p.precio_unitario > 0 for p in presupuesto_costeo.partidas)
+            else EstadoPresupuesto.BORRADOR.value)
 
         await self.update(
             presupuesto_id,
@@ -571,6 +587,15 @@ class PresupuestoService(BaseService[Presupuesto]):
                 ErrorCode.PRESUPUESTO_ERROR,
                 f"Estado inválido: {nuevo_estado}. Válidos: {[e.value for e in EstadoPresupuesto]}",
             )
+        if nuevo_estado in (EstadoPresupuesto.CALCULADO.value, EstadoPresupuesto.VALIDADO.value,
+                            EstadoPresupuesto.APROBADO.value):
+            pendientes = [p.numero for p in presupuesto.partidas
+                          if not p.cantidad or p.cantidad <= 0 or not p.precio_unitario
+                          or p.precio_unitario <= 0 or not p.importe or p.importe <= 0]
+            if not presupuesto.partidas or pendientes or not presupuesto.monto_total or presupuesto.monto_total <= 0:
+                raise MegalodonException(ErrorCode.PRESUPUESTO_ERROR,
+                    "Presupuesto incompleto: capture cantidades y precios antes de validar o aprobar",
+                    details={"partidas_pendientes": pendientes})
         permitidas = self._TRANSICIONES_ESTADO.get(presupuesto.estado, set())
         if nuevo_estado not in permitidas:
             raise MegalodonException(

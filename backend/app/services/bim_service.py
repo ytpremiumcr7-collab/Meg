@@ -13,6 +13,7 @@ todo. Ahora sí queda guardado, incluida la malla para renderizar en el
 frontend y el puente elemento->partida.
 """
 import os
+import math
 try:
     import structlog  # type: ignore
     logger = structlog.get_logger()
@@ -24,6 +25,7 @@ import tempfile
 from datetime import datetime
 from typing import List, Optional, Dict, Any, TYPE_CHECKING
 from uuid import UUID, uuid4
+from types import SimpleNamespace
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -45,6 +47,19 @@ if TYPE_CHECKING:
 # Tipos cuyo insumo relevante es área (m2) en vez de volumen (m3).
 TIPOS_POR_AREA = {"IfcWall", "IfcSlab", "IfcRoof", "IfcCovering"}
 TIPOS_POR_PIEZA = {"IfcDoor", "IfcWindow"}
+
+
+def cantidad_bim(elementos, unidad: str) -> float:
+    """Incomplete groups stay pending, rather than costing only measurable members."""
+    if unidad == "pza":
+        return float(len(elementos))
+    field = {"m2": "area", "m3": "volumen", "ml": "longitud", "m": "longitud"}.get(unidad)
+    if field is None:
+        raise MegalodonException(ErrorCode.BIM_ERROR, f"Unidad '{unidad}' no derivable de BIM")
+    values = [getattr(e, field) for e in elementos]
+    if any(v is None or not math.isfinite(float(v)) or v <= 0 for v in values):
+        return 0.0
+    return sum(float(v) for v in values)
 
 
 class BIMService:
@@ -88,15 +103,15 @@ class BIMService:
         if not expediente_obj:
             raise MegalodonException(ErrorCode.DOCUMENTO_NO_ENCONTRADO, f"Expediente {expediente_id} no encontrado")
 
-        count_result = await self.db.execute(select(ModeloBIM).where(ModeloBIM.expediente_id == expediente_id, ModeloBIM.tenant_id == self.tenant_id))
-        count = len(count_result.scalars().all()) + 1
-        identificador = f"BIM-{str(expediente_id)[:8]}-{count:03d}"
-
-        ruta_storage = f"tenant/{self.tenant_id}/{expediente_id}/{identificador}-{filename}"
-        await storage_bim().subir(ruta_storage, file_content, content_type="application/x-step")
+        modelo_id = uuid4()
+        identificador = f"BIM-{modelo_id}"
+        # Immutable key independent of the user-supplied filename and row count.
+        ruta_storage = f"tenant/{self.tenant_id}/{expediente_id}/{modelo_id}/original.ifc"
+        storage = storage_bim()
+        await storage.subir(ruta_storage, file_content, content_type="application/x-step", overwrite=False)
 
         modelo = ModeloBIM(
-            id=uuid4(),
+            id=modelo_id,
             expediente_id=expediente_id,
             tenant_id=expediente_obj.tenant_id,
             identificador=identificador,
@@ -109,7 +124,15 @@ class BIMService:
             actualizado_por_id=creado_por_id,
         )
         self.db.add(modelo)
-        await self.db.commit()
+        try:
+            await self.db.commit()
+        except Exception:
+            await self.db.rollback()
+            try:
+                await storage.eliminar([ruta_storage])
+            except Exception:
+                logger.exception("bim_storage_cleanup_failed", path=ruta_storage)
+            raise
         await self.db.refresh(modelo)
         return modelo
 
@@ -143,13 +166,13 @@ class BIMService:
     ) -> ModeloBIM:
         """Procesa el IFC de un ModeloBIM ya registrado: cuantifica y
         persiste elementos reales. Deja el modelo en COMPLETADO o ERROR."""
-        modelo = (await self.db.execute(select(ModeloBIM).where(ModeloBIM.id == modelo_id, ModeloBIM.tenant_id == self.tenant_id))).scalar_one_or_none()
+        modelo = (await self.db.execute(select(ModeloBIM).where(ModeloBIM.id == modelo_id, ModeloBIM.tenant_id == self.tenant_id).with_for_update().execution_options(populate_existing=True))).scalar_one_or_none()
         if not modelo:
             raise MegalodonException(ErrorCode.DOCUMENTO_NO_ENCONTRADO, f"Modelo BIM {modelo_id} no encontrado")
 
         modelo.estado_procesamiento = EstadoProceso.EN_PROCESO.value
         modelo.tamano_bytes = len(file_content)
-        await self.db.commit()
+        # Keep the aggregate lock until the replacement and summary commit together.
 
         with tempfile.NamedTemporaryFile(suffix=".ifc", delete=False) as tmp:
             tmp.write(file_content)
@@ -168,25 +191,27 @@ class BIMService:
 
             resultado = self.motor.cuantificar(tipos_elementos, extraer_malla=extraer_malla)
 
+            if not resultado.elementos:
+                raise MegalodonException(ErrorCode.BIM_ERROR, "El IFC no contiene elementos cuantificables")
+            global_ids = [e.global_id for e in resultado.elementos]
+            if len(set(global_ids)) != len(global_ids):
+                raise MegalodonException(ErrorCode.BIM_ERROR, "GlobalId duplicado en el IFC")
+            existing = {e.global_id: e for e in (await self.db.execute(
+                select(ElementoBIM).where(ElementoBIM.modelo_id == modelo_id)
+            )).scalars().all()}
             for elem in resultado.elementos:
-                self.db.add(ElementoBIM(
-                    id=uuid4(),
-                    modelo_id=modelo.id,
-                    global_id=elem.global_id,
-                    express_id=elem.express_id,
-                    tipo=elem.tipo,
-                    nombre=elem.nombre,
-                    volumen=elem.volumen,
-                    area=elem.area,
-                    longitud=elem.longitud,
-                    fuente_volumen=elem.fuente_volumen,
-                    fuente_area=elem.fuente_area,
-                    nivel=elem.nivel,
-                    bbox=elem.bbox,
-                    propiedades=elem.propiedades,
-                    malla_vertices=elem.malla.vertices if elem.malla else None,
-                    malla_caras=elem.malla.caras if elem.malla else None,
-                ))
+                row = existing.pop(elem.global_id, None)
+                if row is None:
+                    row = ElementoBIM(id=uuid4(), modelo_id=modelo_id, global_id=elem.global_id)
+                    self.db.add(row)
+                # Identity, budget mapping and manual zones survive retries/reprocessing.
+                for field in ("express_id", "tipo", "nombre", "volumen", "area", "longitud",
+                              "fuente_volumen", "fuente_area", "nivel", "bbox", "propiedades"):
+                    setattr(row, field, getattr(elem, field))
+                row.malla_vertices = elem.malla.vertices if elem.malla else None
+                row.malla_caras = elem.malla.caras if elem.malla else None
+            for obsolete in existing.values():
+                await self.db.delete(obsolete)
 
             modelo.num_elementos = len(resultado.elementos)
             modelo.niveles = resultado.niveles
@@ -198,8 +223,7 @@ class BIMService:
             else:
                 modelo.estado_procesamiento = EstadoProceso.ERROR.value
 
-            if resultado.errores:
-                modelo.error_procesamiento = "; ".join(resultado.errores[:20])
+            modelo.error_procesamiento = "; ".join(resultado.errores[:20])[:2000] if resultado.errores else None
 
             await self.db.commit()
             await self.db.refresh(modelo)
@@ -212,8 +236,10 @@ class BIMService:
             # caller/worker decide reintentar), pero ahora también queda
             # en logs con contexto de qué modelo falló.
             logger.exception("bim_service.procesar_ifc: fallo procesando IFC", modelo_id=str(modelo_id), error=str(e))
+            await self.db.rollback()
+            modelo = (await self.db.execute(select(ModeloBIM).where(ModeloBIM.id == modelo_id, ModeloBIM.tenant_id == self.tenant_id).with_for_update())).scalar_one()
             modelo.estado_procesamiento = EstadoProceso.ERROR.value
-            modelo.error_procesamiento = str(e)
+            modelo.error_procesamiento = str(e)[:2000]
             await self.db.commit()
             raise
         finally:
@@ -238,13 +264,10 @@ class BIMService:
         query = query.order_by(ElementoBIM.tipo).limit(limit).offset(offset)
         result = await self.db.execute(query)
         elementos = list(result.scalars().all())
-        if not incluir_malla:
-            # La malla puede pesar bastante; solo se manda cuando el
-            # frontend explícitamente la va a renderizar.
-            for e in elementos:
-                e.malla_vertices = None
-                e.malla_caras = None
-        return elementos
+        # Serialize copies: suppressing mesh must never dirty persisted ORM rows.
+        return [SimpleNamespace(**{c.key: (None if not incluir_malla and c.key in
+                ("malla_vertices", "malla_caras") else getattr(e, c.key))
+                for c in ElementoBIM.__table__.columns}) for e in elementos]
 
     async def mapear_a_partidas(self, modelo_id: UUID, expediente_id: UUID, mapeos: List[Dict[str, Any]]) -> int:
         """Asocia elementos BIM a partidas de presupuesto ya existentes.
@@ -252,14 +275,24 @@ class BIMService:
         mapeos: [{"elemento_id": UUID, "partida_id": UUID}, ...]
         """
         await self._validar_modelo_en_expediente(modelo_id, expediente_id)
-        count = 0
+        validated = []
         for m in mapeos:
-            elem = (await self.db.execute(select(ElementoBIM).join(ModeloBIM, ModeloBIM.id == ElementoBIM.modelo_id).where(ElementoBIM.id == m["elemento_id"], ElementoBIM.modelo_id == modelo_id, ModeloBIM.tenant_id == self.tenant_id))).scalar_one_or_none()
-            if elem and elem.modelo_id == modelo_id:
-                elem.partida_id = m["partida_id"]
-                count += 1
+            elem = (await self.db.execute(select(ElementoBIM).where(
+                ElementoBIM.id == m["elemento_id"], ElementoBIM.modelo_id == modelo_id
+            ).with_for_update())).scalar_one_or_none()
+            partida = (await self.db.execute(select(Partida).join(Presupuesto,
+                Presupuesto.id == Partida.presupuesto_id).where(
+                Partida.id == m["partida_id"], Partida.tenant_id == self.tenant_id,
+                Presupuesto.tenant_id == self.tenant_id, Presupuesto.expediente_id == expediente_id
+            ))).scalar_one_or_none()
+            if elem is None or partida is None:
+                raise MegalodonException(ErrorCode.DOCUMENTO_NO_ENCONTRADO,
+                    "Elemento o partida no encontrado en este expediente")
+            validated.append((elem, partida.id))
+        for elem, partida_id in validated:
+            elem.partida_id = partida_id
         await self.db.commit()
-        return count
+        return len(validated)
 
     async def crear_presupuesto_desde_bim(
         self,
@@ -330,23 +363,14 @@ class BIMService:
             if concepto_apu is None:
                 # Sin mapeo para este tipo: comportamiento original, solo
                 # cantidades, $0 honesto (ver nota abajo).
-                if tipo in TIPOS_POR_AREA:
-                    unidad, cantidad = "m2", sum(float(e.area or 0) for e in elems)
-                elif tipo in TIPOS_POR_PIEZA:
-                    unidad, cantidad = "pza", float(len(elems))
-                else:
-                    unidad, cantidad = "m3", sum(float(e.volumen or 0) for e in elems)
+                unidad = "m2" if tipo in TIPOS_POR_AREA else "pza" if tipo in TIPOS_POR_PIEZA else "m3"
+                cantidad = cantidad_bim(elems, unidad)
 
                 partidas_data.append({
                     "descripcion": f"{tipo} (extraído de BIM, {len(elems)} elementos)",
                     "unidad": unidad,
-                    # gt=0 en el resto del sistema; si la cantidad calculada
-                    # dio 0 (ej. elementos sin geometría ni Qto) se deja un
-                    # mínimo simbólico en vez de tronar, pero NO se inventa un
-                    # precio_unitario -- eso se deja pendiente a propósito
-                    # (ver nota abajo) para que no se cuele un precio falso a
-                    # un presupuesto real.
-                    "cantidad": round(cantidad, 4) or 0.0001,
+                    # Zero explicitly marks an unavailable quantity; approval rejects it.
+                    "cantidad": round(cantidad, 4),
                     # Sin "precio_unitario" ni "conceptos": esto es solo
                     # cuantificación. El motor de costeo lo deja en $0.00
                     # hasta que alguien capture el precio real (tabulador o
@@ -360,27 +384,12 @@ class BIMService:
                 # en vez de adivinar -- p. ej. mandar área cuando el APU
                 # real es por m3 daría un importe incorrecto en silencio.
                 unidad_apu = (concepto_apu.unidad or "").lower()
-                if unidad_apu == "m2":
-                    cantidad = sum(float(e.area or 0) for e in elems)
-                elif unidad_apu == "m3":
-                    cantidad = sum(float(e.volumen or 0) for e in elems)
-                elif unidad_apu in ("ml", "m"):
-                    cantidad = sum(float(e.longitud or 0) for e in elems)
-                elif unidad_apu == "pza":
-                    cantidad = float(len(elems))
-                else:
-                    raise MegalodonException(
-                        ErrorCode.BIM_ERROR,
-                        f"El concepto de catálogo mapeado a '{tipo}' está en unidad "
-                        f"'{concepto_apu.unidad}', que no se puede derivar automáticamente "
-                        "de la geometría BIM (solo m2/m3/ml/pza). Usa /mapear-partidas "
-                        "para este tipo en vez de mapeo_catalogo.",
-                    )
+                cantidad = cantidad_bim(elems, unidad_apu)
 
                 partida_data: Dict[str, Any] = {
                     "descripcion": f"{tipo} (extraído de BIM, {len(elems)} elementos) — {concepto_apu.descripcion}",
                     "unidad": concepto_apu.unidad,
-                    "cantidad": round(cantidad, 4) or 0.0001,
+                    "cantidad": round(cantidad, 4),
                 }
                 insumos_desglose = (concepto_apu.desglose or {}).get("insumos") or []
                 if insumos_desglose:

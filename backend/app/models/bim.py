@@ -19,7 +19,7 @@ from enum import Enum as PyEnum
 from typing import Optional
 from uuid import UUID, uuid4
 
-from sqlalchemy import ForeignKey, String, Numeric, Integer, JSON, DateTime, func, UniqueConstraint
+from sqlalchemy import ForeignKey, String, Numeric, Integer, JSON, DateTime, func, UniqueConstraint, ForeignKeyConstraint
 from app.db.types import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -72,6 +72,8 @@ class ModeloBIM(Base, UUIDMixin, TenantMixin, AuditMixin):
 
     __table_args__ = (
         UniqueConstraint("expediente_id", "identificador", name="uq_modelobim_expediente_identificador"),
+        ForeignKeyConstraint(["tenant_id", "expediente_id"],
+            ["expedientes_obra.tenant_id", "expedientes_obra.id"], name="fk_modelobim_tenant_expediente"),
     )
 
 
@@ -124,6 +126,8 @@ class ElementoBIM(Base, UUIDMixin):
     partida_id: Mapped[Optional[UUID]] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("partidas.id", ondelete="SET NULL"), nullable=True, index=True
     )
+
+    __table_args__ = (UniqueConstraint("modelo_id", "global_id", name="uq_elementobim_modelo_global"),)
 
     modelo: Mapped["ModeloBIM"] = relationship("ModeloBIM", back_populates="elementos")
 

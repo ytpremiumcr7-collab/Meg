@@ -298,6 +298,13 @@ class EntitlementsService:
             })
         return salida
 
+    async def verificar_modulo(self, tenant: Tenant, rol: str, app_id: str) -> None:
+        modulos = await self.listar_modulos_para(tenant, rol)
+        modulo = next((m for m in modulos if m["app_id"] == app_id), None)
+        if modulo is None or not modulo["desbloqueado"]:
+            raise MegalodonException(ErrorCode.VALIDACION_FALLIDA,
+                "Módulo no disponible para tu rol o plan", status_code=403)
+
     # ─── Seeding idempotente ────────────────────────────────────────
 
     async def sembrar_planes_default(self) -> int:

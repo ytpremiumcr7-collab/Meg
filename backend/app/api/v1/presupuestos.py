@@ -16,16 +16,15 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_user, get_db, verificar_expediente_tenant
+from app.core.deps import get_current_user, get_db, verificar_expediente_tenant, module_access, require_approval_role
 from app.services.presupuesto_service import PresupuestoService
-from app.services.entitlements_service import EntitlementsService
-from app.models.user import User, Tenant
+from app.models.user import User
 from app.schemas.costos import ParametrosCosteoInput
 from app.schemas.apu_costeo import ConceptoCosteoInput, InsumoCosteoInput
 
 # BUG ORIGINAL: ningún endpoint verificaba que expediente_id perteneciera
 # al tenant del usuario -- ver app.core.deps.verificar_expediente_tenant.
-router = APIRouter(dependencies=[Depends(verificar_expediente_tenant)])
+router = APIRouter(dependencies=[Depends(verificar_expediente_tenant), Depends(module_access("megalodon-costos"))])
 
 
 class PartidaCreate(BaseModel):
@@ -287,13 +286,6 @@ async def recalcular_presupuesto(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user), _rate_limit: bool = Depends(rate_limit_strict),
 ):
-    # BUG ORIGINAL: max_corridas_costeo_mes existía en PlanLimite pero
-    # nada lo hacía cumplir -- esta es la "corrida de costeo" que el plan
-    # limita (3/mes en Free, 25 en Intermedio, etc.), así que se cuenta
-    # aquí antes de recalcular.
-    tenant = await db.get(Tenant, current_user.tenant_id)
-    await EntitlementsService(db).verificar_y_registrar_uso(tenant, "corridas_costeo")
-
     service = PresupuestoService(db, current_user.tenant_id)
     presupuesto = await service.recalcular(
         presupuesto_id, expediente_id=expediente_id, actualizado_por_id=current_user.id,
@@ -317,6 +309,8 @@ async def cambiar_estado_presupuesto(
     validado/aprobado/rechazado -- el campo `estado` tampoco existía
     antes de esta ronda de unificación del modelo de datos."""
     service = PresupuestoService(db, current_user.tenant_id)
+    if data.estado == "APROBADO":
+        await require_approval_role(current_user)
     return await service.cambiar_estado(
         presupuesto_id, expediente_id=expediente_id, nuevo_estado=data.estado,
         actualizado_por_id=current_user.id,

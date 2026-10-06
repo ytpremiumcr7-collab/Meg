@@ -70,14 +70,14 @@ class SupabaseStorage:
     def __init__(self, bucket: str):
         self.bucket = bucket
 
-    async def subir(self, path: str, contenido: bytes, content_type: str = "application/octet-stream") -> str:
+    async def subir(self, path: str, contenido: bytes, content_type: str = "application/octet-stream", *, overwrite: bool = True) -> str:
         """Sube (o sobreescribe, upsert=true) un archivo. Regresa el path
         dentro del bucket, que es lo que se debe guardar en BD (nunca
         guardar URLs firmadas, esas expiran)."""
         client = await get_storage_client()
         try:
             await client.storage.from_(self.bucket).upload(
-                path, contenido, {"content-type": content_type, "upsert": "true"}
+                path, contenido, {"content-type": content_type, "upsert": "true" if overwrite else "false"}
             )
         except Exception as e:
             raise MegalodonException(ErrorCode.ARCHIVO_ERROR, f"Error al subir '{path}' a storage: {e}")

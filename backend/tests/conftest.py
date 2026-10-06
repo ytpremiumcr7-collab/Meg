@@ -97,6 +97,12 @@ async def setup_database():
         async with engine_test.connect() as conn:
             await conn.run_sync(verify)
 
+    # ASGITransport skips lifespan; initialize the same entitlement catalogues.
+    from app.services.entitlements_service import EntitlementsService
+    async with AsyncSessionLocalTest() as session:
+        await EntitlementsService(session).sembrar_planes_default()
+        await EntitlementsService(session).sembrar_modulos_default()
+
     yield
 
     if TEST_DATABASE_URL.startswith('sqlite'):
