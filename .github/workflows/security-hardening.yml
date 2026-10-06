@@ -112,9 +112,7 @@ jobs:
       - run: python -m scripts.verify_migrated_schema
       - run: timeout 120s python -m scripts.smoke_runtime_ci
       - name: Run bounded backend tests and preserve the diagnostic log
-        run: |
-          set -o pipefail
-          timeout --kill-after=30s 5m pytest -vv --maxfail=5 --durations=10 -o faulthandler_timeout=30 2>&1 | tee backend-integration.log
+        run: python -m scripts.run_backend_tests_ci
       - name: Preserve runtime smoke evidence
         if: always()
         uses: actions/upload-artifact@v4

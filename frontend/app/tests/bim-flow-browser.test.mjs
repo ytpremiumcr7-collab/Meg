@@ -86,11 +86,14 @@ test('user creates an obra, resumes an IFC job after restart, approves and expor
     await page.getByLabel('Unidad administrativa').fill('Pruebas');
     await page.getByLabel('Serie documental', {exact:false}).first().fill('02100');
     await page.getByLabel('Subserie documental', {exact:false}).fill('02100-01');
-    await page.getByRole('button',{name:'Crear expediente',exact:true}).click();
+    const [created]=await Promise.all([
+      page.waitForResponse(r=>r.request().method()==='POST' && new URL(r.url()).pathname==='/api/v1/expedientes'),
+      page.getByRole('button',{name:'Crear expediente',exact:true}).click()]);
+    assert.equal(created.status(),200);
     await page.getByRole('button',{name:'Calculadora BIM',exact:true}).click();
-    const upload=page.waitForResponse(r=>r.request().method()==='POST' && /\/bim\/[^/]+\/modelos$/.test(new URL(r.url()).pathname));
-    await page.getByLabel('Subir archivo IFC').setInputFiles(join(backend,'tests/fixtures/ifc/wall_millimetres.ifc'));
-    const uploadResponse=await upload;
+    const [uploadResponse]=await Promise.all([
+      page.waitForResponse(r=>r.request().method()==='POST' && /\/bim\/[^/]+\/modelos$/.test(new URL(r.url()).pathname)),
+      page.getByLabel('Subir archivo IFC').setInputFiles(join(backend,'tests/fixtures/ifc/wall_millimetres.ifc'))]);
     assert.equal(uploadResponse.status(),200);
     const model=await uploadResponse.json();
     assert.equal(model.estado_procesamiento,'PENDIENTE');
@@ -190,6 +193,7 @@ test('user creates an obra, resumes an IFC job after restart, approves and expor
       await readerPage.screenshot({path:join(evidence,'05-solo-lectura.png'),fullPage:true});
     } finally { await readerContext.close(); }
   } finally {
+    await page.screenshot({path:join(evidence,'last-screen.png'),fullPage:true}).catch(()=>{});
     await context.tracing.stop({path:join(evidence,'bim-flow-trace.zip')});
     await context.close();
   }

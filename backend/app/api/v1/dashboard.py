@@ -110,7 +110,7 @@ async def get_dashboard_stats(
     prov_activos = await db.execute(
         select(func.count(Proveedor.id))
         .where(Proveedor.tenant_id == tenant_id)
-        .where(Proveedor.activo == True)
+        .where(Proveedor.estado == 'ACTIVO')
     )
 
     # ── Documentos (join con Expediente para filtrar por tenant) ──
@@ -138,6 +138,8 @@ async def get_dashboard_stats(
     # ── KPIs calculados ──
     kpis = []
     total_exp_val = total_exp.scalar()
+    monto_total_val = float(monto_total.scalar() or 0)
+    docs_pendientes_val = docs_pendientes.scalar()
 
     # KPI: Tasa de finalización
     finalizados = await db.execute(
@@ -150,17 +152,13 @@ async def get_dashboard_stats(
     kpis.append(KPIData(
         label="Tasa de Finalización",
         value=round(tasa_finalizacion, 1),
-        change_pct=5.2,
-        trend="up",
     ))
 
     # KPI: Monto promedio por expediente
-    monto_promedio = (float(monto_total.scalar()) / total_exp_val) if total_exp_val > 0 else 0
+    monto_promedio = (monto_total_val / total_exp_val) if total_exp_val > 0 else 0
     kpis.append(KPIData(
         label="Monto Promedio",
         value=round(monto_promedio, 2),
-        change_pct=-2.1,
-        trend="down",
     ))
 
     # KPI: Tiempo promedio de ciclo (real, calculado desde expedientes cerrados)
@@ -180,16 +178,12 @@ async def get_dashboard_stats(
     kpis.append(KPIData(
         label="Días Promedio Ciclo",
         value=round(float(ciclo_promedio.scalar() or 0.0), 1),
-        change_pct=3.5,
-        trend="stable",
     ))
 
     # KPI: Documentos pendientes
     kpis.append(KPIData(
         label="Documentos Pendientes",
-        value=docs_pendientes.scalar(),
-        change_pct=-8.0,
-        trend="up",
+        value=docs_pendientes_val,
     ))
 
     stats = DashboardStats(
@@ -197,7 +191,7 @@ async def get_dashboard_stats(
         expedientes_activos=activos_exp.scalar(),
         expedientes_archivados=archivados_exp.scalar(),
         total_presupuestos=total_pres.scalar(),
-        monto_total_comprometido=float(monto_total.scalar()),
+        monto_total_comprometido=monto_total_val,
         total_licitaciones=total_lic.scalar(),
         licitaciones_en_proceso=lic_en_proceso.scalar(),
         total_contratos=total_con.scalar(),
@@ -205,7 +199,7 @@ async def get_dashboard_stats(
         total_proveedores=total_prov.scalar(),
         proveedores_activos=prov_activos.scalar(),
         total_documentos=total_docs.scalar(),
-        documentos_pendientes_firma=docs_pendientes.scalar(),
+        documentos_pendientes_firma=docs_pendientes_val,
     )
 
     return DashboardResponse(
