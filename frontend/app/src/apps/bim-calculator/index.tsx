@@ -5,7 +5,12 @@
  * without prior written permission.
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import PresupuestoPanel from './PresupuestoPanel';
+import CantidadesComplementarias, { faltantesDeMedicion, type CapturaCantidad } from './CantidadesComplementarias';
+import { abrirModulo } from '@/lib/navigation';
+import { useAuthStore } from '@/stores/useAuthStore';
+import { permisosBim } from '@/lib/bim-permissions';
 import { Building2, Plus, Trash2, Calculator, Download, HardHat, Upload, Loader2, AlertCircle, FolderKanban, Box, FileWarning, ShieldAlert, CheckCircle2, AlertTriangle, Layers, Search, Link2 } from 'lucide-react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Bounds } from '@react-three/drei';
@@ -94,7 +99,6 @@ const COLOR_POR_TIPO: Record<string, string> = {
   IfcRailing: '#c98e6c',
 };
 const COLOR_DEFAULT = '#8899aa';
-const COLOR_SELECCIONADO = '#ffd166';
 
 function ElementoMesh({
   elemento, seleccionado, wireframe, onSelect, enClash = false,
@@ -139,6 +143,12 @@ function ElementoMesh({
 }
 
 function IFCPanel() {
+  const requestId = useRef(0);
+  const role = useAuthStore(s => s.user?.role);
+  const { canWrite } = permisosBim(role);
+  const [modelos, setModelos] = useState<ModeloBIM[]>([]);
+  const [nuevoPresupuestoId, setNuevoPresupuestoId] = useState('');
+  const [trabajos, setTrabajos] = useState<Awaited<ReturnType<typeof megalodonClient.bim.listarTrabajos>>>([]);
   const expedienteActivo = useExpedienteStore((s) => s.expedienteActivo());
   const [modelo, setModelo] = useState<ModeloBIM | null>(null);
   const [elementos, setElementos] = useState<ElementoBIM[]>([]);
@@ -177,6 +187,8 @@ function IFCPanel() {
   const [factorUtilidad, setFactorUtilidad] = useState(0);
   const [factorImpuesto, setFactorImpuesto] = useState(0);
   const [referenciaParametros, setReferenciaParametros] = useState('');
+  const [capturasCantidad, setCapturasCantidad] = useState<Record<string,CapturaCantidad>>({});
+  useEffect(() => { setCapturasCantidad({}); }, [modelo?.id]);
 
   useEffect(() => {
     if (!expedienteActivo) { setPresupuestosDisponibles([]); return; }
@@ -206,65 +218,58 @@ function IFCPanel() {
     }
   };
 
-  const handleArchivo = async (file: File) => {
+  const cargarModelo = async (selected: ModeloBIM) => {
     if (!expedienteActivo) return;
-    setError('');
-    setProcesando(true);
-    setModelo(null);
-    setElementos([]);
-    setSeleccionado(null);
-    setNivelFiltro('__todos__');
+    const current = ++requestId.current;
+    setProcesando(true); setError(''); setModelo(selected); setElementos([]);
+    setSeleccionado(null); setNivelFiltro('__todos__'); setGeneracion4D(null);
+    setMapeoCatalogo({}); setResultadosCatalogo({}); setBusquedaCatalogo({}); setErroresCatalogo({});
+    setAnalisis(null); setClashes([]); setClashesResaltados(new Set()); setTrabajos([]);
     try {
-      const modeloSubido = await megalodonClient.bim.subirModelo(expedienteActivo.id, file, {
-        nombre: file.name.replace(/\.ifc$/i, ''),
-        extraerMalla: true,
-      });
-      setModelo(modeloSubido);
-
-      // El procesamiento del IFC ahora corre en un worker (antes era
-      // síncrono en este mismo request) -- hay que esperar a que
-      // termine en vez de asumir que ya quedó listo.
-      const modeloListo = modeloSubido.estado_procesamiento === 'COMPLETADO'
-        ? modeloSubido
-        : await megalodonClient.bim.esperarProcesamiento(expedienteActivo.id, modeloSubido.id);
-      setModelo(modeloListo);
-
-      if (modeloListo.estado_procesamiento === 'COMPLETADO') {
-        // FIX P0 auditoría BIM 2026-09-14: antes se pedía un único
-        // limit:500 y se descartaba silenciosamente cualquier elemento
-        // más allá de ese -- un IFC con 2,000+ elementos se veía
-        // "completo" en el visor sin serlo, y eso también afectaba
-        // tiposDelModelo (tipos que solo aparecen después del elemento
-        // 500 nunca llegaban a la UI, ni al mapeo 5D). El backend ya
-        // soporta limit/offset; ahora se pagina de verdad hasta traer
-        // todo el modelo, con un tope de seguridad explícito (avisado,
-        // no silencioso) para no colgar el navegador con modelos
-        // extremos mientras no exista streaming/virtualización real del
-        // visor 3D (ver auditoría: arquitectura de datos BIM pendiente).
-        const PAGINA = 500;
-        const TOPE_SEGURIDAD = 20000;
-        let acumulado: ElementoBIM[] = [];
-        let offset = 0;
-        while (true) {
-          const pagina = await megalodonClient.bim.listarElementos(expedienteActivo.id, modeloListo.id, {
-            incluirMalla: true,
-            limit: PAGINA,
-            offset,
-          });
-          acumulado = acumulado.concat(pagina);
-          if (pagina.length < PAGINA || acumulado.length >= TOPE_SEGURIDAD) break;
-          offset += PAGINA;
-        }
-        setElementos(acumulado);
-        if (acumulado.length >= TOPE_SEGURIDAD) {
-          setError(`El modelo tiene más de ${TOPE_SEGURIDAD} elementos; se muestran los primeros ${acumulado.length} (visor sin streaming todavía -- ver roadmap BIM).`);
-        }
-      } else {
-        setError(modeloListo.error_procesamiento || 'El modelo no se pudo procesar');
+      const ready = ['COMPLETADO', 'ERROR'].includes(selected.estado_procesamiento)
+        ? selected : await megalodonClient.bim.esperarProcesamiento(expedienteActivo.id, selected.id);
+      if (current !== requestId.current) return;
+      setModelo(ready);
+      if (ready.estado_procesamiento !== 'COMPLETADO') {
+        setError(ready.error_procesamiento || 'No se pudo procesar este archivo. Revisa su contenido y vuelve a intentar.');
+        return;
+      }
+      const all: ElementoBIM[] = [];
+      while (all.length < 20000) {
+        const page = await megalodonClient.bim.listarElementos(expedienteActivo.id, ready.id,
+          { incluirMalla:true, limit:500, offset:all.length });
+        if (current !== requestId.current) return;
+        all.push(...page);
+        if (page.length < 500) break;
+      }
+      setElementos(all);
+      if (ready.num_elementos > all.length) setError(`Se muestran ${all.length} de ${ready.num_elementos} elementos. El presupuesto utiliza el modelo completo.`);
+      const history = await megalodonClient.bim.listarGeneraciones(expedienteActivo.id, ready.id);
+      if (current !== requestId.current) return;
+      const generation = history[0];
+      setGeneracion4D(generation || null);
+      if (generation && !['COMPLETADO','ERROR'].includes(generation.estado)) {
+        setGenerando4D(true);
+        const final = await megalodonClient.bim.esperarGeneracion4D5D(expedienteActivo.id, generation.id);
+        if (current === requestId.current) setGeneracion4D(final);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Error al procesar el IFC');
+      if (current === requestId.current) setError(e instanceof Error ? e.message : 'No se pudo abrir el modelo');
     } finally {
+      if (current === requestId.current) { setProcesando(false); setGenerando4D(false); }
+    }
+  };
+
+  const handleArchivo = async (file: File) => {
+    if (!expedienteActivo || !canWrite) return;
+    setError(''); setProcesando(true);
+    try {
+      const uploaded = await megalodonClient.bim.subirModelo(expedienteActivo.id, file,
+        { nombre:file.name.replace(/\.ifc$/i, ''), extraerMalla:true });
+      setModelos(previous => [uploaded, ...previous]);
+      await cargarModelo(uploaded);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo subir el archivo');
       setProcesando(false);
     }
   };
@@ -286,6 +291,8 @@ function IFCPanel() {
           fuente: 'CAPTURA_USUARIO', referencia: referenciaParametros.trim(),
         },
       });
+      setNuevoPresupuestoId(presupuesto.id);
+      setPresupuestosDisponibles(previous => [presupuesto, ...previous]);
       setMensajePresupuesto(`Presupuesto ${presupuesto.identificador} creado (solo cantidades -- falta capturar precios unitarios).`);
     } catch (e) {
       setMensajePresupuesto(e instanceof Error ? e.message : 'No se pudo generar el presupuesto');
@@ -305,6 +312,7 @@ function IFCPanel() {
   // --- 5D: mapeo de tipos a catálogo real (precio real, no inventado) ---
   const [busquedaCatalogo, setBusquedaCatalogo] = useState<Record<string, string>>({});
   const [resultadosCatalogo, setResultadosCatalogo] = useState<Record<string, CatalogoAPUOut[]>>({});
+  const [erroresCatalogo, setErroresCatalogo] = useState<Record<string, string>>({});
   const [buscandoCatalogo, setBuscandoCatalogo] = useState<string | null>(null);
   const [mapeoCatalogo, setMapeoCatalogo] = useState<Record<string, CatalogoAPUOut>>({});
   const [generandoPresupuestoReal, setGenerandoPresupuestoReal] = useState(false);
@@ -364,11 +372,13 @@ function IFCPanel() {
     const q = busquedaCatalogo[tipo]?.trim();
     if (!q) return;
     setBuscandoCatalogo(tipo);
+    setErroresCatalogo(prev => ({ ...prev, [tipo]: '' }));
     try {
       const { items } = await megalodonClient.catalogoApu.listar({ q, limit: 8 });
       setResultadosCatalogo((prev) => ({ ...prev, [tipo]: items }));
-    } catch {
+    } catch (e) {
       setResultadosCatalogo((prev) => ({ ...prev, [tipo]: [] }));
+      setErroresCatalogo(prev => ({ ...prev, [tipo]: e instanceof Error ? e.message : 'No se pudo consultar el catálogo. Intenta buscar de nuevo.' }));
     } finally {
       setBuscandoCatalogo(null);
     }
@@ -385,16 +395,29 @@ function IFCPanel() {
     try {
       const mapeoPayload: Record<string, string> = {};
       for (const [tipo, concepto] of Object.entries(mapeoCatalogo)) mapeoPayload[tipo] = concepto.id;
+      const cantidadesComplementarias = faltantesDeMedicion(elementos,
+        Object.fromEntries(Object.entries(mapeoCatalogo).map(([tipo,concepto])=>[tipo,concepto.unidad])))
+        .flatMap(({elemento,unidad}) => {
+          const capture = capturasCantidad[elemento.id];
+          if (!capture || capture.unidad !== unidad || (!capture.cantidad && !capture.referencia)) return [];
+          const quantity = Number(capture.cantidad);
+          if (!Number.isFinite(quantity) || quantity <= 0 || capture.referencia.trim().length < 5)
+            throw new Error('Completa la cantidad y una referencia de al menos cinco caracteres en cada medición capturada.');
+          return [{elemento_id:elemento.id,unidad,cantidad:quantity,referencia:capture.referencia.trim()}];
+        });
 
       const presupuesto = await megalodonClient.bim.generarPresupuesto(expedienteActivo.id, modelo.id, {
         nombre: `Presupuesto desde ${modelo.nombre}`,
         mapeo_catalogo: Object.keys(mapeoPayload).length > 0 ? mapeoPayload : undefined,
+        cantidades_complementarias: cantidadesComplementarias,
         parametros_costeo: {
           factor_indirecto: factorIndirecto, factor_utilidad: factorUtilidad,
           factor_impuesto: factorImpuesto, factor_riesgo: 0,
           fuente: 'CAPTURA_USUARIO', referencia: referenciaParametros.trim(),
         },
       });
+      setNuevoPresupuestoId(presupuesto.id);
+      setPresupuestosDisponibles(previous => [presupuesto, ...previous]);
       const numMapeados = Object.keys(mapeoPayload).length;
       setMensajePresupuestoReal(
         numMapeados > 0
@@ -447,12 +470,43 @@ function IFCPanel() {
     }
   };
 
+  useEffect(() => {
+    let active = true;
+    if (!expedienteActivo) return;
+    megalodonClient.bim.listarModelos(expedienteActivo.id).then(list => {
+      if (!active) return;
+      setModelos(list);
+      if (list[0]) void cargarModelo(list[0]);
+    }).catch(e => { if (active) setError(e instanceof Error ? e.message : 'No se pudieron cargar los modelos'); });
+    return () => { active = false; requestId.current++; };
+  }, [expedienteActivo?.id]);
+
+  useEffect(() => {
+    if (!expedienteActivo || !modelo) return;
+    let active = true;
+    const load = () => megalodonClient.bim.listarTrabajos(expedienteActivo.id, modelo.id)
+      .then(list => { if (active) setTrabajos(list); })
+      .catch(e => { if (active) setError(e instanceof Error ? e.message : 'No se pudo consultar el procesamiento'); });
+    void load();
+    const interval = setInterval(load, 5000);
+    return () => { active = false; clearInterval(interval); };
+  }, [expedienteActivo?.id, modelo?.id]);
+
+  const reintentar = async (id: string) => {
+    if (!expedienteActivo || !modelo || !canWrite) return;
+    try {
+      await megalodonClient.bim.reintentarTrabajo(expedienteActivo.id, modelo.id, id);
+      await cargarModelo(await megalodonClient.bim.obtenerModelo(expedienteActivo.id, modelo.id));
+    } catch (e) { setError(e instanceof Error ? e.message : 'No se pudo reintentar'); }
+  };
+
   if (!expedienteActivo) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center gap-2 text-center px-6" style={{ color: 'var(--text-muted)' }}>
         <FolderKanban size={32} style={{ opacity: 0.5 }} />
         <p className="text-sm">No hay ningún expediente activo.</p>
-        <p className="text-xs">Abre la app &quot;Proyectos&quot; y selecciona o crea un expediente antes de subir un IFC.</p>
+        <p className="text-xs">Primero elige la obra en la que vas a trabajar.</p>
+        <button onClick={() => abrirModulo('proyectos')} className="px-4 py-2 rounded bg-(--accent-gold) text-(--void)">Elegir o crear obra</button>
       </div>
     );
   }
@@ -489,13 +543,44 @@ function IFCPanel() {
           {procesando ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
           {procesando ? 'Procesando...' : 'Subir IFC'}
           <input
+            aria-label="Subir archivo IFC"
             type="file"
             accept=".ifc"
             className="hidden"
-            disabled={procesando}
+            disabled={procesando || !canWrite}
             onChange={(e) => { const f = e.target.files?.[0]; if (f) handleArchivo(f); }}
           />
         </label>
+      </div>
+
+      <div className="shrink-0 p-3 space-y-2 border-b border-(--border-subtle) text-xs">
+        <p className="text-(--text-secondary)">Sube o abre un modelo, revisa sus cantidades y continúa con el presupuesto y el cronograma.</p>
+        {!!modelos.length && <label className="flex items-center gap-2">Modelo de esta obra
+          <select aria-label="Modelo de esta obra" value={modelo?.id || ''} disabled={procesando}
+            onChange={e => { const item = modelos.find(m => m.id === e.target.value); if (item) void cargarModelo(item); }}
+            className="min-w-0 flex-1 p-2 rounded bg-(--surface-elevated)">
+            <option value="" disabled>Elegir modelo</option>
+            {modelos.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
+          </select>
+          <button className="p-2 border rounded border-(--border-subtle)" disabled={procesando || !modelo}
+            onClick={() => modelo && void megalodonClient.bim.obtenerModelo(expedienteActivo.id, modelo.id).then(cargarModelo).catch(e => setError(e.message))}>Actualizar</button>
+        </label>}
+        <nav aria-label="Pasos de trabajo BIM" className="flex flex-wrap gap-2">
+          <button className="p-2 rounded bg-(--surface-elevated)" disabled={!elementos.length} onClick={() => setTabDerecho('resumen')}>1. Revisar cantidades</button>
+          <button className="p-2 rounded bg-(--surface-elevated)" disabled={!elementos.length} onClick={() => setTabDerecho('presupuesto5d')}>2. Preparar presupuesto</button>
+          <button className="p-2 rounded bg-(--surface-elevated)" disabled={!elementos.length} onClick={() => setTabDerecho('cronograma4d')}>3. Crear cronograma</button>
+        </nav>
+        {procesando && <p role="status">Preparando el modelo… Puedes salir y volver: el trabajo seguirá guardado.</p>}
+        {modelo?.estado_procesamiento === 'ERROR' && canWrite && !trabajos.some(j => j.tipo === 'BIM_IFC') &&
+          <button className="p-2 border rounded border-(--border-subtle)" onClick={() =>
+            void megalodonClient.bim.reprocesarModelo(expedienteActivo.id, modelo.id).then(cargarModelo).catch(e => setError(e.message))}>
+            Volver a procesar todos los elementos y su geometría
+          </button>}
+        {!canWrite && <p>Tu cuenta permite consultar esta obra. Un técnico puede cargar o modificar el modelo.</p>}
+        {trabajos.filter(j => j.estado !== 'COMPLETADO').map(j => <div key={j.id} className="flex gap-2 items-center" role="status">
+          <span>{j.tipo === 'BIM_IFC' ? 'Modelo' : j.tipo === 'BIM_4D' ? 'Cronograma' : 'Interferencias'}: {j.estado === 'ERROR' ? 'Requiere atención' : 'En preparación'}. {j.mensaje || 'Continuará automáticamente.'}</span>
+          {j.estado === 'ERROR' && canWrite && <button className="p-2 border rounded border-(--border-subtle)" onClick={() => void reintentar(j.id)}>Reintentar trabajo</button>}
+        </div>)}
       </div>
 
       {error && (
@@ -560,8 +645,8 @@ function IFCPanel() {
             </span>
           </div>
 
-          <div className="flex-1 flex overflow-hidden">
-            <div className="w-1/2 h-full relative" style={{ background: '#05050a' }}>
+          <div className="flex-1 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden">
+            <div className="w-full lg:w-1/2 h-[340px] lg:h-full shrink-0 relative" style={{ background: '#05050a' }}>
               {/* key={vista} fuerza remount de Canvas al cambiar de
                   proyección -- cambiar de perspectiva a ortográfica en la
                   misma cámara da resultados raros con Bounds/fit. */}
@@ -640,7 +725,7 @@ function IFCPanel() {
                             </select>
                             <button
                               onClick={handleVincularPartida}
-                              disabled={!partidaVinculoId || vinculando}
+                              disabled={!canWrite || !partidaVinculoId || vinculando}
                               className="px-2 py-0.5 rounded text-[10px] font-medium"
                               style={{ background: 'var(--accent-gold)', color: '#000' }}
                             >
@@ -656,7 +741,7 @@ function IFCPanel() {
               )}
             </div>
 
-            <div className="w-1/2 h-full flex flex-col overflow-hidden">
+            <div className="w-full lg:w-1/2 min-h-[400px] lg:min-h-0 lg:h-full flex flex-col overflow-hidden">
               {/* Tabs panel derecho */}
               <div className="flex shrink-0" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                 {(['resumen', 'clash', 'presupuesto5d', 'cronograma4d'] as const).map((t) => (
@@ -670,9 +755,9 @@ function IFCPanel() {
                     }}
                   >
                     {t === 'resumen' && <><Calculator size={11} /> Resumen</>}
-                    {t === 'clash' && <><ShieldAlert size={11} /> Clash {analisis && analisis.num_clashes_duros + analisis.num_clashes_blandos > 0 && <span className="ml-1 px-1 rounded text-[9px]" style={{ background: 'var(--danger)', color: '#fff' }}>{analisis.num_clashes_duros + analisis.num_clashes_blandos}</span>}</>}
-                    {t === 'presupuesto5d' && <><Link2 size={11} /> 5D</>}
-                    {t === 'cronograma4d' && <><Layers size={11} /> 4D</>}
+                    {t === 'clash' && <><ShieldAlert size={11} /> Interferencias {analisis && analisis.num_clashes_duros + analisis.num_clashes_blandos > 0 && <span className="ml-1 px-1 rounded text-[9px]" style={{ background: 'var(--danger)', color: '#fff' }}>{analisis.num_clashes_duros + analisis.num_clashes_blandos}</span>}</>}
+                    {t === 'presupuesto5d' && <><Link2 size={11} /> Presupuesto</>}
+                    {t === 'cronograma4d' && <><Layers size={11} /> Cronograma</>}
                   </button>
                 ))}
               </div>
@@ -686,7 +771,7 @@ function IFCPanel() {
                     </span>
                     <button
                       onClick={handleGenerarPresupuesto}
-                      disabled={generandoPresupuesto || !referenciaParametros.trim()}
+                      disabled={!canWrite || generandoPresupuesto || !referenciaParametros.trim()}
                       className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors"
                       style={{ background: 'var(--surface-elevated)', color: 'var(--text-secondary)', border: '1px solid var(--border-subtle)' }}
                     >
@@ -754,7 +839,7 @@ function IFCPanel() {
                     />
                     <button
                       onClick={handleCorrerClash}
-                      disabled={corriendo || !modelo}
+                      disabled={!canWrite || corriendo || !modelo}
                       className="flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-medium ml-auto transition-colors"
                       style={{ background: 'var(--accent-gold)', color: 'var(--void)', opacity: corriendo || !modelo ? 0.6 : 1 }}
                     >
@@ -889,6 +974,7 @@ function IFCPanel() {
                                 style={{ background: 'var(--surface-elevated)', color: 'var(--text-primary)', border: '1px solid var(--border-subtle)' }}
                               />
                               <button
+                                aria-label={`Buscar concepto para ${tipo}`}
                                 onClick={() => handleBuscarCatalogo(tipo)}
                                 disabled={buscandoCatalogo === tipo}
                                 className="px-2 rounded"
@@ -911,7 +997,8 @@ function IFCPanel() {
                                 ))}
                               </div>
                             )}
-                            {buscandoCatalogo !== tipo && busquedaCatalogo[tipo] && (resultadosCatalogo[tipo]?.length === 0) && (
+                            {erroresCatalogo[tipo] && <p role="alert" className="text-[11px] mt-1" style={{ color: 'var(--danger)' }}>{erroresCatalogo[tipo]}</p>}
+                            {!erroresCatalogo[tipo] && buscandoCatalogo !== tipo && busquedaCatalogo[tipo] && (resultadosCatalogo[tipo]?.length === 0) && (
                               <p className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>Sin resultados.</p>
                             )}
                           </>
@@ -919,6 +1006,10 @@ function IFCPanel() {
                       </div>
                     );
                   })}
+                  <CantidadesComplementarias
+                    faltantes={faltantesDeMedicion(elementos, Object.fromEntries(Object.entries(mapeoCatalogo).map(([tipo,concepto])=>[tipo,concepto.unidad])))}
+                    capturas={capturasCantidad} disabled={!canWrite || generandoPresupuestoReal}
+                    onChange={(id,value)=>setCapturasCantidad(previous=>({...previous,[id]:value}))} />
                   <div className="flex items-center gap-2 mt-1 text-[10px]" style={{ color: 'var(--text-muted)' }}>
                     <label className="flex items-center gap-1">Indirectos
                       <input type="number" step={1} min={0} max={100} value={Math.round(factorIndirecto * 100)}
@@ -945,14 +1036,15 @@ function IFCPanel() {
                   />
                   <button
                     onClick={handleGenerarPresupuestoReal}
-                    disabled={generandoPresupuestoReal || tiposDelModelo.length === 0 || !referenciaParametros.trim()}
+                    disabled={!canWrite || generandoPresupuestoReal || tiposDelModelo.length === 0 || !referenciaParametros.trim()}
                     className="flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-medium mt-1"
                     style={{ background: 'var(--accent-gold)', color: 'var(--void)' }}
                   >
                     {generandoPresupuestoReal ? <Loader2 size={11} className="animate-spin" /> : <Calculator size={11} />}
                     Generar presupuesto
                   </button>
-                  {mensajePresupuestoReal && <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{mensajePresupuestoReal}</p>}
+                  {mensajePresupuestoReal && <p role="status" className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{mensajePresupuestoReal}</p>}
+                  <PresupuestoPanel expedienteId={expedienteActivo.id} nuevoId={nuevoPresupuestoId} />
                 </div>
               )}
 
@@ -974,7 +1066,7 @@ function IFCPanel() {
                       />
                       <button
                         onClick={handleAsignarZona}
-                        disabled={asignandoZona || !zonaInput.trim()}
+                        disabled={!canWrite || asignandoZona || !zonaInput.trim()}
                         className="px-2 rounded text-[10px]"
                         style={{ background: 'var(--surface-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-secondary)' }}
                       >
@@ -1008,7 +1100,7 @@ function IFCPanel() {
                     </div>
                     <button
                       onClick={handleGenerar4D}
-                      disabled={generando4D || !fechaInicio4D}
+                      disabled={!canWrite || generando4D || !fechaInicio4D}
                       className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-medium"
                       style={{ background: 'var(--accent-gold)', color: 'var(--void)' }}
                     >
@@ -1023,8 +1115,10 @@ function IFCPanel() {
                     {generacion4D?.estado === 'COMPLETADO' && (
                       <p className="text-[10px] mt-1.5" style={{ color: 'var(--text-secondary)' }}>
                         Listo: {generacion4D.num_actividades_generadas} actividad(es) creadas (agrupado por {generacion4D.agrupar_por}). Ábrelas en Programación para secuenciarlas y calcular la ruta crítica.
+                        <button className="block p-2 mt-2 rounded bg-(--accent-gold) text-(--void)" onClick={() => abrirModulo('programacion-obra', generacion4D.programa_id || undefined)}>Abrir cronograma en Programación</button>
                       </p>
                     )}
+                    {generacion4D?.estado === 'ERROR' && !error4D && <p role="alert" className="text-xs text-(--danger)">{generacion4D.error} Revisa fecha y duración para generar otro cronograma.</p>}
                     {error4D && (
                       <p className="text-[10px] mt-1.5 flex items-center gap-1" style={{ color: 'var(--danger)' }}>
                         <AlertCircle size={10} /> {error4D}
@@ -1042,7 +1136,9 @@ function IFCPanel() {
 }
 
 export default function BIMCalculator() {
-  const [modo, setModo] = useState<'manual' | 'ifc'>('manual');
+  const [modo, setModo] = useState<'manual' | 'ifc'>('ifc');
+  const activeExpId = useExpedienteStore(s => s.expedienteActivoId);
+  useEffect(() => { void useExpedienteStore.getState().cargarExpedientes(); }, []);
   const [elements, setElements] = useState<BuildingElement[]>([
     { id: '1', type: 'Muro', length: 10, width: 0.2, height: 3, quantity: 4, material: 'Ladrillo' },
     { id: '2', type: 'Columna', length: 0.4, width: 0.4, height: 3, quantity: 8, material: 'Concreto' },
@@ -1135,7 +1231,7 @@ export default function BIMCalculator() {
         )}
       </div>
 
-      {modo === 'ifc' && <IFCPanel />}
+      {modo === 'ifc' && <IFCPanel key={activeExpId || 'sin-obra'} />}
 
       {modo === 'manual' && (
       <div className="flex-1 overflow-auto">
@@ -1220,7 +1316,7 @@ export default function BIMCalculator() {
                   <select
                     value={el.type}
                     onChange={(e) => updateElement(el.id, { type: e.target.value as ElementType })}
-                    className="w-full bg-transparent outline-none font-medium"
+                    className="w-full bg-transparent outline-hidden font-medium"
                     style={{ color: 'var(--text-primary)' }}
                   >
                     {ELEMENT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
@@ -1230,7 +1326,7 @@ export default function BIMCalculator() {
                   <select
                     value={el.material}
                     onChange={(e) => updateElement(el.id, { material: e.target.value as Material })}
-                    className="w-full bg-transparent outline-none"
+                    className="w-full bg-transparent outline-hidden"
                     style={{ color: 'var(--text-secondary)' }}
                   >
                     {MATERIALS.map((m) => <option key={m} value={m}>{m}</option>)}
@@ -1242,7 +1338,7 @@ export default function BIMCalculator() {
                       type="number"
                       value={el[field]}
                       onChange={(e) => updateElement(el.id, { [field]: Number(e.target.value) })}
-                      className="w-full bg-transparent font-mono outline-none"
+                      className="w-full bg-transparent font-mono outline-hidden"
                       style={{ color: 'var(--text-primary)' }}
                       step={field === 'quantity' ? 1 : 0.01}
                     />

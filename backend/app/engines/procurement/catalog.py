@@ -106,6 +106,115 @@ def _normalize_pack(raw: dict[str, Any], *, jurisdiction_code: str) -> dict[str,
     }
 
 
+def _case_pack_codes_from_condition(condition: dict[str, Any]) -> set[str]:
+    """Return the explicit case-pack codes that activate a legal rule.
+
+    Case-pack requirements are stored as versioned ``LegalRule`` rows.  A
+    rule only belongs to a pack when its condition explicitly binds
+    ``case_pack_code``; unscoped rules must not leak into a named pack.
+    """
+    clauses = condition.get("conditions") or []
+    if isinstance(clauses, dict):
+        clauses = [clauses]
+    codes: set[str] = set()
+    for clause in clauses:
+        if not isinstance(clause, dict):
+            continue
+        if str(clause.get("field") or "").lower() != "case_pack_code":
+            continue
+        if str(clause.get("op") or "eq").lower() not in {"eq", "in"}:
+            continue
+        value = clause.get("val", clause.get("value"))
+        values = value if isinstance(value, list) else [value]
+        codes.update(str(item).strip().upper() for item in values if str(item or "").strip())
+    return codes
+
+
+def _artifact_specs_from_rule(rule: LegalRule) -> list[dict[str, Any]]:
+    requirement = rule.requirement or {}
+    artifacts: list[dict[str, Any]] = []
+    for raw_code in requirement.get("artifact_required") or []:
+        code = str(raw_code or "").strip()
+        if not code:
+            continue
+        artifacts.append(
+            {
+                "code": code,
+                "title": str(requirement.get("description") or code),
+                "category": str(requirement.get("category") or rule.domain or "TECNICO").upper(),
+                "source_marker": str(requirement.get("source_marker") or code),
+                "required": bool(requirement.get("mandatory", True)),
+                "requires_uploaded_template": bool(
+                    requirement.get("requires_uploaded_template", False)
+                ),
+                "description": str(requirement.get("description") or ""),
+            }
+        )
+    return artifacts
+
+
+def _derive_case_packs_from_rules(
+    profile: JurisdictionProfile, rules: list[LegalRule]
+) -> list[dict[str, Any]]:
+    """Materialize named packs declared by the profile from scoped rules.
+
+    ``ruleset.case_packs`` is the allow-list while each rule condition is the
+    membership proof.  This keeps the runtime DB-driven without reviving the
+    removed Python ``CASE_PACKS`` constant.
+    """
+    declared = {
+        str(code).strip().upper()
+        for code in (profile.ruleset or {}).get("case_packs") or []
+        if str(code or "").strip()
+    }
+    artifacts_by_pack: dict[str, dict[str, dict[str, Any]]] = {
+        code: {} for code in declared
+    }
+    unscoped: dict[str, dict[str, Any]] = {}
+
+    for rule in rules:
+        artifacts = _artifact_specs_from_rule(rule)
+        if not artifacts:
+            continue
+        scoped_codes = _case_pack_codes_from_condition(rule.condition or {}) & declared
+        targets = scoped_codes or ({f"GENERIC_{profile.code}"} if not declared else set())
+        for code in targets:
+            bucket = artifacts_by_pack.setdefault(code, {})
+            for artifact in artifacts:
+                bucket.setdefault(artifact["code"], artifact)
+        if not scoped_codes and declared:
+            for artifact in artifacts:
+                unscoped.setdefault(artifact["code"], artifact)
+
+    packs: list[dict[str, Any]] = []
+    for code, artifacts in artifacts_by_pack.items():
+        if not artifacts:
+            continue
+        packs.append(
+            {
+                "code": code,
+                "name": f"Paquete de requisitos — {profile.authority}",
+                "jurisdiction_code": profile.code,
+                "project_type": None,
+                "description": "Artefactos derivados de reglas jurídicas condicionadas al paquete.",
+                "artifacts": list(artifacts.values()),
+            }
+        )
+
+    if unscoped:
+        packs.append(
+            {
+                "code": f"GENERIC_{profile.code}",
+                "name": f"Paquete derivado — {profile.authority}",
+                "jurisdiction_code": profile.code,
+                "project_type": None,
+                "description": "Artefactos no condicionados a un paquete específico.",
+                "artifacts": list(unscoped.values()),
+            }
+        )
+    return packs
+
+
 async def load_case_packs(
     db: AsyncSession,
     *,
@@ -135,7 +244,7 @@ async def load_case_packs(
             normalized = _normalize_pack(raw, jurisdiction_code=profile.code)
             if normalized is None:
                 continue
-            packs[normalized["code"]] = normalized
+            packs.setdefault(normalized["code"], normalized)
 
         rules = (
             await db.execute(
@@ -143,40 +252,14 @@ async def load_case_packs(
                     LegalRule.active.is_(True),
                     LegalRule.jurisdiction_code == profile.code,
                     or_(LegalRule.tenant_id == tenant_id, LegalRule.tenant_id.is_(None)),
+                ).order_by(
+                    LegalRule.tenant_id.desc().nullslast(),
+                    LegalRule.rule_version.desc(),
                 )
             )
         ).scalars().all()
-        derived_artifacts: dict[str, dict[str, Any]] = {}
-        for rule in rules:
-            req = rule.requirement or {}
-            for code in req.get("artifact_required") or []:
-                acode = str(code).strip()
-                if not acode:
-                    continue
-                derived_artifacts.setdefault(
-                    acode,
-                    {
-                        "code": acode,
-                        "title": str(req.get("description") or acode),
-                        "category": str(req.get("category") or rule.domain or "TECNICO").upper(),
-                        "source_marker": str(req.get("source_marker") or acode),
-                        "required": bool(req.get("mandatory", True)),
-                        "requires_uploaded_template": False,
-                        "description": str(req.get("description") or ""),
-                    },
-                )
-        generic_code = f"GENERIC_{profile.code}"
-        if derived_artifacts and generic_code not in packs:
-            packs[generic_code] = {
-                "code": generic_code,
-                "name": f"Paquete derivado — {profile.authority}",
-                "jurisdiction_code": profile.code,
-                "project_type": None,
-                "description": (
-                    "Artefactos derivados de LegalRule.artifact_required para esta jurisdicción."
-                ),
-                "artifacts": list(derived_artifacts.values()),
-            }
+        for derived in _derive_case_packs_from_rules(profile, list(rules)):
+            packs.setdefault(derived["code"], derived)
 
     return list(packs.values())
 

@@ -46,8 +46,9 @@ async def _profile_chain(db: AsyncSession, tenant_id: Any, code: str) -> list[Ju
             continue
         result.append(profile)
         parents = (profile.ruleset or {}).get("inherits_from") or []
+        profile_id = getattr(profile, "id", None)
         links = (await db.execute(select(JurisdictionInheritance.parent_profile_id).where(
-            JurisdictionInheritance.child_profile_id == profile.id,
+            JurisdictionInheritance.child_profile_id == profile_id,
             JurisdictionInheritance.active.is_(True),
             or_(JurisdictionInheritance.tenant_id == tenant_id, JurisdictionInheritance.tenant_id.is_(None)),
         ))).scalars().all()

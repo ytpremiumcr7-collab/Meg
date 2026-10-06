@@ -46,12 +46,12 @@ class ExpedienteCreate(BaseModel):
 
 
 class ExpedienteOut(BaseModel):
-    id: str
+    id: UUID
     identificador: str
     titulo: str
     estado: str
     monto_contrato: Optional[float]
-    created_at: str
+    created_at: datetime
 
     class Config:
         from_attributes = True

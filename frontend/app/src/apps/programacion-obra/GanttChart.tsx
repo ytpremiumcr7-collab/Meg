@@ -271,7 +271,7 @@ export default function GanttChart({
                 className="absolute text-xs text-[#C9C7BE] truncate pr-2 flex items-center gap-1.5"
                 style={{ left: 8, top, width: LABEL_W - 12, height: ROW_H }}
               >
-                {act.en_ruta_critica && <span className="w-1.5 h-1.5 rounded-full bg-[#B84A4A] flex-shrink-0" />}
+                {act.en_ruta_critica && <span className="w-1.5 h-1.5 rounded-full bg-[#B84A4A] shrink-0" />}
                 <span className="truncate">{act.nombre}</span>
               </div>
 

@@ -51,7 +51,7 @@ export default function PertPanel({ expedienteId, programaId }: { expedienteId: 
           type="date"
           value={fechaObjetivo}
           onChange={(e) => setFechaObjetivo(e.target.value)}
-          className="h-8 rounded-md px-2 text-xs outline-none"
+          className="h-8 rounded-md px-2 text-xs outline-hidden"
           style={{ background: '#12121A', border: '1px solid #2A2A3E', color: '#E8E4DC' }}
         />
         <button

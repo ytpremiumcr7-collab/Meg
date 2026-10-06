@@ -8,7 +8,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   CalendarDays, Loader2, AlertCircle, RefreshCw, X, Save, Trash2, FolderKanban,
-  GanttChartSquare, Sigma, Gauge, TrendingUp, GitBranch,
+  GanttChartSquare, Sigma, Gauge, TrendingUp, GitBranch, type LucideIcon,
 } from 'lucide-react';
 import { megalodonClient } from '@/lib/api-client';
 import { useExpedienteStore } from '@/stores/useExpedienteStore';
@@ -20,7 +20,7 @@ import CurvaSPanel from './components/CurvaSPanel';
 import RutaCriticaPanel from './components/RutaCriticaPanel';
 
 type Tab = 'gantt' | 'pert' | 'evm' | 'curva-s' | 'ruta-critica';
-const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
+const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
   { id: 'gantt', label: 'Gantt', icon: GanttChartSquare },
   { id: 'pert', label: 'PERT', icon: Sigma },
   { id: 'evm', label: 'EVM', icon: Gauge },
@@ -82,7 +82,7 @@ function EditorActividad({
   };
 
   return (
-    <div className="w-[320px] flex-shrink-0 border-l border-[#2A2A3E] bg-[#0F0F16] flex flex-col overflow-y-auto">
+    <div className="w-[320px] shrink-0 border-l border-[#2A2A3E] bg-[#0F0F16] flex flex-col overflow-y-auto">
       <div className="flex items-center justify-between px-4 py-3 border-b border-[#2A2A3E]">
         <h3 className="text-sm font-semibold text-[#E8E4DC]">Editar actividad</h3>
         <button onClick={onClose} className="text-[#8A8578] hover:text-[#E8E4DC]">
@@ -96,7 +96,7 @@ function EditorActividad({
           <input
             value={nombre}
             onChange={(e) => setNombre(e.target.value)}
-            className="w-full h-9 bg-[#0A0A0F] border border-[#2A2A3E] rounded-md px-3 text-sm text-[#E8E4DC] outline-none focus:border-[#C9A84C]"
+            className="w-full h-9 bg-[#0A0A0F] border border-[#2A2A3E] rounded-md px-3 text-sm text-[#E8E4DC] outline-hidden focus:border-[#C9A84C]"
           />
         </div>
 
@@ -106,7 +106,7 @@ function EditorActividad({
             <input
               value={wbs}
               onChange={(e) => setWbs(e.target.value)}
-              className="w-full h-9 bg-[#0A0A0F] border border-[#2A2A3E] rounded-md px-3 text-sm text-[#E8E4DC] outline-none focus:border-[#C9A84C]"
+              className="w-full h-9 bg-[#0A0A0F] border border-[#2A2A3E] rounded-md px-3 text-sm text-[#E8E4DC] outline-hidden focus:border-[#C9A84C]"
             />
           </div>
           <div>
@@ -117,7 +117,7 @@ function EditorActividad({
               step={0.5}
               value={duracion}
               onChange={(e) => setDuracion(e.target.value)}
-              className="w-full h-9 bg-[#0A0A0F] border border-[#2A2A3E] rounded-md px-3 text-sm text-[#E8E4DC] outline-none focus:border-[#C9A84C]"
+              className="w-full h-9 bg-[#0A0A0F] border border-[#2A2A3E] rounded-md px-3 text-sm text-[#E8E4DC] outline-hidden focus:border-[#C9A84C]"
             />
           </div>
         </div>
@@ -127,7 +127,7 @@ function EditorActividad({
           <select
             value={tipo}
             onChange={(e) => setTipo(e.target.value)}
-            className="w-full h-9 bg-[#0A0A0F] border border-[#2A2A3E] rounded-md px-3 text-sm text-[#E8E4DC] outline-none focus:border-[#C9A84C]"
+            className="w-full h-9 bg-[#0A0A0F] border border-[#2A2A3E] rounded-md px-3 text-sm text-[#E8E4DC] outline-hidden focus:border-[#C9A84C]"
           >
             {TIPOS_ACTIVIDAD.map((t) => (
               <option key={t} value={t}>{t}</option>
@@ -156,7 +156,7 @@ function EditorActividad({
                   <select
                     value={depTipos[predId] || 'FS'}
                     onChange={(e) => setDepTipos((d) => ({ ...d, [predId]: e.target.value }))}
-                    className="h-7 bg-[#0A0A0F] border border-[#2A2A3E] rounded text-[10px] text-[#8A8578] px-1 outline-none"
+                    className="h-7 bg-[#0A0A0F] border border-[#2A2A3E] rounded text-[10px] text-[#8A8578] px-1 outline-hidden"
                   >
                     {Object.entries(TIPOS_DEPENDENCIA).map(([k, label]) => (
                       <option key={k} value={k}>{label}</option>
@@ -178,7 +178,7 @@ function EditorActividad({
               <select
                 value={nuevaPred}
                 onChange={(e) => setNuevaPred(e.target.value)}
-                className="flex-1 h-8 bg-[#0A0A0F] border border-[#2A2A3E] rounded-md text-xs text-[#E8E4DC] px-2 outline-none"
+                className="flex-1 h-8 bg-[#0A0A0F] border border-[#2A2A3E] rounded-md text-xs text-[#E8E4DC] px-2 outline-hidden"
               >
                 <option value="">Agregar predecesora...</option>
                 {disponibles.map((a) => (
@@ -240,9 +240,17 @@ export default function ProgramacionObra() {
     setLoading(true);
     setError('');
     try {
+      const solicitado = new URLSearchParams(window.location.search).get('programa');
       const lista = await megalodonClient.programacion.listar(expedienteId);
+      if (solicitado && !lista.some(p => p.id === solicitado)) {
+        const detalle = await megalodonClient.programacion.obtener(expedienteId, solicitado);
+        lista.unshift(detalle.programa);
+      }
       setProgramas(lista);
-      if (!programaId && lista.length > 0) setProgramaId(lista[0].id);
+      setProgramaId(previous => {
+        if (solicitado && lista.some(p => p.id === solicitado)) return solicitado;
+        return lista.some(p => p.id === previous) ? previous : lista[0]?.id || null;
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudieron cargar los programas');
     } finally {
@@ -336,9 +344,10 @@ export default function ProgramacionObra() {
         <div className="flex items-center gap-2">
           {programas.length > 0 && (
             <select
+              aria-label="Cronograma de esta obra"
               value={programaId || ''}
               onChange={(e) => { setProgramaId(e.target.value); setSelectedId(null); }}
-              className="h-8 bg-[#12121A] border border-[#2A2A3E] rounded-md px-2 text-xs text-[#E8E4DC] outline-none"
+              className="h-8 bg-[#12121A] border border-[#2A2A3E] rounded-md px-2 text-xs text-[#E8E4DC] outline-hidden"
             >
               {programas.map((p) => (
                 <option key={p.id} value={p.id}>{p.nombre}</option>
@@ -386,7 +395,7 @@ export default function ProgramacionObra() {
 
       {error && (
         <div className="flex items-center gap-2 text-sm text-[#B84A4A] bg-[#B84A4A]/10 border-b border-[#B84A4A]/30 px-4 py-2">
-          <AlertCircle className="w-4 h-4 flex-shrink-0" /> {error}
+          <AlertCircle className="w-4 h-4 shrink-0" /> {error}
         </div>
       )}
 

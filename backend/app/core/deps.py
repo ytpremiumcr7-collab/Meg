@@ -59,7 +59,10 @@ async def get_current_user(
     tezcatlipoca/routers/auth.py -- se replicó aquí a propósito para que
     el login quede consistente en toda la plataforma unificada.
     """
-    final_token = request.cookies.get(SESSION_COOKIE_NAME) or token
+    # An explicit Authorization header is authoritative. This matters for
+    # API/SDK clients and also prevents a stale browser cookie from silently
+    # replacing the identity selected by a Bearer token.
+    final_token = token or request.cookies.get(SESSION_COOKIE_NAME)
     if not final_token:
         raise HTTPException(
             status_code=401,
@@ -212,3 +215,28 @@ async def verificar_superficie_tenant(
     if not superficie:
         raise HTTPException(status_code=404, detail="Superficie no encontrada")
     return superficie
+
+
+WRITE_ROLES = {"superadmin", "admin", "tecnico", "revisor"}
+APPROVAL_ROLES = {"superadmin", "admin", "revisor"}
+
+
+def module_access(app_id: str):
+    """Apply the launcher policy to HTTP and authorize mutations by current role."""
+    async def dependency(request: Request, user: User = Depends(get_current_user),
+                         db: AsyncSession = Depends(get_db)):
+        from app.models.user import Tenant
+        from app.services.entitlements_service import EntitlementsService
+        tenant = await db.get(Tenant, user.tenant_id)
+        if tenant is None or not tenant.is_active:
+            raise HTTPException(403, "Organización inactiva")
+        await EntitlementsService(db).verificar_modulo(tenant, user.role, app_id)
+        if request.method not in {"GET", "HEAD", "OPTIONS"} and user.role not in WRITE_ROLES:
+            raise HTTPException(403, "Tu rol permite consultar, no modificar este módulo")
+    return dependency
+
+
+async def require_approval_role(user: User = Depends(get_current_user)):
+    if user.role not in APPROVAL_ROLES:
+        raise HTTPException(403, "Se requiere rol de revisor o administrador para aprobar")
+    return user

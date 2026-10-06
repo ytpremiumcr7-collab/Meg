@@ -159,7 +159,7 @@ export default function InconformidadesPanel() {
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-2 px-3 py-2 flex-wrap" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-        <select value={filtroEstado} onChange={(e) => setFiltroEstado(e.target.value)} className="h-8 rounded px-2 text-xs outline-none" style={inputStyle()}>
+        <select value={filtroEstado} onChange={(e) => setFiltroEstado(e.target.value)} className="h-8 rounded px-2 text-xs outline-hidden" style={inputStyle()}>
           <option value="">Todos los estados</option>
           {ESTADOS_INCONFORMIDAD.map((e) => <option key={e} value={e}>{e}</option>)}
         </select>
@@ -167,7 +167,7 @@ export default function InconformidadesPanel() {
           value={filtroExpediente}
           onChange={(e) => setFiltroExpediente(e.target.value)}
           placeholder="Filtrar por expediente_id"
-          className="h-8 rounded px-2 text-xs outline-none w-48"
+          className="h-8 rounded px-2 text-xs outline-hidden w-48"
           style={inputStyle()}
         />
         <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{total} inconformidad{total !== 1 ? 'es' : ''}</span>
@@ -224,48 +224,48 @@ export default function InconformidadesPanel() {
             </div>
             <div>
               <label className="block text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>Expediente ID</label>
-              <input value={crearForm.expediente_id} onChange={(e) => setCrearForm({ ...crearForm, expediente_id: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-none font-mono" style={inputStyle()} />
+              <input value={crearForm.expediente_id} onChange={(e) => setCrearForm({ ...crearForm, expediente_id: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-hidden font-mono" style={inputStyle()} />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>Licitación ID (opcional)</label>
-                <input value={crearForm.licitacion_id} onChange={(e) => setCrearForm({ ...crearForm, licitacion_id: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-none font-mono" style={inputStyle()} />
+                <input value={crearForm.licitacion_id} onChange={(e) => setCrearForm({ ...crearForm, licitacion_id: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-hidden font-mono" style={inputStyle()} />
               </div>
               <div>
                 <label className="block text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>Contrato ID (opcional)</label>
-                <input value={crearForm.contrato_id} onChange={(e) => setCrearForm({ ...crearForm, contrato_id: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-none font-mono" style={inputStyle()} />
+                <input value={crearForm.contrato_id} onChange={(e) => setCrearForm({ ...crearForm, contrato_id: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-hidden font-mono" style={inputStyle()} />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>Severidad (opcional)</label>
-                <select value={crearForm.severidad || ''} onChange={(e) => setCrearForm({ ...crearForm, severidad: (e.target.value || undefined) as any })} className="w-full h-8 rounded px-2 text-xs outline-none" style={inputStyle()}>
+                <select value={crearForm.severidad || ''} onChange={(e) => setCrearForm({ ...crearForm, severidad: (e.target.value || undefined) as any })} className="w-full h-8 rounded px-2 text-xs outline-hidden" style={inputStyle()}>
                   <option value="">Sin definir</option>
                   {SEVERIDADES.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
               </div>
               <div>
                 <label className="block text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>Fecha límite (opcional)</label>
-                <input type="date" value={crearForm.fecha_limite} onChange={(e) => setCrearForm({ ...crearForm, fecha_limite: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-none" style={inputStyle()} />
+                <input type="date" value={crearForm.fecha_limite} onChange={(e) => setCrearForm({ ...crearForm, fecha_limite: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-hidden" style={inputStyle()} />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>Regla vinculada ID (opcional)</label>
-                <input value={crearForm.regla_id} onChange={(e) => setCrearForm({ ...crearForm, regla_id: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-none font-mono" style={inputStyle()} />
+                <input value={crearForm.regla_id} onChange={(e) => setCrearForm({ ...crearForm, regla_id: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-hidden font-mono" style={inputStyle()} />
               </div>
               <div>
                 <label className="block text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>Asignado a (user ID, opcional)</label>
-                <input value={crearForm.asignado_a} onChange={(e) => setCrearForm({ ...crearForm, asignado_a: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-none font-mono" style={inputStyle()} />
+                <input value={crearForm.asignado_a} onChange={(e) => setCrearForm({ ...crearForm, asignado_a: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-hidden font-mono" style={inputStyle()} />
               </div>
             </div>
             <div>
               <label className="block text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>Título</label>
-              <input value={crearForm.titulo} onChange={(e) => setCrearForm({ ...crearForm, titulo: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-none" style={inputStyle()} />
+              <input value={crearForm.titulo} onChange={(e) => setCrearForm({ ...crearForm, titulo: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-hidden" style={inputStyle()} />
             </div>
             <div>
               <label className="block text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>Descripción</label>
-              <textarea value={crearForm.descripcion} onChange={(e) => setCrearForm({ ...crearForm, descripcion: e.target.value })} rows={3} className="w-full rounded px-2 py-1.5 text-xs outline-none resize-none" style={inputStyle()} />
+              <textarea value={crearForm.descripcion} onChange={(e) => setCrearForm({ ...crearForm, descripcion: e.target.value })} rows={3} className="w-full rounded px-2 py-1.5 text-xs outline-hidden resize-none" style={inputStyle()} />
             </div>
             <button
               onClick={crear}
@@ -292,42 +292,42 @@ export default function InconformidadesPanel() {
 
             <div>
               <label className="block text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>Estado</label>
-              <select value={editForm.estado} onChange={(e) => setEditForm({ ...editForm, estado: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-none" style={inputStyle()}>
+              <select value={editForm.estado} onChange={(e) => setEditForm({ ...editForm, estado: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-hidden" style={inputStyle()}>
                 {ESTADOS_INCONFORMIDAD.map((e) => <option key={e} value={e}>{e}</option>)}
               </select>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>Severidad</label>
-                <select value={editForm.severidad} onChange={(e) => setEditForm({ ...editForm, severidad: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-none" style={inputStyle()}>
+                <select value={editForm.severidad} onChange={(e) => setEditForm({ ...editForm, severidad: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-hidden" style={inputStyle()}>
                   <option value="">Sin definir</option>
                   {SEVERIDADES.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
               </div>
               <div>
                 <label className="block text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>Fecha límite</label>
-                <input type="date" value={editForm.fecha_limite} onChange={(e) => setEditForm({ ...editForm, fecha_limite: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-none" style={inputStyle()} />
+                <input type="date" value={editForm.fecha_limite} onChange={(e) => setEditForm({ ...editForm, fecha_limite: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-hidden" style={inputStyle()} />
               </div>
             </div>
             <div>
               <label className="block text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>Asignado a (user ID)</label>
-              <input value={editForm.asignado_a} onChange={(e) => setEditForm({ ...editForm, asignado_a: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-none font-mono" style={inputStyle()} />
+              <input value={editForm.asignado_a} onChange={(e) => setEditForm({ ...editForm, asignado_a: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-hidden font-mono" style={inputStyle()} />
             </div>
             <div>
               <label className="block text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>Respuesta del proveedor</label>
-              <textarea value={editForm.respuesta} onChange={(e) => setEditForm({ ...editForm, respuesta: e.target.value })} rows={2} className="w-full rounded px-2 py-1.5 text-xs outline-none resize-none" style={inputStyle()} />
+              <textarea value={editForm.respuesta} onChange={(e) => setEditForm({ ...editForm, respuesta: e.target.value })} rows={2} className="w-full rounded px-2 py-1.5 text-xs outline-hidden resize-none" style={inputStyle()} />
             </div>
             <div>
               <label className="block text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>Resolución</label>
-              <textarea value={editForm.resolucion} onChange={(e) => setEditForm({ ...editForm, resolucion: e.target.value })} rows={2} className="w-full rounded px-2 py-1.5 text-xs outline-none resize-none" style={inputStyle()} />
+              <textarea value={editForm.resolucion} onChange={(e) => setEditForm({ ...editForm, resolucion: e.target.value })} rows={2} className="w-full rounded px-2 py-1.5 text-xs outline-hidden resize-none" style={inputStyle()} />
             </div>
             <div>
               <label className="block text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>Dictamen</label>
-              <textarea value={editForm.dictamen} onChange={(e) => setEditForm({ ...editForm, dictamen: e.target.value })} rows={2} className="w-full rounded px-2 py-1.5 text-xs outline-none resize-none" style={inputStyle()} />
+              <textarea value={editForm.dictamen} onChange={(e) => setEditForm({ ...editForm, dictamen: e.target.value })} rows={2} className="w-full rounded px-2 py-1.5 text-xs outline-hidden resize-none" style={inputStyle()} />
             </div>
             <div>
               <label className="block text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>Fecha de dictamen</label>
-              <input type="date" value={editForm.fecha_dictamen} onChange={(e) => setEditForm({ ...editForm, fecha_dictamen: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-none" style={inputStyle()} />
+              <input type="date" value={editForm.fecha_dictamen} onChange={(e) => setEditForm({ ...editForm, fecha_dictamen: e.target.value })} className="w-full h-8 rounded px-2 text-xs outline-hidden" style={inputStyle()} />
             </div>
             <button
               onClick={guardarDetalle}

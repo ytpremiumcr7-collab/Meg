@@ -34,6 +34,7 @@ class InsumoCosteo:
     cantidad: Decimal
     precio_unitario: Decimal
     rendimiento: Decimal = Decimal("1.0")
+    actualizacion_precio: Optional[dict] = None
 
     @property
     def importe(self) -> Decimal:
@@ -114,6 +115,7 @@ class PresupuestoCosteo:
     nombre: str
     parametros: ParametrosCosteoSnapshot
     partidas: List[PartidaCosteo] = field(default_factory=list)
+    cobertura_bim: Optional[dict] = None
 
     @property
     def factor_indirecto(self) -> Decimal:
@@ -277,8 +279,48 @@ class MotorCosteo:
         ws.column_dimensions["D"].width = 15
         ws.column_dimensions["E"].width = 15
         ws.column_dimensions["F"].width = 18
+        for row in ws.iter_rows(min_row=2):
+            # Catalogue text is data, never an executable spreadsheet formula.
+            for column in (1, 2):
+                if isinstance(row[column].value, str):
+                    row[column].data_type = 's'
+
+        actualizaciones = [i for p in presupuesto.partidas for c in p.conceptos
+                           for i in c.insumos if i.actualizacion_precio]
+        if actualizaciones:
+            evidencia = wb.create_sheet('Actualizacion materiales')
+            evidencia.append(['Insumo', 'Serie', 'Mes base', 'Mes destino', 'Precio original MXN',
+                              'Precio estimado MXN', 'Nivel base', 'Nivel destino',
+                              'Documento base SHA256', 'Documento destino SHA256', 'Snapshot SHA256'])
+            for i in actualizaciones:
+                s = i.actualizacion_precio
+                evidencia.append([i.clave, s['serie']['codigo'], s['base']['mes'], s['destino']['mes'],
+                                  s['precio_original'], s['precio_actualizado'], s['base']['valor'],
+                                  s['destino']['valor'], s['base']['documento_sha256'],
+                                  s['destino']['documento_sha256'], s['sha256']])
+            # Evidence is literal text, including identifiers that start with '='.
+            for row in evidencia:
+                for cell in row:
+                    cell.data_type = 's'
 
         buffer = io.BytesIO()
+        if presupuesto.cobertura_bim is not None:
+            coverage = presupuesto.cobertura_bim
+            evidence = wb.create_sheet('Cobertura BIM', 0)
+            evidence.append(['MEDICIONES COMPLETAS' if coverage['completa'] else 'PRESUPUESTO PARCIAL: faltan mediciones BIM'])
+            evidence.append(['Modelo', coverage['modelo_id']])
+            evidence.append(['Elementos medidos', coverage['elementos_medidos'], 'Total', coverage['elementos_totales']])
+            evidence.append(['Elementos pendientes', ', '.join(coverage['elementos_pendientes'])])
+            evidence.append(['Elemento', 'Unidad', 'Cantidad capturada', 'Referencia', 'Usuario', 'Fecha'])
+            for capture in coverage['capturas']:
+                evidence.append([capture['elemento_id'], capture['unidad'], capture['cantidad'],
+                    capture['referencia'], capture['usuario_id'], capture['capturado_en']])
+            for row in evidence:
+                for cell in row:
+                    if isinstance(cell.value, str): cell.data_type = 's'
+            evidence.column_dimensions['A'].width = 65
+            evidence.column_dimensions['D'].width = 60
+            wb.active = 0
         wb.save(buffer)
         return buffer.getvalue()
 

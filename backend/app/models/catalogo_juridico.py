@@ -77,7 +77,7 @@ class CatalogoJuridico(Base, UUIDMixin, TenantMixin):
     )
 
 
-class ReglaCumplimiento(Base, UUIDMixin, TenantMixin):
+class ReglaCatalogoJuridico(Base, UUIDMixin, TenantMixin):
     """Reglas de cumplimiento derivadas del catálogo jurídico."""
     __tablename__ = "reglas_cumplimiento_catalogo"
 

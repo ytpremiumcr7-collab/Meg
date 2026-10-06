@@ -8,58 +8,64 @@
 import { create } from 'zustand';
 import type { User } from '@/types';
 import { megalodonClient } from '@/lib/api-client';
+import { useExpedienteStore } from './useExpedienteStore';
 
 interface AuthState {
   user: User | null;
   isAuthenticated: boolean;
   isBootComplete: boolean;
-  accessToken: string | null;
-  refreshToken: string | null;
   isLoading: boolean;
+  isCheckingSession: boolean;
+  restoreSession: () => Promise<void>;
   error: string | null;
   /** Login real contra el backend (email + password). */
   login: (email: string, password: string) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
   setBootComplete: (complete: boolean) => void;
 }
 
-// ANTES: login(username, _password?) era síncrono, aceptaba CUALQUIER
-// texto de 2+ caracteres como si fuera un usuario válido, y jamás tocaba
-// el backend -- el propio código lo decía: "en producción esto irá
-// contra el backend". Ahora sí va contra el backend real.
-//
-// TAMBIÉN SE ELIMINÓ loginAsGuest(): entraba al shell con
-// isAuthenticated=true y accessToken=null. No era solo un modo demo
-// inofensivo -- era un bypass real de autenticación (cualquiera podía
-// entrar al escritorio sin credenciales), y de cualquier forma cada
-// llamada real al backend le habría fallado con 401 al no traer token.
-// El freeze técnico acordado es explícito: sin auth de invitado en producción.
+let restoring: Promise<void> | null = null;
+
 export const useAuthStore = create<AuthState>((set) => ({
   user: null,
   isAuthenticated: false,
   isBootComplete: false,
-  accessToken: null,
-  refreshToken: null,
   isLoading: false,
+  isCheckingSession: true,
   error: null,
+
+  restoreSession: async () => {
+    if (!restoring) {
+      restoring = (async () => {
+        try {
+          const backendUser = await megalodonClient.auth.me();
+          set({ user: { id: backendUser.id, name: backendUser.full_name,
+            username: backendUser.email, isGuest: false, role: backendUser.role }, isAuthenticated: true });
+          const { useEntitlementsStore } = await import('./useEntitlementsStore');
+          void useEntitlementsStore.getState().cargar();
+        } catch { set({ user: null, isAuthenticated: false }); }
+        finally { set({ isCheckingSession: false }); }
+      })().finally(() => { restoring = null; });
+    }
+    await restoring;
+  },
 
   login: async (email, password) => {
     set({ isLoading: true, error: null });
     try {
-      const token = await megalodonClient.auth.login(email, password);
+      await megalodonClient.auth.login(email, password);
       const backendUser = await megalodonClient.auth.me();
       const user: User = {
         id: backendUser.id,
         name: backendUser.full_name,
         username: backendUser.email,
         isGuest: false,
+        role: backendUser.role,
       };
       set({
         user,
         isAuthenticated: true,
         isBootComplete: false,
-        accessToken: token.access_token,
-        refreshToken: token.refresh_token,
         isLoading: false,
       });
       import('./useEntitlementsStore').then(({ useEntitlementsStore }) => {
@@ -72,15 +78,17 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
 
-  logout: () => {
-    void megalodonClient.auth.logout().catch(() => undefined);
+  logout: async () => {
+    try { await megalodonClient.auth.logout(); } catch (e) {
+      set({ error: e instanceof Error ? e.message : "No se pudo cerrar la sesión" });
+      return;
+    }
     megalodonClient.setToken('');
+    useExpedienteStore.getState().limpiar();
     set({
       user: null,
       isAuthenticated: false,
       isBootComplete: false,
-      accessToken: null,
-      refreshToken: null,
     });
   },
 

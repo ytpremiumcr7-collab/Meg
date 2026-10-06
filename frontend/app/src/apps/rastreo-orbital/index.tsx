@@ -92,7 +92,7 @@ export default function Home() {
     (index: number, simMs: number, past: Float32Array, future: Float32Array) => {
       const rec = getRec(index)
       if (!rec) return
-      const periodMs = ((2 * Math.PI) / rec.no) * 60 * 1000
+      const periodMs = ((2 * Math.PI) / rec.meanMotionRad) * 1000
       const n = past.length / 3
       const fill = (out: Float32Array, startMs: number, endMs: number) => {
         let lx = 0
@@ -259,8 +259,8 @@ export default function Home() {
           lon: satellite.degreesLong(geo.longitude),
           alt: geo.height,
           speed: Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z),
-          period: (2 * Math.PI) / rec.no,
-          incl: (rec.inclo * 180) / Math.PI,
+          period: (2 * Math.PI) / rec.meanMotionRad / 60,
+          incl: (rec.inclination * 180) / Math.PI,
         })
       } catch {
         /* decayed */
@@ -326,7 +326,7 @@ export default function Home() {
       {/* hover tooltip */}
       {hover && tooltipPos && hoverSat && (
         <div
-          className="pointer-events-none fixed z-30 flex max-w-[180px] items-center gap-1.5 truncate rounded-md border border-white/10 bg-[#0b0f16]/90 px-2.5 py-1 backdrop-blur-sm"
+          className="pointer-events-none fixed z-30 flex max-w-[180px] items-center gap-1.5 truncate rounded-md border border-white/10 bg-[#0b0f16]/90 px-2.5 py-1 backdrop-blur-xs"
           style={tooltipPos}
         >
           <span

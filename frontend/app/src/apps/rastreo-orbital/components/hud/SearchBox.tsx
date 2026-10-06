@@ -79,7 +79,7 @@ export default function SearchBox({ sats, onSelect }: SearchBoxProps) {
           }
         }}
         placeholder="Search satellite or NORAD id…"
-        className="w-full rounded-xl border border-white/10 bg-[#0a0e14]/70 py-2.5 pl-9 pr-3 font-mono text-xs text-slate-200 placeholder-slate-500 outline-none backdrop-blur-xl focus:border-sky-400/40"
+        className="w-full rounded-xl border border-white/10 bg-[#0a0e14]/70 py-2.5 pl-9 pr-3 font-mono text-xs text-slate-200 placeholder-slate-500 outline-hidden backdrop-blur-xl focus:border-sky-400/40"
       />
       {open && results.length > 0 && (
         <div className="absolute left-0 right-0 top-full z-30 mt-1.5 overflow-hidden rounded-xl border border-white/10 bg-[#0b0f16]/95 backdrop-blur-xl">

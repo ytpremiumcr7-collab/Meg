@@ -7,6 +7,7 @@
 Schemas de catálogos de conceptos reales (CFE, CMIC, CONAGA).
 """
 from typing import Optional, List
+from uuid import UUID
 from datetime import datetime
 from pydantic import BaseModel, Field
 
@@ -20,16 +21,19 @@ class CatalogoFuenteCreate(BaseModel):
     vigencia_fin: str
     descripcion: Optional[str] = None
     url_fuente: Optional[str] = None
+    moneda: Optional[str] = Field(None, pattern=r'^[A-Z]{3}$')
 
 
 class CatalogoFuenteOut(BaseModel):
-    id: str
+    id: UUID
     nombre: str
     tipo: TipoCatalogo
     vigencia_inicio: str
     vigencia_fin: str
     descripcion: Optional[str] = None
     url_fuente: Optional[str] = None
+    moneda: Optional[str] = None
+    moneda_evidencia: Optional[dict] = None
     activo: bool
     created_at: datetime
 
@@ -38,7 +42,7 @@ class CatalogoFuenteOut(BaseModel):
 
 
 class ConceptoCatalogoCreate(BaseModel):
-    fuente_id: str
+    fuente_id: UUID
     clave: str = Field(..., max_length=50)
     descripcion: str
     descripcion_larga: Optional[str] = None
@@ -52,8 +56,8 @@ class ConceptoCatalogoCreate(BaseModel):
 
 
 class ConceptoCatalogoOut(BaseModel):
-    id: str
-    fuente_id: str
+    id: UUID
+    fuente_id: UUID
     clave: str
     descripcion: str
     descripcion_larga: Optional[str]
@@ -76,7 +80,7 @@ class ConceptoCatalogoList(BaseModel):
 
 
 class InsumoCatalogoCreate(BaseModel):
-    fuente_id: str
+    fuente_id: UUID
     clave: str = Field(..., max_length=50)
     descripcion: str
     tipo: str  # MATERIAL, MANO_OBRA, MAQUINARIA, SALARIO_PROFESIONAL
@@ -90,8 +94,8 @@ class InsumoCatalogoCreate(BaseModel):
 
 
 class InsumoCatalogoOut(BaseModel):
-    id: str
-    fuente_id: str
+    id: UUID
+    fuente_id: UUID
     clave: str
     descripcion: str
     tipo: str

@@ -110,4 +110,5 @@ export interface User {
   username: string;
   avatar?: string;
   isGuest: boolean;
+  role?: string;
 }

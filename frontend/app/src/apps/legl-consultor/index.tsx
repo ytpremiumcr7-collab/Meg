@@ -9,8 +9,8 @@
 import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Scale, Send, BookOpen, Search, MessageSquare, X, Sparkles,
-  Loader2, Mic, Wand2, PanelLeft, PanelRight, ChevronLeft,
+  Scale, Send, MessageSquare, Sparkles,
+  Loader2, PanelLeft, PanelRight,
   GitCompare, Calculator, ListChecks
 } from 'lucide-react';
 import { megalodonClient } from '@/lib/api-client';
@@ -19,6 +19,7 @@ import { megalodonClient } from '@/lib/api-client';
 import ComparadorArticulos from './components/ComparadorArticulos';
 import CalculadoraPlazos from './components/CalculadoraPlazos';
 import ChecklistGenerator from './components/ChecklistGenerator';
+import CoberturaCorpusPanel from './components/CoberturaCorpusPanel';
 
 interface Mensaje {
   id: string;
@@ -132,6 +133,7 @@ export default function LeglConsultorApp() {
           </button>
         </div>
 
+        <CoberturaCorpusPanel />
         {/* Área de mensajes — estilo conversación */}
         <div ref={scrollRef} className="flex-1 overflow-y-auto p-5 space-y-4">
           {mensajes.map((msg, idx) => (
@@ -213,7 +215,7 @@ export default function LeglConsultorApp() {
               onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && enviarMensaje()}
               placeholder="Pregúntame cualquier cosa legal..."
               className="flex-1 bg-transparent text-sm text-zinc-100 placeholder-zinc-600 
-                       focus:outline-none"
+                       focus:outline-hidden"
             />
             <button
               onClick={() => enviarMensaje()}

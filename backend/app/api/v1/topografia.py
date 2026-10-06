@@ -390,7 +390,7 @@ async def importar_las(
     result = await db.execute(
         select(Levantamiento).where(
             Levantamiento.id == levantamiento_id,
-            Levantamiento.expediente.has(Expediente.tenant_id == current_user.tenant_id)
+            Levantamiento.expediente.has(ExpedienteObra.tenant_id == current_user.tenant_id)
         )
     )
     levantamiento = result.scalar_one_or_none()

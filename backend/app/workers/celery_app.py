@@ -15,6 +15,7 @@ celery_app = Celery(
     backend=settings.CELERY_RESULT_BACKEND,
     include=[
         "app.workers.bim_tasks",
+        "app.workers.process_tasks",
         "app.workers.montecarlo_tasks",
         "app.workers.ocr_tasks",
         "app.workers.pdf_tasks",
@@ -25,6 +26,8 @@ celery_app = Celery(
 )
 
 celery_app.conf.update(
+    broker_transport_options={"socket_connect_timeout":2, "socket_timeout":2, "visibility_timeout":2400},
+    broker_connection_timeout=2,
     task_serializer="json",
     accept_content=["json"],
     result_serializer="json",

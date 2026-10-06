@@ -10,9 +10,9 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  FileText, Gavel, Users, ClipboardCheck, Calculator,
+  FileText, Gavel, Users, ClipboardCheck,
   Shield, TrendingUp, BookOpen, AlertCircle, CheckCircle2,
-  Clock, DollarSign, Scale, ChevronRight, Download, Printer
+  Scale, type LucideIcon,
 } from 'lucide-react';
 import { useExpedienteStore } from '@/stores/useExpedienteStore';
 import { megalodonClient } from '@/lib/api-client';
@@ -34,7 +34,7 @@ type Fase = 'planeacion' | 'convocatoria' | 'automatizacion' | 'proposiciones' |
 interface FaseConfig {
   id: Fase;
   label: string;
-  icon: React.ElementType;
+  icon: LucideIcon;
   color: string;
   bgColor: string;
   borderColor: string;
@@ -121,8 +121,6 @@ export default function LicitacionesObraApp() {
             const Icon = fase.icon;
             const isActive = fase.id === faseActiva;
             const isPast = idx < faseActualIdx;
-            const isFuture = idx > faseActualIdx;
-
             return (
               <button
                 key={fase.id}

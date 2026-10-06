@@ -14,11 +14,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && groupadd --system --gid 10001 megalodon \
     && useradd --system --uid 10001 --gid 10001 --home-dir /app --no-create-home megalodon
 
-COPY pyproject.toml README.md ./
-RUN python -m pip install --upgrade pip setuptools wheel \
-    && pip install --no-cache-dir -e .
+COPY requirements.lock ./
+RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 
 COPY . /app
+RUN pip install --no-cache-dir --no-deps .
 
 RUN mkdir -p /app/.cache /app/data /app/logs \
     && chown -R 10001:10001 /app

@@ -2,15 +2,14 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from unittest.mock import AsyncMock
+
+import pytest
 
 from app.engines.juridico.motor_juridico import MotorJuridico, TipoContratacion
-from app.engines.juridico.umbrales_referencia import (
-    Jurisdiccion,
-    TipoContratacionRef,
-    buscar_umbral,
-)
 from app.engines.procurement.requirements import ProcurementRequirementMapper
 from app.engines.procurement.rules import DeterministicRuleCompiler, DeterministicRuleRuntime
+from app.engines.procurement.threshold_resolver import ThresholdBand, ThresholdDecision
 
 
 def test_requirement_mapper_fails_closed_for_malformed_condition():
@@ -40,20 +39,31 @@ def test_decision_table_no_match_is_a_testable_outcome():
     assert cases[0]["passed"] is True
 
 
-def test_candidate_legal_threshold_is_not_authoritative():
+@pytest.mark.asyncio
+async def test_candidate_legal_threshold_is_not_authoritative():
     engine = MotorJuridico()
-    candidate = next(
-        jur
-        for jur in Jurisdiccion
-        if (
-            (u := buscar_umbral(jur, TipoContratacionRef.OBRA_PUBLICA, 2026)) is not None
-            and getattr(u.estado_dato, "value", None) == "CANDIDATO"
-        )
-    )
-    result = engine.determinar_procedimiento(
+    engine._thresholds.resolve = AsyncMock(return_value=ThresholdDecision(
+        found=True,
+        jurisdiction_code="MX-FED-OBRA",
+        tipo_contratacion="OBRA_PUBLICA",
+        ejercicio_fiscal=2026,
+        band=ThresholdBand(0, None, 499, 3776, 223, 2868),
+        ley="LOPSRM",
+        articulo_referencia="Art. 43",
+        fuente="Fuente secundaria pendiente de verificación",
+        fuente_uri=None,
+        estado_dato="CANDIDATO",
+        datos_verificados=False,
+        es_candidato=True,
+        notes="No confirmado contra fuente primaria.",
+        inherited_from=("MX-FED-OBRA",),
+    ))
+    result = await engine.determinar_procedimiento(
+        object(),
+        tenant_id="00000000-0000-0000-0000-000000000001",
+        jurisdiction_code="MX-FED-OBRA",
         monto=1_000_000,
         tipo_contratacion=TipoContratacion.OBRA_PUBLICA,
-        jurisdiccion=candidate,
         ejercicio_fiscal=2026,
         presupuesto_dependencia_miles=1_000,
     )

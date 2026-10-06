@@ -9,12 +9,13 @@ import { useState } from 'react';
 import {
   FileSignature, ShieldCheck, Link2, FileCheck2, ListChecks,
   Loader2, AlertCircle, CheckCircle2, Lock,
+  type LucideIcon,
 } from 'lucide-react';
 import { megalodonClient } from '@/lib/api-client';
 
 type SubTab = 'firmar' | 'validar' | 'merkle' | 'cfdi' | 'formato';
 
-const SUBTABS: { id: SubTab; label: string; icon: React.ElementType }[] = [
+const SUBTABS: { id: SubTab; label: string; icon: LucideIcon }[] = [
   { id: 'firmar', label: 'Firmar documento', icon: FileSignature },
   { id: 'validar', label: 'Validar firma', icon: ShieldCheck },
   { id: 'merkle', label: 'Merkle expediente', icon: Link2 },
@@ -36,7 +37,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 function TextInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
-  return <input {...props} className="w-full h-8 rounded px-2 text-xs outline-none" style={inputStyle()} />;
+  return <input {...props} className="w-full h-8 rounded px-2 text-xs outline-hidden" style={inputStyle()} />;
 }
 
 function ResultBox({ children }: { children: React.ReactNode }) {
@@ -151,7 +152,7 @@ function FirmarDocumento() {
       </button>
       {resultado && (
         <div className="flex items-start gap-2 text-xs" style={{ color: 'var(--success)' }}>
-          <CheckCircle2 size={14} className="mt-0.5 flex-shrink-0" />
+          <CheckCircle2 size={14} className="mt-0.5 shrink-0" />
           <ResultBox>{JSON.stringify(resultado, null, 2)}</ResultBox>
         </div>
       )}
@@ -344,7 +345,7 @@ function FormatoRequerido() {
       </p>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Plataforma">
-          <select value={plataforma} onChange={(e) => setPlataforma(e.target.value as typeof plataforma)} className="w-full h-8 rounded px-2 text-xs outline-none" style={inputStyle()}>
+          <select value={plataforma} onChange={(e) => setPlataforma(e.target.value as typeof plataforma)} className="w-full h-8 rounded px-2 text-xs outline-hidden" style={inputStyle()}>
             {PLATAFORMAS.map((p) => <option key={p} value={p}>{p}</option>)}
           </select>
         </Field>

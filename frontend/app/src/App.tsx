@@ -5,6 +5,7 @@
  * without prior written permission.
  */
 
+import { useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useAuthStore } from '@/stores/useAuthStore';
 import LoginScreen from '@/components/LoginScreen';
@@ -12,7 +13,11 @@ import BootSequence from '@/components/BootSequence';
 import CommandCenter from '@/components/CommandCenter';
 
 export default function App() {
-  const { isAuthenticated, isBootComplete } = useAuthStore();
+  const { isAuthenticated, isBootComplete, isCheckingSession, restoreSession } = useAuthStore();
+  useEffect(() => { void restoreSession(); }, [restoreSession]);
+  if (isCheckingSession) {
+    return <div className="w-full h-full bg-[#030305] text-white flex items-center justify-center" role="status">Comprobando sesión…</div>;
+  }
 
   return (
     <div className="w-full h-full overflow-hidden bg-[#030305]">

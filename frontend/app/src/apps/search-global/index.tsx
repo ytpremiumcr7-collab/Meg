@@ -10,7 +10,7 @@
  * Búsqueda across todos los dominios del sistema
  */
 import { useState, useEffect, useCallback } from 'react';
-import { Search, FileText, Folder, Calculator, Gavel, Award, Filter, X, Tag } from 'lucide-react';
+import { Search, FileText, Folder, Calculator, Gavel, Award, Filter, X } from 'lucide-react';
 import { megalodonClient } from '../../lib/api-client';
 
 interface SearchResult {
@@ -110,7 +110,7 @@ export default function SearchApp() {
               placeholder="Buscar en documentos, expedientes, presupuestos, contratos..."
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 bg-[#1A1A24] border border-[#C9A84C]/20 rounded-lg text-sm text-[#E8E4DC] placeholder-[#8A8578] focus:outline-none focus:border-[#C9A84C]/50"
+              className="w-full pl-10 pr-4 py-2.5 bg-[#1A1A24] border border-[#C9A84C]/20 rounded-lg text-sm text-[#E8E4DC] placeholder-[#8A8578] focus:outline-hidden focus:border-[#C9A84C]/50"
             />
             {query && (
               <button

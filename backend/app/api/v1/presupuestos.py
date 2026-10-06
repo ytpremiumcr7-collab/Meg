@@ -8,36 +8,45 @@ API de presupuestos programables conectada a PresupuestoService.
 """
 from app.core.rate_limit import rate_limit_standard, rate_limit_strict
 from datetime import datetime
+from decimal import Decimal
 from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_user, get_db, verificar_expediente_tenant
+from app.core.deps import get_current_user, get_db, verificar_expediente_tenant, module_access, require_approval_role
 from app.services.presupuesto_service import PresupuestoService
-from app.services.entitlements_service import EntitlementsService
-from app.models.user import User, Tenant
+from app.models.user import User
 from app.schemas.costos import ParametrosCosteoInput
+from app.schemas.apu_costeo import ConceptoCosteoInput, InsumoCosteoInput
 
 # BUG ORIGINAL: ningún endpoint verificaba que expediente_id perteneciera
 # al tenant del usuario -- ver app.core.deps.verificar_expediente_tenant.
-router = APIRouter(dependencies=[Depends(verificar_expediente_tenant)])
+router = APIRouter(dependencies=[Depends(verificar_expediente_tenant), Depends(module_access("megalodon-costos"))])
 
 
 class PartidaCreate(BaseModel):
+    catalogo_libro_id: Optional[str] = Field(None, min_length=64, max_length=64)
     numero: int
     descripcion: str
     unidad: str
-    cantidad: float = Field(..., gt=0)
+    cantidad: Decimal = Field(..., gt=0, max_digits=18, decimal_places=4)
     # BUG ORIGINAL: era requerido (Field(..., gt=0)) SIEMPRE, incluso para
     # partidas con APU (conceptos/insumos) donde el precio se calcula solo.
     # Ahora solo es obligatorio para partidas tipo tabulador (sin
     # conceptos), donde el precio ya viene resuelto de un catálogo oficial.
-    precio_unitario: Optional[float] = Field(None, gt=0)
-    insumos: Optional[List[dict]] = Field(default_factory=list)
-    conceptos: Optional[List[dict]] = Field(default_factory=list)
+    precio_unitario: Optional[Decimal] = Field(None, gt=0, max_digits=18, decimal_places=2)
+    insumos: Optional[List[InsumoCosteoInput]] = Field(default_factory=list)
+    conceptos: Optional[List[ConceptoCosteoInput]] = Field(default_factory=list)
+
+
+    @model_validator(mode="after")
+    def validar_origen_precio(self):
+        if not self.catalogo_libro_id and not self.conceptos and not self.insumos and self.precio_unitario is None:
+            raise ValueError("La partida requiere precio, catálogo o análisis de insumos")
+        return self
 
 
 class PresupuestoCreate(BaseModel):
@@ -62,6 +71,7 @@ class InsumoOut(BaseModel):
     precio_unitario: float
     importe: float
     rendimiento: float
+    actualizacion_precio: Optional[dict] = None
 
     class Config:
         from_attributes = True
@@ -148,6 +158,7 @@ async def crear_presupuesto(
     partidas_data = []
     for p in data.partidas:
         partidas_data.append({
+            "catalogo_libro_id": p.catalogo_libro_id,
             "numero": p.numero,
             "descripcion": p.descripcion,
             "unidad": p.unidad,
@@ -156,8 +167,8 @@ async def crear_presupuesto(
             # el caso "partida de tabulador con precio ya conocido" jamás
             # llegaba al servicio (siempre se recalculaba en 0.00).
             "precio_unitario": p.precio_unitario,
-            "insumos": p.insumos or [],
-            "conceptos": p.conceptos or [],
+            "insumos": [i.model_dump(mode='python') for i in (p.insumos or [])],
+            "conceptos": [c.model_dump(mode='python') for c in (p.conceptos or [])],
         })
 
     presupuesto = await service.crear_desde_costeo(
@@ -275,13 +286,6 @@ async def recalcular_presupuesto(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user), _rate_limit: bool = Depends(rate_limit_strict),
 ):
-    # BUG ORIGINAL: max_corridas_costeo_mes existía en PlanLimite pero
-    # nada lo hacía cumplir -- esta es la "corrida de costeo" que el plan
-    # limita (3/mes en Free, 25 en Intermedio, etc.), así que se cuenta
-    # aquí antes de recalcular.
-    tenant = await db.get(Tenant, current_user.tenant_id)
-    await EntitlementsService(db).verificar_y_registrar_uso(tenant, "corridas_costeo")
-
     service = PresupuestoService(db, current_user.tenant_id)
     presupuesto = await service.recalcular(
         presupuesto_id, expediente_id=expediente_id, actualizado_por_id=current_user.id,
@@ -305,6 +309,8 @@ async def cambiar_estado_presupuesto(
     validado/aprobado/rechazado -- el campo `estado` tampoco existía
     antes de esta ronda de unificación del modelo de datos."""
     service = PresupuestoService(db, current_user.tenant_id)
+    if data.estado == "APROBADO":
+        await require_approval_role(current_user)
     return await service.cambiar_estado(
         presupuesto_id, expediente_id=expediente_id, nuevo_estado=data.estado,
         actualizado_por_id=current_user.id,

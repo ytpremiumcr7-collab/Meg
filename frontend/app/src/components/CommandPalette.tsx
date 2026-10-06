@@ -18,8 +18,8 @@ interface CommandPaletteProps {
   onSelectApp: (id: string) => void;
 }
 
-function resolveIcon(name: string): React.ComponentType<{ className?: string }> {
-  const map = Icons as unknown as Record<string, React.ComponentType<{ className?: string }>>;
+function resolveIcon(name: string): Icons.LucideIcon {
+  const map = Icons as unknown as Record<string, Icons.LucideIcon>;
   return map[name] || Icons.AppWindow;
 }
 
@@ -113,7 +113,7 @@ export default function CommandPalette({ onSelectApp }: CommandPaletteProps) {
                   ref={inputRef}
                   autoFocus
                   placeholder="Saltar a un módulo, expediente o acción…"
-                  className="flex-1 h-[52px] bg-transparent outline-none text-[14px]"
+                  className="flex-1 h-[52px] bg-transparent outline-hidden text-[14px]"
                   style={{ color: 'var(--text-primary)' }}
                 />
                 <kbd
@@ -135,7 +135,7 @@ export default function CommandPalette({ onSelectApp }: CommandPaletteProps) {
                 <CommandPrimitive.Item
                   value="inicio panel resumen dashboard"
                   onSelect={() => handleSelect('inicio')}
-                  className="group flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer text-[13px] data-[selected=true]:bg-[color:var(--surface-hover)]"
+                  className="group flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer text-[13px] data-[selected=true]:bg-(--surface-hover)"
                   style={{ color: 'var(--text-primary)' }}
                 >
                   <Icons.LayoutDashboard className="w-[16px] h-[16px]" style={{ color: 'var(--accent-gold)' }} />
@@ -146,7 +146,7 @@ export default function CommandPalette({ onSelectApp }: CommandPaletteProps) {
                 {recentApps.length > 0 && (
                   <CommandPrimitive.Group
                     heading="Recientes"
-                    className="mt-1 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-[0.12em]"
+                    className="mt-1 **:[[cmdk-group-heading]]:px-3 **:[[cmdk-group-heading]]:py-1.5 **:[[cmdk-group-heading]]:text-[10px] **:[[cmdk-group-heading]]:uppercase **:[[cmdk-group-heading]]:tracking-[0.12em]"
                     style={{ color: 'var(--text-muted)' }}
                   >
                     {recentApps.map((app) => {
@@ -156,7 +156,7 @@ export default function CommandPalette({ onSelectApp }: CommandPaletteProps) {
                           key={`recent-${app.id}`}
                           value={`recent ${app.name} ${app.id}`}
                           onSelect={() => handleSelect(app.id)}
-                          className="flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer text-[13px] data-[selected=true]:bg-[color:var(--surface-hover)]"
+                          className="flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer text-[13px] data-[selected=true]:bg-(--surface-hover)"
                           style={{ color: 'var(--text-primary)' }}
                         >
                           <Icon className="w-[16px] h-[16px]" style={{ color: 'var(--accent-gold)' }} />
@@ -170,7 +170,7 @@ export default function CommandPalette({ onSelectApp }: CommandPaletteProps) {
 
                 <CommandPrimitive.Group
                   heading="Módulos"
-                  className="mt-1 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-[0.12em]"
+                  className="mt-1 **:[[cmdk-group-heading]]:px-3 **:[[cmdk-group-heading]]:py-1.5 **:[[cmdk-group-heading]]:text-[10px] **:[[cmdk-group-heading]]:uppercase **:[[cmdk-group-heading]]:tracking-[0.12em]"
                   style={{ color: 'var(--text-muted)' }}
                 >
                   {apps.map((app) => {
@@ -180,7 +180,7 @@ export default function CommandPalette({ onSelectApp }: CommandPaletteProps) {
                         key={app.id}
                         value={`${app.name} ${app.id} ${CATEGORY_LABEL[app.category] ?? ''}`}
                         onSelect={() => handleSelect(app.id)}
-                        className="flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer text-[13px] data-[selected=true]:bg-[color:var(--surface-hover)]"
+                        className="flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer text-[13px] data-[selected=true]:bg-(--surface-hover)"
                         style={{ color: 'var(--text-primary)' }}
                       >
                         <Icon className="w-[16px] h-[16px]" style={{ color: 'var(--accent-gold)' }} />
@@ -196,13 +196,13 @@ export default function CommandPalette({ onSelectApp }: CommandPaletteProps) {
 
                 <CommandPrimitive.Group
                   heading="Sesión"
-                  className="mt-1 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-[0.12em]"
+                  className="mt-1 **:[[cmdk-group-heading]]:px-3 **:[[cmdk-group-heading]]:py-1.5 **:[[cmdk-group-heading]]:text-[10px] **:[[cmdk-group-heading]]:uppercase **:[[cmdk-group-heading]]:tracking-[0.12em]"
                   style={{ color: 'var(--text-muted)' }}
                 >
                   <CommandPrimitive.Item
                     value="cerrar sesion logout salir"
                     onSelect={() => { close(); logout(); }}
-                    className="flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer text-[13px] data-[selected=true]:bg-[color:var(--surface-hover)]"
+                    className="flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer text-[13px] data-[selected=true]:bg-(--surface-hover)"
                     style={{ color: 'var(--text-secondary)' }}
                   >
                     <Icons.LogOut className="w-[16px] h-[16px]" />

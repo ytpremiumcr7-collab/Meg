@@ -66,13 +66,13 @@ export default function PoligonalPanel({ levantamiento }: { levantamiento: Levan
             <div key={i} className="flex items-center gap-2">
               <span className="w-6 text-[11px] text-right" style={{ color: 'var(--text-muted)' }}>{i + 1}</span>
               {puntosDisponibles.length > 0 && (
-                <select value={v.puntoId || ''} onChange={(e) => e.target.value && elegirPunto(i, e.target.value)} className="h-8 rounded px-2 text-xs outline-none" style={inputCls()}>
+                <select value={v.puntoId || ''} onChange={(e) => e.target.value && elegirPunto(i, e.target.value)} className="h-8 rounded px-2 text-xs outline-hidden" style={inputCls()}>
                   <option value="">— punto —</option>
                   {puntosDisponibles.map((p) => <option key={p.id} value={p.id}>{p.identificador}</option>)}
                 </select>
               )}
-              <input value={v.x} onChange={(e) => setManual(i, 0, e.target.value)} type="number" placeholder="Este (X)" className="flex-1 h-8 rounded px-2 text-xs outline-none font-mono" style={inputCls()} />
-              <input value={v.y} onChange={(e) => setManual(i, 1, e.target.value)} type="number" placeholder="Norte (Y)" className="flex-1 h-8 rounded px-2 text-xs outline-none font-mono" style={inputCls()} />
+              <input value={v.x} onChange={(e) => setManual(i, 0, e.target.value)} type="number" placeholder="Este (X)" className="flex-1 h-8 rounded px-2 text-xs outline-hidden font-mono" style={inputCls()} />
+              <input value={v.y} onChange={(e) => setManual(i, 1, e.target.value)} type="number" placeholder="Norte (Y)" className="flex-1 h-8 rounded px-2 text-xs outline-hidden font-mono" style={inputCls()} />
               <button onClick={() => setVertices((prev) => prev.filter((_, idx) => idx !== i))} disabled={vertices.length <= 3} className="text-xs disabled:opacity-30" style={{ color: 'var(--danger)' }}><Trash2 size={13} /></button>
             </div>
           ))}

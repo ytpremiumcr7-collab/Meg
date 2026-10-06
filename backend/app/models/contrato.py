@@ -9,12 +9,18 @@ Incluye: estimaciones, entregables, garantías, penas, finiquito.
 """
 from enum import Enum
 from uuid import uuid4
+from typing import TYPE_CHECKING
 
 from sqlalchemy import String, Text, Numeric, ForeignKey, Index, DateTime, Integer, Boolean, UniqueConstraint
 from app.db.types import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, UUIDMixin, TenantMixin, AuditMixin
+
+if TYPE_CHECKING:
+    from app.models.expediente import ExpedienteObra
+    from app.models.licitacion import Licitacion
+    from app.models.proveedor import Proveedor
 
 
 class EstadoContrato(str, Enum):

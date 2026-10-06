@@ -49,7 +49,7 @@ export default function EvaluarPanel() {
           onChange={(e) => setExpedienteId(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && evaluar()}
           placeholder="ID del expediente a evaluar"
-          className="h-8 rounded px-2 text-xs outline-none w-64 font-mono"
+          className="h-8 rounded px-2 text-xs outline-hidden w-64 font-mono"
           style={inputStyle()}
         />
         <button

@@ -8,12 +8,16 @@ Modelos de presupuesto, partidas, conceptos e insumos.
 """
 from enum import Enum
 from uuid import uuid4
+from typing import TYPE_CHECKING
 
 from sqlalchemy import CheckConstraint, String, Text, Numeric, ForeignKey, ForeignKeyConstraint, Index, Integer, UniqueConstraint
 from app.db.types import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, UUIDMixin, AuditMixin, TenantMixin
+
+if TYPE_CHECKING:
+    from app.models.expediente import ExpedienteObra
 
 
 class ZonaEconomica(str, Enum):
@@ -97,9 +101,16 @@ class Presupuesto(Base, UUIDMixin, TenantMixin, AuditMixin):
     expediente_id: Mapped[UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("expedientes_obra.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    expediente: Mapped["ExpedienteObra"] = relationship("ExpedienteObra", back_populates="presupuestos")
+    expediente: Mapped["ExpedienteObra"] = relationship(
+        "ExpedienteObra",
+        back_populates="presupuestos",
+        foreign_keys=[expediente_id],
+    )
     partidas: Mapped[list["Partida"]] = relationship(
-        "Partida", back_populates="presupuesto", cascade="all, delete-orphan"
+        "Partida",
+        back_populates="presupuesto",
+        cascade="all, delete-orphan",
+        foreign_keys="Partida.presupuesto_id",
     )
 
     __table_args__ = (
@@ -140,9 +151,14 @@ class Partida(Base, UUIDMixin, TenantMixin):
     presupuesto_id: Mapped[UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("presupuestos.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    presupuesto: Mapped["Presupuesto"] = relationship("Presupuesto", back_populates="partidas")
+    presupuesto: Mapped["Presupuesto"] = relationship(
+        "Presupuesto", back_populates="partidas", foreign_keys=[presupuesto_id]
+    )
     conceptos: Mapped[list["Concepto"]] = relationship(
-        "Concepto", back_populates="partida", cascade="all, delete-orphan"
+        "Concepto",
+        back_populates="partida",
+        cascade="all, delete-orphan",
+        foreign_keys="Concepto.partida_id",
     )
 
     __table_args__ = (
@@ -173,9 +189,14 @@ class Concepto(Base, UUIDMixin, TenantMixin):
     partida_id: Mapped[UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("partidas.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    partida: Mapped["Partida"] = relationship("Partida", back_populates="conceptos")
+    partida: Mapped["Partida"] = relationship(
+        "Partida", back_populates="conceptos", foreign_keys=[partida_id]
+    )
     insumos: Mapped[list["Insumo"]] = relationship(
-        "Insumo", back_populates="concepto", cascade="all, delete-orphan"
+        "Insumo",
+        back_populates="concepto",
+        cascade="all, delete-orphan",
+        foreign_keys="Insumo.concepto_id",
     )
 
     __table_args__ = (
@@ -204,13 +225,16 @@ class Insumo(Base, UUIDMixin, TenantMixin):
 
     # Fuente del catálogo
     fuente_catalogo: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    actualizacion_precio: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     rendimiento: Mapped[float] = mapped_column(Numeric(8, 4), default=1.0)
 
     # Relaciones
     concepto_id: Mapped[UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("conceptos.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    concepto: Mapped["Concepto"] = relationship("Concepto", back_populates="insumos")
+    concepto: Mapped["Concepto"] = relationship(
+        "Concepto", back_populates="insumos", foreign_keys=[concepto_id]
+    )
 
     __table_args__ = (
         Index("idx_insumo_tenant", "tenant_id"),

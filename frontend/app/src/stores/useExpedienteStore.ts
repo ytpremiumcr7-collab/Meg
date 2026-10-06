@@ -9,6 +9,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { megalodonClient } from '@/lib/api-client';
 import type { Expediente } from '@/lib/megalodon-client';
+import { MegalodonApiError } from '@/lib/megalodon-client';
 
 export interface NuevoExpedienteInput {
   titulo: string;
@@ -36,7 +37,10 @@ interface ExpedienteState {
   crearExpediente: (data: NuevoExpedienteInput) => Promise<Expediente>;
   setExpedienteActivo: (id: string | null) => void;
   expedienteActivo: () => Expediente | null;
+  limpiar: () => void;
 }
+let ultimaCarga = 0;
+let revisionSesion = 0;
 
 // Fuente única de verdad de "en qué expediente estoy trabajando" para
 // todo el sistema (costos, BIM, documentos, etc.). Antes no existía nada
@@ -51,19 +55,34 @@ export const useExpedienteStore = create<ExpedienteState>()(
       error: null,
 
       cargarExpedientes: async () => {
+        if (get().isLoading) return;
+        const carga = ++ultimaCarga;
+        const idsIniciales = new Set(get().expedientes.map(e => e.id));
         set({ isLoading: true, error: null });
         try {
           const expedientes = await megalodonClient.expedientes.list({ limit: 100 });
-          set({ expedientes, isLoading: false });
-
-          // Si el expediente activo guardado ya no existe (borrado,
-          // cuenta distinta, etc.), se limpia en vez de dejarlo apuntando
-          // a algo inválido.
           const activoId = get().expedienteActivoId;
+          let eliminado = false;
           if (activoId && !expedientes.some((e) => e.id === activoId)) {
-            set({ expedienteActivoId: null });
+            try {
+              // Absence in the first page is not deletion of the selected project.
+              expedientes.push(await megalodonClient.expedientes.get(activoId));
+            } catch (e) {
+              if (!(e instanceof MegalodonApiError) || ![403, 404].includes(e.status)) throw e;
+              eliminado = true;
+            }
           }
+          if (carga !== ultimaCarga) return;
+          set(state => {
+            const conservados = state.expedientes.filter(e => !idsIniciales.has(e.id)
+              || (e.id === state.expedienteActivoId && e.id !== activoId));
+            const porId = new Map(expedientes.map(e => [e.id, e]));
+            for (const expediente of conservados) porId.set(expediente.id, expediente);
+            return { expedientes: [...porId.values()], isLoading: false,
+              ...(eliminado && state.expedienteActivoId === activoId ? { expedienteActivoId: null } : {}) };
+          });
         } catch (e) {
+          if (carga !== ultimaCarga) return;
           set({
             isLoading: false,
             error: e instanceof Error ? e.message : 'No se pudieron cargar los expedientes',
@@ -72,9 +91,11 @@ export const useExpedienteStore = create<ExpedienteState>()(
       },
 
       crearExpediente: async (data) => {
+        const sesion = revisionSesion;
         set({ isLoading: true, error: null });
         try {
           const nuevo = await megalodonClient.expedientes.create(data);
+          if (sesion !== revisionSesion) return nuevo;
           set((state) => ({
             expedientes: [nuevo, ...state.expedientes],
             expedienteActivoId: nuevo.id, // el recién creado pasa a ser el activo
@@ -83,12 +104,17 @@ export const useExpedienteStore = create<ExpedienteState>()(
           return nuevo;
         } catch (e) {
           const message = e instanceof Error ? e.message : 'No se pudo crear el expediente';
-          set({ isLoading: false, error: message });
+          if (sesion === revisionSesion) set({ isLoading: false, error: message });
           throw new Error(message);
         }
       },
 
       setExpedienteActivo: (id) => set({ expedienteActivoId: id }),
+      limpiar: () => {
+        ultimaCarga += 1;
+        revisionSesion += 1;
+        set({ expedientes: [], expedienteActivoId: null, isLoading: false, error: null });
+      },
 
       expedienteActivo: () => {
         const { expedientes, expedienteActivoId } = get();

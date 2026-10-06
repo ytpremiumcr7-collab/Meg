@@ -46,13 +46,13 @@ export default function CurvasPanel({ superficies }: { superficies: SuperficieTI
   return (
     <div className="h-full flex">
       <div className="w-64 shrink-0 p-3 space-y-3 overflow-y-auto" style={{ borderRight: '1px solid var(--border-subtle)', background: 'var(--surface)' }}>
-        <select value={superficieId} onChange={(e) => setSuperficieId(e.target.value)} className="w-full h-8 rounded px-2 text-xs outline-none" style={inputCls()}>
+        <select value={superficieId} onChange={(e) => setSuperficieId(e.target.value)} className="w-full h-8 rounded px-2 text-xs outline-hidden" style={inputCls()}>
           <option value="">Superficie</option>
           {superficies.map((s) => <option key={s.id} value={s.id}>{s.nombre}</option>)}
         </select>
         <div>
           <label className="text-[11px]" style={{ color: 'var(--text-muted)' }}>Equidistancia (m)</label>
-          <input value={intervalo} onChange={(e) => setIntervalo(e.target.value)} type="number" step="0.5" min="0.1" className="w-full h-8 rounded px-2 text-xs outline-none font-mono" style={inputCls()} />
+          <input value={intervalo} onChange={(e) => setIntervalo(e.target.value)} type="number" step="0.5" min="0.1" className="w-full h-8 rounded px-2 text-xs outline-hidden font-mono" style={inputCls()} />
         </div>
         <button onClick={() => void generar()} disabled={!superficieId || cargando} className="w-full flex items-center justify-center gap-1.5 h-8 rounded text-xs font-semibold disabled:opacity-40" style={{ background: 'var(--accent-gold)', color: 'var(--void)' }}>
           {cargando ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />} Generar curvas

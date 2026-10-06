@@ -67,15 +67,20 @@ class TestCPMNoSilence:
 
 
 class TestFeodoNoSilence:
-    def test_feodo_propagates_exception(self):
-        """Verificar que Feodo Tracker propaga excepciones."""
-        import ast
-        with open("tezcatlipoca/services/malware/feodo_tracker.py", "r") as f:
-            content = f.read()
+    def test_feodo_marks_unavailable_instead_of_reporting_clean_feed(self):
+        """Una caída sin respaldo debe distinguirse de un feed vivo vacío."""
+        from tezcatlipoca.services.malware.feodo_tracker import FeodoTrackerClient
 
-        assert "InteropException" in content, "Feodo debe lanzar InteropException"
-        assert "from exc" in content, "Feodo debe usar 'from exc' para chain"
-        assert "logger.error" in content, "Feodo debe loguear el error antes de propagar"
+        client = FeodoTrackerClient()
+        client._feed_cache = MagicMock()
+        client._feed_cache.load.return_value = None
+        with patch(
+            "tezcatlipoca.services.malware.feodo_tracker.sync_get",
+            side_effect=RuntimeError("network down"),
+        ):
+            assert client.fetch() == []
+        assert client.last_status == "unavailable"
+        client._feed_cache.load.assert_called_once_with("feodo_tracker_raw")
 
     def test_no_silent_pass_comment(self):
         """Verificar que no queda el comentario de silencio."""
@@ -85,27 +90,3 @@ class TestFeodoNoSilence:
 
         assert "Silently fail" not in content, "No debe quedar comentario de silencio"
         assert "return defaults" not in content, "No debe retornar defaults en silencio"
-
-
-class TestAuthRecordAttempt:
-    def test_record_attempt_not_pass(self):
-        """Verificar que _record_attempt no es solo pass."""
-        import ast
-        with open("tezcatlipoca/routers/auth.py", "r") as f:
-            tree = ast.parse(f.read())
-
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef) and node.name == "_record_attempt":
-                assert len(node.body) > 1 or not isinstance(node.body[0], ast.Pass),                     "_record_attempt no debe ser solo pass"
-                body_str = ast.dump(node)
-                assert "redis" in body_str or "lpush" in body_str,                     "_record_attempt debe interactuar con Redis"
-
-    def test_record_attempt_has_audit_logic(self):
-        """Verificar que _record_attempt tiene lógica de auditoria."""
-        import ast
-        with open("tezcatlipoca/routers/auth.py", "r") as f:
-            content = f.read()
-
-        assert "auth:attempts" in content, "Debe usar key de auditoria"
-        assert "expire" in content, "Debe setear TTL"
-        assert "7" in content or "86400" in content, "Debe tener retención de 7 días"

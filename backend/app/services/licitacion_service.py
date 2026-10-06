@@ -2,6 +2,7 @@
 """Servicio de licitaciones — Máquina de estados legal completa."""
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Optional, List, Dict, Any
 from uuid import UUID
 
@@ -18,6 +19,7 @@ from app.models.licitacion import (
     JuntaAclaracion,
     Proposicion,
     EvaluacionLicitacion,
+    TipoEvaluacion,
 )
 from app.models.user import User
 from app.schemas.licitacion import (
@@ -188,6 +190,27 @@ class LicitacionService:
             .order_by(JuntaAclaracion.created_at.desc())
         )
         return result.scalars().all()
+
+    async def registrar_junta(
+        self,
+        db: AsyncSession,
+        licitacion_id: UUID,
+        data: JuntaAclaracionCreate,
+        current_user: User,
+    ) -> JuntaAclaracion:
+        """Registra el acta oficial de una junta ya celebrada externamente."""
+        await self._obtener_licitacion(db, licitacion_id, current_user)
+        junta = JuntaAclaracion(
+            licitacion_id=licitacion_id,
+            tenant_id=current_user.tenant_id,
+            creado_por_id=current_user.id,
+            actualizado_por_id=current_user.id,
+            **data.model_dump(),
+        )
+        db.add(junta)
+        await db.commit()
+        await db.refresh(junta)
+        return junta
 
     async def registrar_proposicion(self, db: AsyncSession, licitacion_id: UUID, data: ProposicionCreate, current_user: User) -> Proposicion:
         lic = await self._obtener_licitacion(db, licitacion_id, current_user)

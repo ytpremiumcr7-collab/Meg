@@ -81,11 +81,12 @@ class ProgramacionService(BaseService[ProgramaObra]):
                 ErrorCode.DOCUMENTO_NO_ENCONTRADO,
                 f"Expediente {expediente_id} no encontrado",
             )
-        tenant_id = str(tenant_id) if tenant_id is not None else None
-        if tenant_id is not None and str(expediente.tenant_id) != tenant_id:
+        effective_tenant = tenant_id if tenant_id is not None else self.tenant_id
+        effective_tenant = str(effective_tenant) if effective_tenant is not None else None
+        if effective_tenant is not None and str(expediente.tenant_id) != effective_tenant:
             raise MegalodonException(
                 ErrorCode.DOCUMENTO_NO_ENCONTRADO,
-                f"Expediente {expediente_id} no encontrado en el tenant {tenant_id}",
+                f"Expediente {expediente_id} no encontrado en el tenant {effective_tenant}",
             )
 
         # Generar identificador

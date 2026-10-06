@@ -1,55 +1,14 @@
-"""Create Tezcatlipoca tables — never captured by Alembic autogenerate.
+"""Create the embedded subsystem tables before its audit tenant migration.
 
-Hallazgo (auditoría externa 2026-08-27, verificado leyendo el código antes
-de escribir esta migración, no solo confiando en el reporte): Tezcatlipoca
-tiene su propio `Base = declarative_base()` en `tezcatlipoca/db/models.py`,
-separado del `Base` de `app.models.base` que usa el resto de Megalodon.
-`alembic/env.py` construye `target_metadata` solo a partir de
-`app.models.base.Base` (`import app.models` puebla ese metadata; nunca se
-importa `tezcatlipoca.db.models`). Resultado: ningún `alembic revision
---autogenerate` ha visto jamás estas 8 tablas, y no existe ninguna
-migración que las cree -- confirmado con:
-
-    grep -rl "create_table.*tezcatlipoca_users" alembic/versions/*.py
-    → sin resultados
-
-La única migración relacionada con Tez
-(`f4c2d7e9a1b6_tez_audit_tenant_scope.py`) hace ALTER TABLE condicional
-sobre `api_logs` ("si la columna no existe, agrégala") -- asume que la
-tabla PODRÍA existir (de una instalación vieja que sí corrió el
-`Base.metadata.create_all()` en runtime que el propio código de
-`tezcatlipoca/db/models.py` documenta como abandonado), pero no la crea.
-En una base nueva, esa migración no falla (la inspección de una tabla que
-no existe no truena en Postgres, solo regresa columnas vacías) pero
-tampoco hace nada -- las 8 tablas de Tez simplemente no existen.
-
-Por qué importa en producción: `tezcatlipoca/core/bootstrap.py` y varios
-routers (`snapshots.py`, `wormhole.py`, `auth.py`, etc.) asumen que
-`tezcatlipoca_users`, `snapshots`, `tunnels`, `dead_drops`, `api_logs`,
-`token_blacklist`, `system_settings`, `user_sessions` existen desde el
-primer request. Con Alembic como única autoridad de esquema (que es la
-dirección correcta, reemplazando el create_all() implícito), una base
-nueva que corre `alembic upgrade head` queda con el schema de Megalodon
-completo pero CERO tablas de Tez -- cualquier endpoint de Tez que las
-toque revienta con "relation does not exist" en el primer uso real, no en
-el arranque (el arranque solo corre migraciones, no valida que cada tabla
-esperada por cada subsistema esté presente).
-
-Esta migración crea las 8 tablas con el esquema exacto de
-`tezcatlipoca/db/models.py` (columna por columna, verificado por lectura
-directa del archivo, no regenerado de memoria). No es un fix de la
-fractura arquitectónica de fondo -- Tez sigue teniendo un `Base` separado
-del resto del proyecto, lo cual significa que un futuro cambio a esos
-modelos NO se va a reflejar en autogenerate a menos que alguien recuerde
-escribir la migración a mano, como se hizo aquí. Ver
-CAMBIOS_2026-08-27_legal_corpus_integracion.md para la recomendación de
-unificar ambos `Base` en un solo `target_metadata`.
+Tezcatlipoca uses its own metadata; both registries are now included in
+Alembic autogenerate. Creation precedes f4c2d7e9a1b6, which alters api_logs.
+No application create_all is required for a fresh installation.
 """
 from alembic import op
 import sqlalchemy as sa
 
 revision = "20260829_tezcatlipoca_tables"
-down_revision = "20260827_legal_rule_active_requires_fundamento"
+down_revision = "d5e8f7a1c2b3"
 branch_labels = None
 depends_on = None
 

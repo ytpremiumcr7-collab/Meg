@@ -192,15 +192,15 @@ export default function RepositorioPanel({ expedienteId }: { expedienteId: strin
               onChange={(e) => setQ(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && buscar()}
               placeholder="Buscar por nombre o descripción..."
-              className="w-full h-8 rounded pl-7 pr-2 text-xs outline-none"
+              className="w-full h-8 rounded pl-7 pr-2 text-xs outline-hidden"
               style={inputStyle()}
             />
           </div>
-          <select value={tipo} onChange={(e) => setTipo(e.target.value)} className="h-8 rounded px-2 text-xs outline-none" style={inputStyle()}>
+          <select value={tipo} onChange={(e) => setTipo(e.target.value)} className="h-8 rounded px-2 text-xs outline-hidden" style={inputStyle()}>
             <option value="">Todos los tipos</option>
             {TIPOS_DOCUMENTO.map((t) => <option key={t} value={t}>{t}</option>)}
           </select>
-          <select value={estado} onChange={(e) => setEstado(e.target.value)} className="h-8 rounded px-2 text-xs outline-none" style={inputStyle()}>
+          <select value={estado} onChange={(e) => setEstado(e.target.value)} className="h-8 rounded px-2 text-xs outline-hidden" style={inputStyle()}>
             <option value="">Todos los estados</option>
             {ESTADOS_DOCUMENTO.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
@@ -358,7 +358,7 @@ export default function RepositorioPanel({ expedienteId }: { expedienteId: strin
                                 <select
                                   value={tipoSugerido}
                                   onChange={(e) => setTipoSugerido(e.target.value)}
-                                  className="h-7 rounded px-2 text-[11px] outline-none"
+                                  className="h-7 rounded px-2 text-[11px] outline-hidden"
                                   style={inputStyle()}
                                 >
                                   <option value="">Tipo sugerido...</option>
@@ -410,7 +410,7 @@ export default function RepositorioPanel({ expedienteId }: { expedienteId: strin
             />
             <div>
               <label className="block text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>Tipo documental</label>
-              <select value={uploadTipo} onChange={(e) => setUploadTipo(e.target.value)} className="w-full h-8 rounded px-2 text-xs outline-none" style={inputStyle()}>
+              <select value={uploadTipo} onChange={(e) => setUploadTipo(e.target.value)} className="w-full h-8 rounded px-2 text-xs outline-hidden" style={inputStyle()}>
                 {TIPOS_DOCUMENTO.map((t) => <option key={t} value={t}>{t}</option>)}
               </select>
             </div>

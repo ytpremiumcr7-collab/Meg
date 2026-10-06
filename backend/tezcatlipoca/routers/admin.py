@@ -12,18 +12,16 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
 
-from db.models import get_async_db, User, ApiLog, Snapshot, TokenBlacklist
+from db.models import get_async_db, User, ApiLog, Snapshot
+from app.core.deps import get_db as megalodon_get_db
+from app.api.v1.users import require_tenant_admin
+from app.models.user import User as MegalodonUser
 from routers.auth import get_current_user
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 
 # ─── Pydantic Models ───
-
-class UserUpdateRequest(BaseModel):
-    tier: Optional[str] = Field(default=None, pattern=r"^(restricted|full|admin)$")
-    is_active: Optional[bool] = None
-
 
 class LogsFilterRequest(BaseModel):
     hours: int = Field(default=24, ge=1, le=168)
@@ -45,33 +43,34 @@ async def require_admin(current_user: User = Depends(get_current_user)):
 
 @router.get("/dashboard")
 async def admin_dashboard(
-    admin: User = Depends(require_admin),
+    admin: MegalodonUser = Depends(require_tenant_admin),
     db: AsyncSession = Depends(get_async_db),
+    megalodon_db: AsyncSession = Depends(megalodon_get_db),
     _rate_limit: bool = Depends(rate_limit_standard)
 ):
     """Get admin dashboard statistics."""
     # User stats
-    result = await db.execute(select(func.count()).select_from(User).where(User.tenant_id == admin.tenant_id))
+    result = await megalodon_db.execute(select(func.count()).select_from(MegalodonUser).where(MegalodonUser.tenant_id == admin.tenant_id))
     total_users = result.scalar()
 
-    result = await db.execute(select(func.count()).select_from(User).where(User.tenant_id == admin.tenant_id, User.is_active == True))
+    result = await megalodon_db.execute(select(func.count()).select_from(MegalodonUser).where(MegalodonUser.tenant_id == admin.tenant_id, MegalodonUser.is_active == True))
     active_users = result.scalar()
 
-    result = await db.execute(
-        select(func.count()).select_from(User).where(
-            User.tenant_id == admin.tenant_id,
-            User.created_at >= datetime.now(timezone.utc) - timedelta(days=1)
+    result = await megalodon_db.execute(
+        select(func.count()).select_from(MegalodonUser).where(
+            MegalodonUser.tenant_id == admin.tenant_id,
+            MegalodonUser.created_at >= datetime.now(timezone.utc) - timedelta(days=1)
         )
     )
     new_users_today = result.scalar()
 
     # API stats
-    result = await db.execute(select(func.count()).select_from(ApiLog).where(ApiLog.tenant_id == admin.tenant_id))
+    result = await db.execute(select(func.count()).select_from(ApiLog).where(ApiLog.tenant_id == str(admin.tenant_id)))
     total_requests = result.scalar()
 
     result = await db.execute(
         select(func.count()).select_from(ApiLog).where(
-            ApiLog.tenant_id == admin.tenant_id,
+            ApiLog.tenant_id == str(admin.tenant_id),
             ApiLog.timestamp >= datetime.now(timezone.utc) - timedelta(days=1)
         )
     )
@@ -79,7 +78,7 @@ async def admin_dashboard(
 
     result = await db.execute(
         select(func.count()).select_from(ApiLog).where(
-            ApiLog.tenant_id == admin.tenant_id,
+            ApiLog.tenant_id == str(admin.tenant_id),
             ApiLog.status_code >= 400,
             ApiLog.timestamp >= datetime.now(timezone.utc) - timedelta(days=1)
         )
@@ -90,7 +89,7 @@ async def admin_dashboard(
     # Top endpoints
     result = await db.execute(
         select(ApiLog.endpoint, func.count(ApiLog.id).label("count"))
-        .where(ApiLog.tenant_id == admin.tenant_id, ApiLog.timestamp >= datetime.now(timezone.utc) - timedelta(days=1))
+        .where(ApiLog.tenant_id == str(admin.tenant_id), ApiLog.timestamp >= datetime.now(timezone.utc) - timedelta(days=1))
         .group_by(ApiLog.endpoint)
         .order_by(func.count(ApiLog.id).desc())
         .limit(10)
@@ -98,12 +97,8 @@ async def admin_dashboard(
     top_endpoints = result.all()
 
     # Snapshots
-    result = await db.execute(select(func.count()).select_from(Snapshot).where(Snapshot.tenant_id == admin.tenant_id))
+    result = await db.execute(select(func.count()).select_from(Snapshot).where(Snapshot.tenant_id == str(admin.tenant_id)))
     total_snapshots = result.scalar()
-
-    # Token blacklist
-    result = await db.execute(select(func.count()).select_from(TokenBlacklist))
-    revoked_tokens = result.scalar()
 
     return {
         "users": {
@@ -118,65 +113,7 @@ async def admin_dashboard(
             "top_endpoints": [{"endpoint": e[0], "count": e[1]} for e in top_endpoints]
         },
         "snapshots": total_snapshots,
-        "revoked_tokens": revoked_tokens,
         "timestamp": datetime.now(timezone.utc).isoformat()
-    }
-
-
-@router.get("/users")
-async def list_users(
-    admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_async_db),
-    skip: int = 0,
-    limit: int = 100,
-    _rate_limit: bool = Depends(rate_limit_standard)
-):
-    """List all users with pagination."""
-    result = await db.execute(
-        select(User).where(User.tenant_id == admin.tenant_id).offset(skip).limit(limit)
-    )
-    users = result.scalars().all()
-    return [
-        {
-            "id": u.id,
-            "username": u.username,
-            "tier": u.tier,
-            "is_active": u.is_active,
-            "created_at": u.created_at.isoformat() if u.created_at else None,
-            "last_login": u.last_login.isoformat() if u.last_login else None,
-            "api_calls_total": u.api_calls_total
-        }
-        for u in users
-    ]
-
-
-@router.patch("/users/{user_id}")
-async def update_user(
-    user_id: int,
-    req: UserUpdateRequest,
-    admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_async_db),
-    _rate_limit: bool = Depends(rate_limit_strict)
-):
-    """Update user tier or status."""
-    result = await db.execute(select(User).where(User.id == user_id, User.tenant_id == admin.tenant_id))
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    if req.tier is not None:
-        user.tier = req.tier
-    if req.is_active is not None:
-        user.is_active = req.is_active
-
-    await db.commit()
-    await db.refresh(user)
-
-    return {
-        "id": user.id,
-        "username": user.username,
-        "tier": user.tier,
-        "is_active": user.is_active
     }
 
 
@@ -193,7 +130,7 @@ async def get_logs(
 ):
     """Get API logs with filtering."""
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
-    conditions = [ApiLog.tenant_id == admin.tenant_id, ApiLog.timestamp >= since]
+    conditions = [ApiLog.tenant_id == str(admin.tenant_id), ApiLog.timestamp >= since]
 
     if endpoint:
         safe_endpoint = endpoint.replace("%", "").replace("_", "")

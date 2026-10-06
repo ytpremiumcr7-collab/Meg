@@ -17,8 +17,8 @@ interface HomeProps {
   onOpenApp: (id: string) => void;
 }
 
-function resolveIcon(name: string): React.ComponentType<{ className?: string }> {
-  const map = Icons as unknown as Record<string, React.ComponentType<{ className?: string }>>;
+function resolveIcon(name: string): Icons.LucideIcon {
+  const map = Icons as unknown as Record<string, Icons.LucideIcon>;
   return map[name] || Icons.AppWindow;
 }
 
@@ -128,7 +128,7 @@ export default function Home({ onOpenApp }: HomeProps) {
                     onClick={() => onOpenApp(app.id)}
                     whileHover={{ y: -1 }}
                     whileTap={{ scale: 0.98 }}
-                    className="flex flex-col items-start gap-2 p-3 rounded-lg text-left transition-all hover:bg-[color:var(--surface-hover)]"
+                    className="flex flex-col items-start gap-2 p-3 rounded-lg text-left transition-all hover:bg-(--surface-hover)"
                     style={{ border: '1px solid var(--border-subtle)' }}
                     onMouseEnter={(e) => { e.currentTarget.style.boxShadow = 'var(--shadow-glow-gold)'; e.currentTarget.style.borderColor = 'var(--accent-gold-dim)'; }}
                     onMouseLeave={(e) => { e.currentTarget.style.boxShadow = 'none'; e.currentTarget.style.borderColor = 'var(--border-subtle)'; }}

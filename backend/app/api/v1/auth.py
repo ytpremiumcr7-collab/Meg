@@ -9,15 +9,12 @@ Endpoints de autenticación conectados a AuthService.
 from app.core.rate_limit import rate_limit_standard, rate_limit_strict
 import re
 from typing import List, Optional
-from datetime import datetime, timezone
+from datetime import datetime
 from uuid import UUID
-import hashlib
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
-import jwt
-from jwt.exceptions import PyJWTError
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,8 +22,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.core.deps import REFRESH_COOKIE_NAME, SESSION_COOKIE_NAME, get_current_user, get_db, oauth2_scheme
 from app.core.entitlements import requiere_rol
-from app.core.rate_limit import rate_limit_strict
-from app.core.token_revocation import revoke_jti, revoke_refresh_family
 from app.services.auth_service import AuthService
 from app.models.user import Invitation, User, UserRole
 
@@ -38,12 +33,12 @@ def _slugify(value: str) -> str:
 logger = logging.getLogger(__name__)
 
 
-def _token_identifier(token: str) -> str:
-    """Identificador estable para tokens legacy sin jti."""
-    digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
-    return f"legacy:{digest}"
-
 router = APIRouter()
+
+
+class BrowserSession(BaseModel):
+    """La sesión web solo expone su duración; las credenciales van en cookies."""
+    expires_in: int
 
 
 class Token(BaseModel):
@@ -117,6 +112,7 @@ class RefreshRequest(BaseModel):
     refresh_token: Optional[str] = None
 
 
+@router.post("/session/login", response_model=BrowserSession)
 @router.post("/login", response_model=Token)
 async def login(
     response: Response,
@@ -270,15 +266,20 @@ async def list_invitations(
     ]
 
 
+@router.post("/session/refresh", response_model=BrowserSession)
 @router.post("/refresh", response_model=Token)
 async def refresh_token(
-    data: RefreshRequest,
     request: Request,
     response: Response,
+    data: Optional[RefreshRequest] = None,
     db: AsyncSession = Depends(get_db),
     _rate_limit: bool = Depends(rate_limit_strict),
 ):
-    refresh_value = data.refresh_token or request.cookies.get(REFRESH_COOKIE_NAME)
+    if request.url.path.endswith("/session/refresh"):
+        refresh_value = request.cookies.get(REFRESH_COOKIE_NAME)
+    else:
+        # El contrato SDK exige credenciales explícitas; no expone cookies a JS.
+        refresh_value = data.refresh_token if data else None
     if not refresh_value:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token requerido")
     auth_service = AuthService(db)
@@ -325,45 +326,13 @@ async def logout(
     token: Optional[str] = Depends(oauth2_scheme),
     _rate_limit: bool = Depends(rate_limit_strict),
 ):
-    """Cierra sesión y revoca el token de acceso (y el refresh si se manda).
-
-    ANTES: solo borraba la cookie. El Bearer (si el cliente guardó uno
-    aparte) seguía siendo válido hasta expirar solo -- ambas auditorías
-    de este proyecto señalaron exactamente esto. Ahora el jti del
-    access token (cookie o Bearer, lo que haya) se revoca de inmediato
-    contra Redis (ver app/core/token_revocation.py) -- el mismo store
-    que revisa Tezcatlipoca en su puente de identidad.
-    """
-    access_token = request.cookies.get(SESSION_COOKIE_NAME) or token
-    if access_token:
-        try:
-            payload = jwt.decode(access_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-            exp_ts = payload.get("exp")
-            expires_at = (
-                datetime.fromtimestamp(exp_ts, tz=timezone.utc)
-                if exp_ts else datetime.now(timezone.utc)
-            )
-            access_jti = payload.get("jti") or _token_identifier(access_token)
-            await revoke_jti(access_jti, expires_at, token_kind="access", reason="logout")
-        except PyJWTError:
-            logger.debug("Logout recibió access token inválido o expirado; no se revoca jti")
-
-    refresh_value = (body.refresh_token if body else None) or request.cookies.get(REFRESH_COOKIE_NAME)
-    if refresh_value:
-        try:
-            payload = jwt.decode(refresh_value, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-            exp_ts = payload.get("exp")
-            expires_at = (
-                datetime.fromtimestamp(exp_ts, tz=timezone.utc)
-                if exp_ts else datetime.now(timezone.utc)
-            )
-            refresh_jti = payload.get("jti") or _token_identifier(refresh_value)
-            await revoke_jti(refresh_jti, expires_at, token_kind="refresh", reason="logout")
-            family_id = payload.get("sid") or payload.get("session_id") or _token_identifier(refresh_value)
-            await revoke_refresh_family(family_id=family_id, expires_at=expires_at, reason="logout")
-        except PyJWTError:
-            logger.debug("Logout recibió refresh token inválido o expirado; no se revoca jti")
-
+    """Cierra la sesión elegida con la misma prioridad que la autenticación."""
+    from app.services.session_service import logout_session
+    access_token = token or request.cookies.get(SESSION_COOKIE_NAME)
+    refresh_value = (body.refresh_token if body else None)
+    if not token and not refresh_value:
+        refresh_value = request.cookies.get(REFRESH_COOKIE_NAME)
+    await logout_session(access_token, refresh_value)
     response.delete_cookie(key=SESSION_COOKIE_NAME, path="/")
     response.delete_cookie(key=REFRESH_COOKIE_NAME, path="/api/v1/auth")
     return {"status": "ok"}

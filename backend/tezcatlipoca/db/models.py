@@ -11,17 +11,13 @@
 #     directamente (o se fuerza +asyncpg si viene con +psycopg2).
 
 import os
-import asyncio
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Optional, List, AsyncGenerator
 
 from sqlalchemy import (
     Column, Integer, String, Float, DateTime, Text, Boolean, JSON, LargeBinary,
     select, delete,
 )
-from alembic import command
-from alembic.config import Config
 from sqlalchemy.ext.asyncio import (
     create_async_engine,
     async_sessionmaker,
@@ -83,8 +79,8 @@ class User(Base):
     username = Column(String(50), unique=True, index=True, nullable=False)
     password_hash = Column(String(255), nullable=False)
     tier = Column(String(20), default="restricted")
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    last_login = Column(DateTime, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    last_login = Column(DateTime(timezone=True), nullable=True)
     is_active = Column(Boolean, default=True)
     api_calls_today = Column(Integer, default=0)
     api_calls_total = Column(Integer, default=0)
@@ -102,9 +98,9 @@ class UserSession(Base):
     jti = Column(String(255), nullable=False)
     ip_address = Column(String(45), nullable=True)
     user_agent = Column(String(500), nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    expires_at = Column(DateTime, nullable=False)
-    last_active = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    last_active = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     is_active = Column(Boolean, default=True)
 
 
@@ -119,7 +115,7 @@ class Snapshot(Base):
     tenant_id = Column(String(36), index=True, nullable=True)
     layers = Column(JSON, default=list)
     viewport = Column(JSON, nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
 class Tunnel(Base):
@@ -136,9 +132,9 @@ class Tunnel(Base):
     bytes_transferred = Column(Integer, default=0)
     packets = Column(Integer, default=0)
     latency_ms = Column(Float, nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    expires_at = Column(DateTime, nullable=False)
-    closed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    closed_at = Column(DateTime(timezone=True), nullable=True)
 
 
 class DeadDrop(Base):
@@ -150,8 +146,8 @@ class DeadDrop(Base):
     owner_user_id = Column(Integer, nullable=False)
     owner_username = Column(String(255), nullable=True)
     encrypted_payload = Column(LargeBinary, nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    expires_at = Column(DateTime(timezone=True), nullable=False)
     max_reads = Column(Integer, default=1)
     reads = Column(Integer, default=0)
     status = Column(String(20), default="active")
@@ -170,7 +166,7 @@ class ApiLog(Base):
     response_time_ms = Column(Float, nullable=True)
     ip_address = Column(String(45), nullable=True)
     user_agent = Column(String(500), nullable=True)
-    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    timestamp = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
 class TokenBlacklist(Base):
@@ -179,8 +175,8 @@ class TokenBlacklist(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     token_jti = Column(String(255), unique=True, nullable=False, index=True)
-    expires_at = Column(DateTime, nullable=False)
-    revoked_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    revoked_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
 class SystemSetting(Base):
@@ -191,8 +187,8 @@ class SystemSetting(Base):
     tenant_id = Column(String(36), index=True, nullable=True)
     key = Column(String(255), nullable=False, index=True)
     value = Column(JSON, nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
 
 # ─── Async DB helpers ────────────────────────────────────────────────
@@ -206,41 +202,8 @@ async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
-def _build_alembic_config() -> Config:
-    backend_root = Path(__file__).resolve().parents[2]
-    config = Config(str(backend_root / "alembic.ini"))
-    config.set_main_option("script_location", str(backend_root / "alembic"))
-    config.set_main_option("sqlalchemy.url", DATABASE_URL)
-    return config
-
-
-def _upgrade_database_sync() -> None:
-    """Aplica migraciones de Alembic hasta head.
-
-    La versión anterior hacía `Base.metadata.create_all()` en runtime, lo
-    que convertía el arranque en un bootstrap implícito de esquema. Aquí
-    la verdad operativa pasa a ser Alembic: si el esquema está atrasado,
-    se corrige con migraciones; si la base no existe o no responde, el
-    arranque falla de forma explícita en vez de fabricar tablas por su
-    cuenta.
-    """
-    command.upgrade(_build_alembic_config(), "head")
-
-
 async def init_db_async():
-    """Inicializa la base de datos ejecutando migraciones de Alembic.
-
-    Se mantiene el nombre por compatibilidad con los puntos de arranque
-    existentes, pero el comportamiento ya no crea tablas a mano.
-    """
-    await asyncio.to_thread(_upgrade_database_sync)
-
-
-def init_db():
-    """Compatibilidad síncrona para scripts y documentación legacy.
-
-    El runtime principal debe usar `await init_db_async()` desde un
-    contexto async; este wrapper existe para no romper comandos antiguos
-    que ejecutan fuera de event loop.
-    """
-    asyncio.run(init_db_async())
+    """Verify the migrated schema; runtime never owns migration privileges."""
+    from scripts.verify_migrated_schema import verify
+    async with engine.connect() as connection:
+        await connection.run_sync(verify)

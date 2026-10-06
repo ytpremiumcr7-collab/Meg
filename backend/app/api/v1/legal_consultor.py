@@ -387,6 +387,13 @@ async def listar_categorias(current_user: User = Depends(get_current_user), _rat
     """Lista las categorías temáticas disponibles."""
     return {"categorias": _motor.listar_categorias()}
 
+
+@router.get('/cobertura')
+@handle_megalodon_errors
+async def cobertura_corpus(current_user: User = Depends(get_current_user),
+                           _rate_limit: bool = Depends(rate_limit_standard)):
+    return _motor.cobertura()
+
 @router.post("/categoria/{categoria_id}")
 @handle_megalodon_errors
 async def buscar_por_categoria(

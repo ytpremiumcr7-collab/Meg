@@ -8,12 +8,18 @@ Modelos de proveedores, licitantes y contratistas.
 """
 from enum import Enum
 from uuid import uuid4
+from typing import TYPE_CHECKING
 
 from sqlalchemy import String, Text, Boolean, ForeignKey, Index
 from app.db.types import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, UUIDMixin, TenantMixin, AuditMixin
+
+if TYPE_CHECKING:
+    from app.models.compliance import Sancion
+    from app.models.contrato import Contrato
+    from app.models.licitacion import Proposicion
 
 
 class TipoPersona(str, Enum):

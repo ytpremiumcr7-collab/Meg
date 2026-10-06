@@ -21,7 +21,7 @@ interface AnimatedNumberProps {
 export default function AnimatedNumber({ value, duration = 700, className, style, decimals = 0, format }: AnimatedNumberProps) {
   const [display, setDisplay] = useState(0);
   const fromRef = useRef(0);
-  const rafRef = useRef<number>();
+  const rafRef = useRef<number | null>(null);
 
   useEffect(() => {
     const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;

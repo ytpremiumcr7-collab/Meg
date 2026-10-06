@@ -11,7 +11,7 @@ export default function BootSequence() {
   const apps = useAppRegistry(s => s.apps);
   const [checks, setChecks] = useState<Check[]>([
     { name: 'API / health', state: 'pending' },
-    { name: 'API / ready · DB/Redis/Tezcatlipoca', state: 'pending' },
+    { name: 'API / ready · DB/Redis', state: 'pending' },
     { name: 'Entitlements / tenant', state: 'pending' },
     { name: 'Tezcatlipoca telemetry', state: 'pending' },
     { name: `App registry (${apps.length} apps)`, state: 'pending' },
@@ -35,7 +35,7 @@ export default function BootSequence() {
         if (cancelled) return;
         if (ready?.status !== 'ready') {
           update(1, 'failed', JSON.stringify(ready));
-          throw new Error('El backend todavía no está listo. Revisa DB, Redis y Tezcatlipoca.');
+          throw new Error('El backend todavía no está listo. Revisa DB y Redis.');
         }
         update(1, 'ok');
 
@@ -43,9 +43,15 @@ export default function BootSequence() {
         if (cancelled) return;
         update(2, 'ok');
 
-        await megalodonClient.tezcatlipoca.telemetry();
-        if (cancelled) return;
-        update(3, 'ok');
+        try {
+          await megalodonClient.tezcatlipoca.telemetry();
+          if (cancelled) return;
+          update(3, 'ok');
+        } catch (exc) {
+          if (cancelled) return;
+          const detail = exc instanceof Error ? exc.message : 'Servicio opcional no disponible';
+          update(3, 'failed', detail);
+        }
         update(4, 'ok');
         setTimeout(() => { if (!cancelled) { setFadeOut(true); setBootComplete(true); } }, 300);
       } catch (exc) {
@@ -63,7 +69,7 @@ export default function BootSequence() {
   return (
     <AnimatePresence>
       {!fadeOut && (
-        <motion.div exit={{ opacity: 0 }} transition={{ duration: 0.35 }} className="fixed inset-0 z-[50000] bg-[#030305] flex flex-col items-start justify-center" style={{ paddingLeft: '15%' }}>
+        <motion.div exit={{ opacity: 0 }} transition={{ duration: 0.35 }} className="fixed inset-0 z-50000 bg-[#030305] flex flex-col items-start justify-center" style={{ paddingLeft: '15%' }}>
           <div className="max-w-[780px] w-full">
             <div className="font-mono text-sm space-y-1.5 min-h-[240px]">
               {checks.map((check) => (
@@ -73,7 +79,7 @@ export default function BootSequence() {
                   </span>
                   <div>
                     <div className="text-[#8A8578]">{check.name}</div>
-                    {check.detail && <div className="text-[11px] text-[#D45A5A] max-w-[680px] break-words">{check.detail}</div>}
+                    {check.detail && <div className="text-[11px] text-[#D45A5A] max-w-[680px] wrap-break-word">{check.detail}</div>}
                   </div>
                 </div>
               ))}

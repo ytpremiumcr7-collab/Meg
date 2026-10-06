@@ -4,6 +4,8 @@ import copy
 from datetime import datetime, timezone
 from hashlib import sha256
 import json
+import structlog
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
@@ -20,6 +22,7 @@ from app.models.programacion import ProgramaObra
 from app.models.procurement import (
     PreparationRunStatus,
     ArtifactStatus,
+    RequirementStatus,
     SubmissionPackage,
     TenderApproval,
     TenderArtifact,
@@ -32,6 +35,7 @@ from app.models.procurement import (
     TenderRevision,
     TenderState,
     TenderValidationRun, JurisdictionInheritance, TenderDocument, TenderDocumentRevision,
+    TenderDependency,
 )
 from app.models.user import User
 from app.schemas.procurement.schemas import (
@@ -41,7 +45,7 @@ from app.schemas.procurement.schemas import (
     RequirementCreate,
     RevisionCreate,
     SemiAutoReviewPatch,
-    TenderCreate, JurisdictionProfileCreate, LegalSourceCreate, LegalRuleCreate,
+    TenderCreate, JurisdictionPackCreate, JurisdictionProfileCreate, LegalSourceCreate, LegalRuleCreate,
 )
 from app.engines.procurement.orchestrator import TenderOrchestrator
 from app.engines.procurement.compiler import ProcurementArtifactCompiler
@@ -61,6 +65,9 @@ from app.engines.procurement.proposition_bridge import build_economic_block, hyd
 from app.engines.procurement.format_field_map import load_format_catalog, normalize_format_code
 from app.models.bim import ModeloBIM
 from app.models.topografia import CalculoVolumen
+
+
+logger = structlog.get_logger()
 
 
 class ProcurementService:
@@ -524,7 +531,11 @@ class ProcurementService:
             TenderPackage.tenant_id == self.user.tenant_id,
         )
         if for_update:
-            stmt = stmt.with_for_update()
+            # IDs/tenant ownership remain immutable. Serialize writers with
+            # NO KEY UPDATE so the independently committed preparation trace
+            # can acquire its FK KEY SHARE lock on this same tender. FOR UPDATE
+            # caused run() to wait forever on its own trace transaction.
+            stmt = stmt.with_for_update(key_share=True)
         tender = await self.db.scalar(stmt)
         if tender is None:
             raise MegalodonException(ErrorCode.DOCUMENTO_NO_ENCONTRADO, "TenderPackage no encontrado.", 404)
@@ -1890,7 +1901,14 @@ class ProcurementService:
             # Artifacts materialized from a reference/case pack are working documents.
             # They are never submission-eligible unless the source model explicitly
             # binds them to an official tender template supplied by the authority.
-            case_spec = next((spec for spec in (case_pack.artifacts if case_pack is not None else ()) if spec.code == code), None)
+            case_spec = next(
+                (
+                    spec
+                    for spec in (case_pack.get("artifacts") or [])
+                    if spec.get("code") == code
+                ),
+                None,
+            ) if case_pack is not None else None
             official_template = bool(source_templates.get(code)) if case_pack is not None else False
             reference_only = bool(case_spec is not None and not official_template)
             artifact = TenderArtifact(
@@ -2074,6 +2092,8 @@ class ProcurementService:
             result = await self.orchestrator.run(self.db, tender, tracker=tracker)
             if result["findings"]:
                 tender.review_state = TenderState.BLOCKED.value
+                result['state'] = tender.state
+                result['review_state'] = tender.review_state
                 await self._commit()
                 await tracker.finish(
                     PreparationRunStatus.BLOCKED.value,

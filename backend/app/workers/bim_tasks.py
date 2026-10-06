@@ -96,7 +96,8 @@ def procesar_ifc(
         return asyncio.run(_run())
 
     except Exception as exc:
-        logger.warning("bim_tasks.procesar_ifc: fallo procesando IFC", modelo_id=modelo_id, error=str(exc))
+        error_message = str(exc)
+        logger.warning("bim_tasks.procesar_ifc: fallo procesando IFC", modelo_id=modelo_id, error=error_message)
         # Marcar el modelo en ERROR para que el frontend no quede en polling
         try:
             async def _marcar_error():
@@ -105,10 +106,10 @@ def procesar_ifc(
                 from sqlalchemy import select
                 from app.models.base import EstadoProceso
                 async with AsyncSessionLocal() as db:
-                    modelo = (await db.execute(select(ModeloBIM).where(ModeloBIM.id == UUID(modelo_id), ModeloBIM.expediente_id == UUID(expediente_id), ModeloBIM.tenant_id == UUID(tenant_id)))).scalar_one_or_none()
-                    if modelo:
+                    modelo = (await db.execute(select(ModeloBIM).where(ModeloBIM.id == UUID(modelo_id), ModeloBIM.expediente_id == UUID(expediente_id), ModeloBIM.tenant_id == UUID(tenant_id)).with_for_update())).scalar_one_or_none()
+                    if modelo and modelo.estado_procesamiento != EstadoProceso.COMPLETADO.value:
                         modelo.estado_procesamiento = EstadoProceso.ERROR.value
-                        modelo.error_procesamiento = str(exc)[:500]
+                        modelo.error_procesamiento = error_message[:500]
                         await db.commit()
             asyncio.run(_marcar_error())
         except Exception as marcar_exc:
@@ -120,7 +121,7 @@ def procesar_ifc(
             # ningún lado de qué pasó. Ahora al menos queda en logs.
             logger.error(
                 "bim_tasks.procesar_ifc: fallo al marcar modelo en ERROR",
-                modelo_id=modelo_id, error_original=str(exc), error_al_marcar=str(marcar_exc),
+                modelo_id=modelo_id, error_original=error_message, error_al_marcar=str(marcar_exc),
             )
 
         self.retry(countdown=60, exc=exc)
@@ -210,7 +211,8 @@ def generar_4d5d_desde_bim(
     except Exception as exc:
         from app.core.errors import MegalodonException as _MegalodonException
 
-        logger.warning("bim_tasks.generar_4d5d_desde_bim: fallo generando 4D/5D", generacion_id=generacion_id, error=str(exc))
+        error_message = str(exc)
+        logger.warning("bim_tasks.generar_4d5d_desde_bim: fallo generando 4D/5D", generacion_id=generacion_id, error=error_message)
 
         try:
             async def _marcar_error():
@@ -222,13 +224,13 @@ def generar_4d5d_desde_bim(
                     generacion = (await db.execute(select(GeneracionBIM4D5D).where(GeneracionBIM4D5D.id == _UUID(generacion_id), GeneracionBIM4D5D.tenant_id == _UUID(tenant_id)))).scalar_one_or_none()
                     if generacion:
                         generacion.estado = EstadoProceso.ERROR.value
-                        generacion.error = str(exc)[:500]
+                        generacion.error = error_message[:500]
                         await db.commit()
             asyncio.run(_marcar_error())
         except Exception as marcar_exc:
             logger.error(
                 "bim_tasks.generar_4d5d_desde_bim: fallo al marcar generación en ERROR",
-                generacion_id=generacion_id, error_original=str(exc), error_al_marcar=str(marcar_exc),
+                generacion_id=generacion_id, error_original=error_message, error_al_marcar=str(marcar_exc),
             )
 
         if isinstance(exc, _MegalodonException):

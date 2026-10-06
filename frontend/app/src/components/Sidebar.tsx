@@ -14,8 +14,8 @@ interface SidebarProps {
   onSelect: (id: string) => void;
 }
 
-function resolveIcon(name: string): React.ComponentType<{ className?: string }> {
-  const map = Icons as unknown as Record<string, React.ComponentType<{ className?: string }>>;
+function resolveIcon(name: string): Icons.LucideIcon {
+  const map = Icons as unknown as Record<string, Icons.LucideIcon>;
   return map[name] || Icons.AppWindow;
 }
 
@@ -24,17 +24,17 @@ export default function Sidebar({ activeId, onSelect }: SidebarProps) {
 
   return (
     <aside
-      className="flex flex-col h-full w-[224px] shrink-0 border-r"
+      className="flex flex-col h-full w-[68px] sm:w-[224px] shrink-0 border-r"
       style={{ background: 'var(--abyss)', borderColor: 'var(--border-subtle)' }}
     >
-      <div className="flex items-center gap-2.5 px-5 h-16 shrink-0 border-b" style={{ borderColor: 'var(--border-subtle)' }}>
+      <div className="flex items-center gap-2.5 px-3 sm:px-5 h-16 shrink-0 border-b" style={{ borderColor: 'var(--border-subtle)' }}>
         <div
           className="w-8 h-8 rounded-md flex items-center justify-center shrink-0"
           style={{ background: 'linear-gradient(135deg, var(--accent-gold-bright), var(--accent-gold-dim))' }}
         >
           <span className="text-[15px] font-bold text-[#12121A]" style={{ fontFamily: 'Cinzel, serif' }}>M</span>
         </div>
-        <div className="leading-tight">
+        <div className="hidden sm:block leading-tight">
           <div className="text-[13px] font-semibold tracking-wide" style={{ color: 'var(--text-primary)', fontFamily: 'Cinzel, serif' }}>
             MEGALODON
           </div>
@@ -68,7 +68,7 @@ export default function Sidebar({ activeId, onSelect }: SidebarProps) {
         })}
       </nav>
 
-      <div className="px-4 py-3.5 border-t text-[10px] leading-relaxed" style={{ borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }}>
+      <div className="hidden sm:block px-4 py-3.5 border-t text-[10px] leading-relaxed" style={{ borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }}>
         DOMINA. ANALIZA. CONSTRUYE. PROTEGE.
       </div>
     </aside>
@@ -81,7 +81,7 @@ function SidebarItem({
   isActive,
   onClick,
 }: {
-  icon: React.ComponentType<{ className?: string }>;
+  icon: Icons.LucideIcon;
   label: string;
   isActive: boolean;
   onClick: () => void;
@@ -89,6 +89,8 @@ function SidebarItem({
   return (
     <button
       onClick={onClick}
+      aria-label={label}
+      title={label}
       className="relative w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-left transition-colors group"
       style={{
         background: isActive ? 'var(--surface-elevated)' : 'transparent',
@@ -104,7 +106,7 @@ function SidebarItem({
         />
       )}
       <Icon className="w-[17px] h-[17px] shrink-0" />
-      <span className="text-[13px] font-medium truncate group-hover:text-[color:var(--text-primary)]" style={{ color: isActive ? 'var(--accent-gold-bright)' : undefined }}>
+      <span className="hidden sm:block text-[13px] font-medium truncate group-hover:text-(--text-primary)" style={{ color: isActive ? 'var(--accent-gold-bright)' : undefined }}>
         {label}
       </span>
     </button>

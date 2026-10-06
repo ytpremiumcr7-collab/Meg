@@ -307,6 +307,10 @@ class RedisClient:
         result = await self.execute("expire", lambda client: client.expire(key, seconds))
         return bool(result)
 
+    async def eval(self, script: str, numkeys: int, *args):
+        """Execute the atomic refresh-rotation script on the shared backend."""
+        return await self.execute('eval', lambda client: client.eval(script, numkeys, *args))
+
     async def pipeline(self):
         if self._client is None:
             connected = await self.connect()

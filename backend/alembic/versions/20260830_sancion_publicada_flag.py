@@ -23,7 +23,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "20260830_sancion_publicada_flag"
-down_revision = "20260829_tezcatlipoca_tables"
+down_revision = "20260827_legal_rule_active_requires_fundamento"
 branch_labels = None
 depends_on = None
 

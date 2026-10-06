@@ -2,8 +2,8 @@
  * Generador de Checklist según Procedimiento Detectado
  */
 import { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { CheckSquare, ListChecks, DollarSign, RefreshCw, Copy, CheckCircle2, Circle, AlertTriangle } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { ListChecks, RefreshCw, CheckCircle2, Circle, AlertTriangle } from 'lucide-react';
 import { megalodonClient } from '@/lib/api-client';
 import { claveProcedimiento, nombreProcedimiento, advertenciaConfiabilidad } from '../lib/procedimiento';
 
@@ -124,7 +124,7 @@ export default function ChecklistGenerator() {
           onChange={(e) => setMonto(e.target.value)}
           placeholder="Monto estimado ($)"
           className="flex-1 bg-zinc-800/60 border border-zinc-700 rounded-lg px-3 py-2 text-sm 
-                   text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-emerald-500/40"
+                   text-zinc-200 placeholder-zinc-600 focus:outline-hidden focus:border-emerald-500/40"
         />
         <button
           onClick={generar}
@@ -142,7 +142,7 @@ export default function ChecklistGenerator() {
         placeholder="Presupuesto autorizado de la dependencia (miles $)"
         title="El Anexo 9 del PEF es una tabla escalonada por este dato, no por el monto del contrato aislado."
         className="w-full mb-4 bg-zinc-800/60 border border-zinc-700 rounded-lg px-3 py-2 text-sm 
-                 text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-emerald-500/40"
+                 text-zinc-200 placeholder-zinc-600 focus:outline-hidden focus:border-emerald-500/40"
       />
 
       {procedimiento && (
