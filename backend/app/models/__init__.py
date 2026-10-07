@@ -73,6 +73,7 @@ from app.models.notifications import NotificationLog
 
 # ─── 13. Entitlements (planes, límites, uso, suscripciones) ─
 from app.models.montecarlo import MonteCarloRun, EstadoMonteCarlo
+from app.models.ocr_job import OCRJob, OCRJobStatus
 
 from app.models.procurement import (
     TenderPackage, TenderRevision, TenderDocument, TenderDocumentRevision, TenderLicitacionBridge, JurisdictionProfile, JurisdictionInheritance, ProcedureThreshold, LegalSource, LegalRule, TenderRuleDefinition,
