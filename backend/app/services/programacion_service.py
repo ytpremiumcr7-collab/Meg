@@ -7,6 +7,7 @@
 ProgramacionService - Gestión de programas de obra con CPM/PERT/EVM.
 """
 from datetime import datetime
+import math
 from typing import List, Optional, Dict, Any
 from uuid import UUID, uuid4
 
@@ -247,7 +248,7 @@ class ProgramacionService(BaseService[ProgramaObra]):
         # Actualizar programa
         programa.resultado_cpm = resultado.to_dict()
         programa.fecha_fin_plan = resultado.ruta_critica.fecha_fin
-        programa.duracion_plan_dias = resultado.duracion_total
+        programa.duracion_plan_dias = int(math.ceil(resultado.duracion_total))
 
         await self.db.commit()
 
