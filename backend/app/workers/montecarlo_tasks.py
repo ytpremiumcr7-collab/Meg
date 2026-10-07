@@ -18,16 +18,16 @@ class MonteCarloCancelled(Exception):
     """Cancelación solicitada por el usuario; no debe reintentarse."""
 
 
-@celery_app.task(bind=True, time_limit=1200, max_retries=2)
+@celery_app.task(bind=True, time_limit=1200, max_retries=2, acks_late=True, reject_on_worker_lost=True, track_started=True)
 def ejecutar_simulacion(self, task_id: str, run_id: str, data: dict):
     started = time.perf_counter()
 
-    async def _db_progress(progress: int) -> None:
+    async def _db_progress(progress: int) -> bool:
         from app.models.base import AsyncSessionLocal
         from app.services.montecarlo_service import MonteCarloService
 
         async with AsyncSessionLocal() as db:
-            await MonteCarloService(db, UUID(data["_tenant_id"])).actualizar_progreso(task_id, progress)
+            return await MonteCarloService(db, UUID(data["_tenant_id"])).actualizar_progreso(task_id, progress)
 
     async def _mark_started() -> bool:
         from app.models.base import AsyncSessionLocal
@@ -41,17 +41,23 @@ def ejecutar_simulacion(self, task_id: str, run_id: str, data: dict):
         async with AsyncSessionLocal() as db:
             return await MonteCarloService(db, UUID(data["_tenant_id"])).esta_cancelada(task_id)
 
-    async def _mark_complete(resultado: dict, execution_ms: int) -> None:
+    async def _mark_complete(resultado: dict, execution_ms: int) -> bool:
         from app.models.base import AsyncSessionLocal
         from app.services.montecarlo_service import MonteCarloService
         async with AsyncSessionLocal() as db:
-            await MonteCarloService(db, UUID(data["_tenant_id"])).completar(task_id, resultado, execution_ms)
+            return await MonteCarloService(db, UUID(data["_tenant_id"])).completar(task_id, resultado, execution_ms)
 
-    async def _mark_failed(exc: Exception, execution_ms: int) -> None:
+    async def _mark_failed(exc: Exception, execution_ms: int) -> bool:
         from app.models.base import AsyncSessionLocal
         from app.services.montecarlo_service import MonteCarloService
         async with AsyncSessionLocal() as db:
-            await MonteCarloService(db, UUID(data["_tenant_id"])).fallar(task_id, exc, execution_ms)
+            return await MonteCarloService(db, UUID(data["_tenant_id"])).fallar(task_id, exc, execution_ms)
+
+    async def _prepare_retry() -> bool:
+        from app.models.base import AsyncSessionLocal
+        from app.services.montecarlo_service import MonteCarloService
+        async with AsyncSessionLocal() as db:
+            return await MonteCarloService(db, UUID(data["_tenant_id"])).preparar_reintento(task_id)
 
     try:
         started_ok = asyncio.run(_mark_started())
@@ -100,7 +106,11 @@ def ejecutar_simulacion(self, task_id: str, run_id: str, data: dict):
         )
         payload = resultado.to_dict()
         execution_ms = int((time.perf_counter() - started) * 1000)
-        asyncio.run(_mark_complete(payload, execution_ms))
+        completed = asyncio.run(_mark_complete(payload, execution_ms))
+        if not completed:
+            if asyncio.run(_is_cancelled()):
+                return {"status": "CANCELADO", "run_id": run_id, "task_id": task_id}
+            return {"status": "IGNORED_STALE_ATTEMPT", "run_id": run_id, "task_id": task_id}
         return {
             "status": "SUCCESS",
             "run_id": run_id,
@@ -112,11 +122,14 @@ def ejecutar_simulacion(self, task_id: str, run_id: str, data: dict):
         return {"status": "CANCELADO", "run_id": run_id, "task_id": task_id}
     except Exception as exc:
         execution_ms = int((time.perf_counter() - started) * 1000)
+        if asyncio.run(_is_cancelled()):
+            return {"status": "CANCELADO", "run_id": run_id, "task_id": task_id}
         logger.exception("montecarlo_task_failed", task_id=task_id, run_id=run_id, error=str(exc))
         if self.request.retries < self.max_retries:
-            try:
-                asyncio.run(_db_progress(0))
-            finally:
+            if asyncio.run(_prepare_retry()):
                 raise self.retry(countdown=30 * (self.request.retries + 1), exc=exc)
+            if asyncio.run(_is_cancelled()):
+                return {"status": "CANCELADO", "run_id": run_id, "task_id": task_id}
+            return {"status": "IGNORED_STALE_ATTEMPT", "run_id": run_id, "task_id": task_id}
         asyncio.run(_mark_failed(exc, execution_ms))
         raise
