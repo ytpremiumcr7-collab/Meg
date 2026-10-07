@@ -134,27 +134,30 @@ async def test_crear_programa_rolls_back_persisted_rows_when_cpm_rejects_cycle(
     db_session.add(expediente)
     await db_session.commit()
     await db_session.refresh(expediente)
+    expediente_id = expediente.id
+    tenant_id = tenant.id
+    user_id = user.id
 
-    service = ProgramacionService(db_session, tenant.id)
+    service = ProgramacionService(db_session, tenant_id)
 
     with pytest.raises(MegalodonException):
         await service.crear_programa(
-            expediente_id=expediente.id,
+            expediente_id=expediente_id,
             nombre="Programa ciclico",
             fecha_inicio=datetime(2026, 10, 7, 8, 0, 0),
             actividades_data=[
                 {"id": "A", "nombre": "A", "duracion": 2, "predecesoras": ["B"]},
                 {"id": "B", "nombre": "B", "duracion": 3, "predecesoras": ["A"]},
             ],
-            creado_por_id=user.id,
-            tenant_id=tenant.id,
+            creado_por_id=user_id,
+            tenant_id=tenant_id,
         )
 
     persisted = (
         await db_session.execute(
             select(ProgramaObra).where(
-                ProgramaObra.expediente_id == expediente.id,
-                ProgramaObra.tenant_id == tenant.id,
+                ProgramaObra.expediente_id == expediente_id,
+                ProgramaObra.tenant_id == tenant_id,
             )
         )
     ).scalars().all()
