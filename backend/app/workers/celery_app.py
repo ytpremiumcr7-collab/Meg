@@ -42,5 +42,9 @@ celery_app.conf.update(
             "task": "app.workers.procurement_reconciliation.reconcile_procurement_storage",
             "schedule": 300.0,
         },
+        "procurement-job-reconciliation": {
+            "task": "app.workers.procurement_reconciliation.reconcile_procurement_jobs",
+            "schedule": 30.0,
+        },
     },
 )
