@@ -48,6 +48,8 @@ class OCRService:
         self,
         presupuesto_id: UUID,
         resultado: ResultadoOCR,
+        *,
+        auto_commit: bool = True,
     ) -> None:
         """Crea partidas sugeridas en un presupuesto desde metrados OCR.
 
@@ -106,7 +108,10 @@ class OCRService:
             )
             self.db.add(partida)
 
-        await self.db.commit()
+        if auto_commit:
+            await self.db.commit()
+        else:
+            await self.db.flush()
 
     async def validar_metrados(
         self,
