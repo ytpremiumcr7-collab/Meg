@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
+import json
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ErrorCode, MegalodonException
@@ -44,6 +46,45 @@ class OCRJobService:
                 status_code=404,
             )
 
+    @staticmethod
+    def request_hash(
+        *,
+        source_bytes: bytes,
+        filename: str,
+        presupuesto_id: UUID | None,
+    ) -> str:
+        payload = {
+            "source_sha256": sha256(source_bytes).hexdigest(),
+            "filename": filename,
+            "presupuesto_id": str(presupuesto_id) if presupuesto_id else None,
+        }
+        return sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+
+    async def recuperar_por_idempotencia(
+        self,
+        key: str | None,
+        request_hash: str,
+    ) -> OCRJob | None:
+        if not key:
+            return None
+        row = await self.db.scalar(
+            select(OCRJob).where(
+                OCRJob.tenant_id == self.tenant_id,
+                OCRJob.idempotency_key == key,
+            )
+        )
+        if row is None:
+            return None
+        if row.request_hash != request_hash:
+            raise MegalodonException(
+                ErrorCode.CONFLICT,
+                "La Idempotency-Key OCR ya fue utilizada para otra entrada.",
+                status_code=409,
+            )
+        return row
+
     async def crear(
         self,
         *,
@@ -54,14 +95,29 @@ class OCRJobService:
         storage_path: str,
         source_bytes: bytes,
         presupuesto_id: UUID | None,
-    ) -> OCRJob:
+        idempotency_key: str | None = None,
+        request_hash: str | None = None,
+    ) -> tuple[OCRJob, bool]:
         await self.validar_presupuesto(presupuesto_id)
+        req_hash = request_hash or self.request_hash(
+            source_bytes=source_bytes,
+            filename=filename,
+            presupuesto_id=presupuesto_id,
+        )
+        existing = await self.recuperar_por_idempotencia(
+            idempotency_key, req_hash
+        )
+        if existing is not None:
+            return existing, True
+
         row = OCRJob(
             id=job_id,
             tenant_id=self.tenant_id,
             creado_por_id=user.id,
             actualizado_por_id=user.id,
             task_id=str(job_id),
+            idempotency_key=idempotency_key,
+            request_hash=req_hash,
             filename=filename,
             content_type=content_type,
             storage_path=storage_path,
@@ -74,9 +130,18 @@ class OCRJobService:
             result={},
         )
         self.db.add(row)
-        await self.db.commit()
+        try:
+            await self.db.commit()
+        except IntegrityError:
+            await self.db.rollback()
+            existing = await self.recuperar_por_idempotencia(
+                idempotency_key, req_hash
+            )
+            if existing is not None:
+                return existing, True
+            raise
         await self.db.refresh(row)
-        return row
+        return row, False
 
     async def publicar(self, job_id: UUID) -> OCRJob:
         """Publica un PENDING bajo lock sólo del OCRJob correspondiente."""
