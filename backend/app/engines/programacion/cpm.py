@@ -204,8 +204,77 @@ class MotorCPM:
         self.actividades: Dict[str, Actividad] = {}
 
     def agregar_actividad(self, actividad: Actividad) -> None:
-        """Agrega una actividad al programa."""
+        """Agrega una actividad sin permitir que un identificador pise otra."""
+        if not actividad.id:
+            raise MegalodonException(
+                ErrorCode.VALIDACION_FALLIDA,
+                "La actividad requiere un identificador no vacío.",
+            )
+        if actividad.id in self.actividades:
+            raise MegalodonException(
+                ErrorCode.CONFLICT,
+                f"El identificador de actividad {actividad.id} está duplicado.",
+                details={"actividad_id": actividad.id},
+            )
         self.actividades[actividad.id] = actividad
+
+    def _sumar_duracion(
+        self,
+        inicio: datetime,
+        duracion: float,
+        usar_calendario: bool,
+    ) -> datetime:
+        """Suma duración conservando fracciones de día."""
+        if not usar_calendario:
+            return inicio + timedelta(days=duracion)
+        completos = int(duracion)
+        fraccion = float(duracion) - completos
+        fin = self.calendario.sumar_dias_habiles(inicio, completos)
+        if fraccion:
+            fin = fin + timedelta(days=fraccion)
+        return fin
+
+    def _restar_duracion(
+        self,
+        fin: datetime,
+        duracion: float,
+        usar_calendario: bool,
+    ) -> datetime:
+        """Resta duración usando la misma convención que _sumar_duracion."""
+        if not usar_calendario:
+            return fin - timedelta(days=duracion)
+        completos = int(duracion)
+        fraccion = float(duracion) - completos
+        inicio = self.calendario.restar_dias_habiles(fin, completos)
+        if fraccion:
+            inicio = inicio - timedelta(days=fraccion)
+        return inicio
+
+    def _duracion_entre(
+        self,
+        inicio: datetime,
+        fin: datetime,
+        usar_calendario: bool,
+    ) -> float:
+        """Duración del proyecto en las mismas unidades usadas por el motor."""
+        if fin <= inicio:
+            return 0.0
+        if not usar_calendario:
+            return (fin - inicio).total_seconds() / 86400
+
+        cursor = inicio
+        dias = 0.0
+        while cursor + timedelta(days=1) <= fin:
+            cursor = cursor + timedelta(days=1)
+            fecha = cursor.date() if hasattr(cursor, "date") else cursor
+            if self.calendario.es_dia_habil(fecha):
+                dias += 1.0
+        restante = (fin - cursor).total_seconds() / 86400
+        if restante > 0:
+            fecha_fin = fin.date() if hasattr(fin, "date") else fin
+            if self.calendario.es_dia_habil(fecha_fin):
+                dias += restante
+        return dias
 
     def _detectar_ciclos(self) -> Optional[List[str]]:
         """
@@ -281,9 +350,7 @@ class MotorCPM:
         fecha_inicio: datetime,
         usar_calendario: bool = True,
     ) -> ResultadoCPM:
-        """
-        Calcula CPM completo: forward pass, backward pass, ruta crítica.
-        """
+        """Calcula CPM completo con relaciones FS/SS/FF/SF."""
         if not self.actividades:
             raise MegalodonException(
                 ErrorCode.NORMATIVO_GENERICO,
@@ -303,37 +370,86 @@ class MotorCPM:
                 details={"predecesoras_inexistentes": missing},
             )
 
+        for act in self.actividades.values():
+            for pred in act.predecesoras:
+                raw = act.dependencias.get(pred, TipoDependencia.FIN_INICIO)
+                try:
+                    act.dependencias[pred] = TipoDependencia(raw)
+                except ValueError as exc:
+                    raise MegalodonException(
+                        ErrorCode.VALIDACION_FALLIDA,
+                        f"Tipo de dependencia inválido entre {pred} y {act.id}: {raw}",
+                        details={"predecesora": pred, "actividad": act.id, "tipo": str(raw)},
+                    ) from exc
+
         ciclo = self._detectar_ciclos()
         if ciclo:
             raise MegalodonException(
                 ErrorCode.NORMATIVO_GENERICO,
                 "El programa tiene una dependencia circular entre "
                 f"actividades: {' -> '.join(ciclo)}. Corrige las "
-                "predecesoras antes de calcular CPM -- con un ciclo, "
-                "el forward pass no puede resolver fechas para las "
-                "actividades atrapadas en él.",
+                "predecesoras antes de calcular CPM.",
                 details={"ciclo": ciclo},
             )
 
-        # Forward pass: calcular inicio/fin temprano
+        # Las sucesoras son una proyección del grafo de predecesoras. Se
+        # reconstruyen en cada cálculo para no depender de estado viejo del
+        # llamador y para que el backward pass use exactamente el mismo grafo.
+        for act in self.actividades.values():
+            act.sucesoras = []
+            act.inicio_temprano = None
+            act.fin_temprano = None
+            act.inicio_tardio = None
+            act.fin_tardio = None
+            act.holgura_total = 0.0
+            act.holgura_libre = 0.0
+            act.en_ruta_critica = False
+        for act in self.actividades.values():
+            for pred in act.predecesoras:
+                self.actividades[pred].sucesoras.append(act.id)
+
         self._forward_pass(fecha_inicio, usar_calendario)
 
-        # Backward pass: calcular inicio/fin tardío
+        unresolved = [
+            act.id for act in self.actividades.values()
+            if act.inicio_temprano is None or act.fin_temprano is None
+        ]
+        if unresolved:
+            raise MegalodonException(
+                ErrorCode.VALIDACION_FALLIDA,
+                "No fue posible resolver las fechas tempranas del programa.",
+                details={"actividades_sin_fecha": unresolved},
+            )
+
         fecha_fin_proyecto = max(
-            (a.fin_temprano for a in self.actividades.values() if a.fin_temprano),
-            default=fecha_inicio,
+            a.fin_temprano for a in self.actividades.values()
+            if a.fin_temprano is not None
         )
         self._backward_pass(fecha_fin_proyecto, usar_calendario)
 
-        # Calcular holguras y ruta crítica
+        unresolved_late = [
+            act.id for act in self.actividades.values()
+            if act.inicio_tardio is None or act.fin_tardio is None
+        ]
+        if unresolved_late:
+            raise MegalodonException(
+                ErrorCode.VALIDACION_FALLIDA,
+                "No fue posible resolver las fechas tardías del programa.",
+                details={"actividades_sin_fecha_tardia": unresolved_late},
+            )
+
         self._calcular_holguras()
 
-        # Generar datos para visualización
         gantt = self._generar_gantt()
         curva_s = self._generar_curva_s()
         diagrama_red = self._generar_diagrama_red()
 
-        # Identificar ruta crítica
+        duracion_total = self._duracion_entre(
+            fecha_inicio,
+            fecha_fin_proyecto,
+            usar_calendario,
+        )
+
         actividades_criticas = [
             a for a in self.actividades.values() if a.en_ruta_critica
         ]
@@ -341,17 +457,11 @@ class MotorCPM:
 
         ruta_critica = RutaCritica(
             actividades_criticas=actividades_criticas,
-            duracion_total=sum(a.duracion for a in actividades_criticas),
+            duracion_total=duracion_total,
             fecha_inicio=fecha_inicio,
             fecha_fin=fecha_fin_proyecto,
             holgura_total_proyecto=0.0,
         )
-
-        duracion_total = max(
-            (a.fin_temprano - a.inicio_temprano).days
-            for a in self.actividades.values()
-            if a.fin_temprano and a.inicio_temprano
-        ) if any(a.fin_temprano for a in self.actividades.values()) else 0
 
         return ResultadoCPM(
             actividades=dict(self.actividades),
@@ -363,21 +473,16 @@ class MotorCPM:
         )
 
     def _forward_pass(self, fecha_inicio: datetime, usar_calendario: bool) -> None:
-        """Forward pass: calcula inicio y fin temprano."""
-        # Inicializar actividades sin predecesoras
+        """Forward pass para relaciones FS, SS, FF y SF."""
         for act in self.actividades.values():
             if not act.predecesoras:
                 act.inicio_temprano = fecha_inicio
-                if usar_calendario:
-                    act.fin_temprano = self.calendario.sumar_dias_habiles(
-                        fecha_inicio, int(act.duracion)
-                    )
-                else:
-                    act.fin_temprano = fecha_inicio + timedelta(days=act.duracion)
+                act.fin_temprano = self._sumar_duracion(
+                    fecha_inicio, act.duracion, usar_calendario
+                )
 
-        # Iterar hasta que todas tengan fechas
         cambios = True
-        max_iter = len(self.actividades) * 2
+        max_iter = max(1, len(self.actividades) * 2)
         iter_count = 0
 
         while cambios and iter_count < max_iter:
@@ -388,97 +493,131 @@ class MotorCPM:
                 if act.inicio_temprano is not None:
                     continue
 
-                # Verificar que todas las predecesoras tengan fin temprano
-                pred_fechas = []
-                for pred_id in act.predecesoras:
-                    pred = self.actividades.get(pred_id)
-                    if pred and pred.fin_temprano:
-                        pred_fechas.append(pred.fin_temprano)
-
-                if len(pred_fechas) == len(act.predecesoras) and pred_fechas:
-                    inicio = max(pred_fechas)
-                    act.inicio_temprano = inicio
-
-                    if usar_calendario:
-                        act.fin_temprano = self.calendario.sumar_dias_habiles(
-                            inicio, int(act.duracion)
-                        )
-                    else:
-                        act.fin_temprano = inicio + timedelta(days=act.duracion)
-
-                    cambios = True
-
-    def _backward_pass(self, fecha_fin: datetime, usar_calendario: bool) -> None:
-        """Backward pass: calcula inicio y fin tardío."""
-        # Inicializar actividades sin sucesoras
-        for act in self.actividades.values():
-            if not act.sucesoras:
-                act.fin_tardio = fecha_fin
-                if usar_calendario:
-                    act.inicio_tardio = self.calendario.restar_dias_habiles(
-                        fecha_fin, int(act.duracion)
-                    )
-                else:
-                    act.inicio_tardio = fecha_fin - timedelta(days=act.duracion)
-
-        # Iterar hacia atrás
-        cambios = True
-        max_iter = len(self.actividades) * 2
-        iter_count = 0
-
-        while cambios and iter_count < max_iter:
-            cambios = False
-            iter_count += 1
-
-            for act in self.actividades.values():
-                if act.fin_tardio is not None:
+                preds = [self.actividades[pred_id] for pred_id in act.predecesoras]
+                if any(
+                    pred.inicio_temprano is None or pred.fin_temprano is None
+                    for pred in preds
+                ):
                     continue
 
-                # Verificar que todas las sucesoras tengan inicio tardío
-                succ_fechas = []
-                for succ_id in act.sucesoras:
-                    succ = self.actividades.get(succ_id)
-                    if succ and succ.inicio_tardio:
-                        succ_fechas.append(succ.inicio_tardio)
-
-                if len(succ_fechas) == len(act.sucesoras) and succ_fechas:
-                    fin = min(succ_fechas)
-                    act.fin_tardio = fin
-
-                    if usar_calendario:
-                        act.inicio_tardio = self.calendario.restar_dias_habiles(
-                            fin, int(act.duracion)
+                candidatos = [fecha_inicio]
+                for pred_id, pred in zip(act.predecesoras, preds):
+                    relacion = act.dependencias.get(
+                        pred_id, TipoDependencia.FIN_INICIO
+                    )
+                    if relacion == TipoDependencia.FIN_INICIO:
+                        candidato = pred.fin_temprano
+                    elif relacion == TipoDependencia.INICIO_INICIO:
+                        candidato = pred.inicio_temprano
+                    elif relacion == TipoDependencia.FIN_FIN:
+                        candidato = self._restar_duracion(
+                            pred.fin_temprano, act.duracion, usar_calendario
                         )
-                    else:
-                        act.inicio_tardio = fin - timedelta(days=act.duracion)
+                    else:  # INICIO_FIN / SF
+                        candidato = self._restar_duracion(
+                            pred.inicio_temprano, act.duracion, usar_calendario
+                        )
+                    candidatos.append(candidato)
 
-                    cambios = True
+                inicio = max(candidatos)
+                act.inicio_temprano = inicio
+                act.fin_temprano = self._sumar_duracion(
+                    inicio, act.duracion, usar_calendario
+                )
+                cambios = True
+
+    def _backward_pass(self, fecha_fin: datetime, usar_calendario: bool) -> None:
+        """Backward pass coherente con relaciones FS, SS, FF y SF."""
+        pendientes = set(self.actividades)
+        max_iter = max(1, len(self.actividades) * 2)
+        iter_count = 0
+
+        while pendientes and iter_count < max_iter:
+            iter_count += 1
+            progreso = False
+
+            for act_id in list(pendientes):
+                act = self.actividades[act_id]
+                sucesoras = [self.actividades[sid] for sid in act.sucesoras]
+                if any(
+                    succ.inicio_tardio is None or succ.fin_tardio is None
+                    for succ in sucesoras
+                ):
+                    continue
+
+                # Toda actividad debe terminar, como máximo, al cierre del
+                # proyecto aunque una relación SS/SF por sí sola no lo exija.
+                candidatos_inicio = [
+                    self._restar_duracion(
+                        fecha_fin, act.duracion, usar_calendario
+                    )
+                ]
+                for succ in sucesoras:
+                    relacion = succ.dependencias.get(
+                        act.id, TipoDependencia.FIN_INICIO
+                    )
+                    if relacion == TipoDependencia.FIN_INICIO:
+                        candidato = self._restar_duracion(
+                            succ.inicio_tardio, act.duracion, usar_calendario
+                        )
+                    elif relacion == TipoDependencia.INICIO_INICIO:
+                        candidato = succ.inicio_tardio
+                    elif relacion == TipoDependencia.FIN_FIN:
+                        candidato = self._restar_duracion(
+                            succ.fin_tardio, act.duracion, usar_calendario
+                        )
+                    else:  # INICIO_FIN / SF
+                        candidato = succ.fin_tardio
+                    candidatos_inicio.append(candidato)
+
+                inicio = min(candidatos_inicio)
+                act.inicio_tardio = inicio
+                act.fin_tardio = self._sumar_duracion(
+                    inicio, act.duracion, usar_calendario
+                )
+                pendientes.remove(act_id)
+                progreso = True
+
+            if not progreso:
+                break
 
     def _calcular_holguras(self) -> None:
-        """Calcula holguras totales y libres, identifica ruta crítica."""
+        """Calcula holguras respetando el tipo de cada dependencia."""
         for act in self.actividades.values():
-            if act.inicio_temprano and act.inicio_tardio:
+            if act.inicio_temprano is not None and act.inicio_tardio is not None:
                 act.holgura_total = (
                     act.inicio_tardio - act.inicio_temprano
                 ).total_seconds() / 86400
 
-            # Holgura libre: diferencia entre inicio temprano de sucesora y fin temprano
-            if act.sucesoras:
-                succ_inicios = []
-                for succ_id in act.sucesoras:
-                    succ = self.actividades.get(succ_id)
-                    if succ and succ.inicio_temprano:
-                        succ_inicios.append(succ.inicio_temprano)
+            holguras_libres = []
+            for succ_id in act.sucesoras:
+                succ = self.actividades.get(succ_id)
+                if (
+                    succ is None
+                    or succ.inicio_temprano is None
+                    or succ.fin_temprano is None
+                    or act.inicio_temprano is None
+                    or act.fin_temprano is None
+                ):
+                    continue
+                relacion = succ.dependencias.get(
+                    act.id, TipoDependencia.FIN_INICIO
+                )
+                if relacion == TipoDependencia.FIN_INICIO:
+                    delta = succ.inicio_temprano - act.fin_temprano
+                elif relacion == TipoDependencia.INICIO_INICIO:
+                    delta = succ.inicio_temprano - act.inicio_temprano
+                elif relacion == TipoDependencia.FIN_FIN:
+                    delta = succ.fin_temprano - act.fin_temprano
+                else:  # INICIO_FIN / SF
+                    delta = succ.fin_temprano - act.inicio_temprano
+                holguras_libres.append(delta.total_seconds() / 86400)
 
-                if succ_inicios and act.fin_temprano:
-                    min_succ_inicio = min(succ_inicios)
-                    act.holgura_libre = (
-                        min_succ_inicio - act.fin_temprano
-                    ).total_seconds() / 86400
-            else:
-                act.holgura_libre = act.holgura_total
-
-            # Ruta crítica: holgura total = 0 (o muy cercana)
+            act.holgura_libre = (
+                min(holguras_libres)
+                if holguras_libres
+                else act.holgura_total
+            )
             act.en_ruta_critica = abs(act.holgura_total) < 0.001
 
     def calcular_pert(
@@ -486,68 +625,61 @@ class MotorCPM:
         fecha_inicio: datetime,
         fecha_objetivo: Optional[datetime] = None,
     ) -> ResultadoPERT:
-        """
-        Calcula PERT (Program Evaluation and Review Technique).
-        Usa tres estimaciones de duración.
-        """
-        duraciones_esperadas = []
-        varianzas = []
+        """Calcula PERT sobre el mismo grafo CPM, incluyendo tareas deterministas."""
+        from scipy import stats
+
+        varianza_por_id: Dict[str, float] = {}
 
         for act in self.actividades.values():
-            if act.duracion_optimista and act.duracion_probable and act.duracion_pesimista:
-                # Fórmula PERT: (o + 4m + p) / 6
+            if (
+                act.duracion_optimista is not None
+                and act.duracion_probable is not None
+                and act.duracion_pesimista is not None
+            ):
                 esperada = (
-                    act.duracion_optimista +
-                    4 * act.duracion_probable +
-                    act.duracion_pesimista
+                    act.duracion_optimista
+                    + 4 * act.duracion_probable
+                    + act.duracion_pesimista
                 ) / 6
-
-                # Varianza: ((p - o) / 6)²
-                varianza = ((act.duracion_pesimista - act.duracion_optimista) / 6) ** 2
-
-                duraciones_esperadas.append(esperada)
-                varianzas.append(varianza)
-
-                # Actualizar duración para CPM
+                varianza = (
+                    (act.duracion_pesimista - act.duracion_optimista) / 6
+                ) ** 2
                 act.duracion = esperada
+                varianza_por_id[act.id] = varianza
             else:
-                duraciones_esperadas.append(act.duracion)
-                varianzas.append(0)
+                varianza_por_id[act.id] = 0.0
 
-        # Recalcular CPM con duraciones esperadas
         resultado_cpm = self.calcular_cpm(fecha_inicio)
         duracion_esperada = resultado_cpm.duracion_total
 
-        # Varianza total de la ruta crítica
         varianza_total = sum(
-            varianzas[i]
-            for i, act in enumerate(self.actividades.values())
+            varianza_por_id.get(act.id, 0.0)
+            for act in self.actividades.values()
             if act.en_ruta_critica
         )
+        desviacion = float(np.sqrt(varianza_total))
 
-        desviacion = np.sqrt(varianza_total)
-
-        # Probabilidad de terminar a tiempo
         probabilidad = 0.5
         if fecha_objetivo and duracion_esperada > 0:
-            dias_objetivo = (fecha_objetivo - fecha_inicio).days
-            z = (dias_objetivo - duracion_esperada) / desviacion if desviacion > 0 else 0
-            from scipy import stats
-            probabilidad = stats.norm.cdf(z)
+            dias_objetivo = (fecha_objetivo - fecha_inicio).total_seconds() / 86400
+            if desviacion > 0:
+                z = (dias_objetivo - duracion_esperada) / desviacion
+                probabilidad = float(stats.norm.cdf(z))
+            else:
+                probabilidad = 1.0 if dias_objetivo >= duracion_esperada else 0.0
 
-        # Percentiles
         percentiles = {}
         if desviacion > 0:
             for p in [10, 25, 50, 75, 90, 95]:
-                dias = duracion_esperada + stats.norm.ppf(p/100) * desviacion
-                percentiles[f"p{p}"] = dias
+                dias = duracion_esperada + stats.norm.ppf(p / 100) * desviacion
+                percentiles[f"p{p}"] = float(dias)
 
         return ResultadoPERT(
             duracion_esperada=duracion_esperada,
             varianza_total=varianza_total,
             desviacion_estandar=desviacion,
             probabilidad_terminar_a_tiempo=probabilidad,
-            fecha_probable_terminacion=fecha_inicio + timedelta(days=int(duracion_esperada)),
+            fecha_probable_terminacion=fecha_inicio + timedelta(days=duracion_esperada),
             percentiles=percentiles,
         )
 
