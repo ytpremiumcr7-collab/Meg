@@ -43,6 +43,8 @@ async def _execute(job_id: str, user_id: str, tenant_id: str, tender_id: str):
         job.status = "RUNNING"
         job.progress = 5
         job.started_at = datetime.now(timezone.utc)
+        job.error_code = None
+        job.error_message = None
         await db.commit()
 
         user = await db.get(User, UUID(user_id))
