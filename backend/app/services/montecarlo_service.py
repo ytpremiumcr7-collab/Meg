@@ -446,23 +446,39 @@ class MonteCarloService:
         return payload
 
     async def publicar_pendiente(self, run: MonteCarloRun) -> bool:
-        """Publica una intención durable del dominio Monte Carlo.
+        """Publica una intención durable sin tabla universal de jobs.
 
-        No existe una tabla universal de jobs: MonteCarloRun sigue siendo la
-        fuente de verdad de este dominio. El task_id persistido actúa como
-        identidad estable frente a reintentos de publicación.
+        El lock es local a MonteCarloRun: serializa replays/reconciliadores del
+        mismo run. El worker puede aceptar PENDIENTE, así que una caída después
+        de que el broker acepte pero antes del commit sigue siendo recuperable.
         """
-        if run.estado != EstadoMonteCarlo.PENDIENTE.value:
+        locked = await self.db.scalar(
+            select(MonteCarloRun)
+            .where(
+                MonteCarloRun.id == run.id,
+                MonteCarloRun.tenant_id == run.tenant_id,
+            )
+            .with_for_update()
+        )
+        if locked is None or locked.estado != EstadoMonteCarlo.PENDIENTE.value:
+            await self.db.rollback()
             return False
 
         from app.workers.celery_app import celery_app
 
-        celery_app.send_task(
-            "app.workers.montecarlo_tasks.ejecutar_simulacion",
-            args=[run.task_id, str(run.id), self.payload_worker(run)],
-            task_id=run.task_id,
-        )
-        await self.marcar_encolado(run.id, run.tenant_id)
+        try:
+            celery_app.send_task(
+                "app.workers.montecarlo_tasks.ejecutar_simulacion",
+                args=[locked.task_id, str(locked.id), self.payload_worker(locked)],
+                task_id=locked.task_id,
+            )
+        except Exception:
+            await self.db.rollback()
+            raise
+
+        locked.estado = EstadoMonteCarlo.ENCOLADO.value
+        locked.progreso = 0
+        await self.db.commit()
         return True
 
     @classmethod
