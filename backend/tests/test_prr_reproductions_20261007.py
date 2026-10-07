@@ -24,7 +24,9 @@ from app.services.procurement.jobs import ProcurementJobService
 from app.services.procurement.service import ProcurementService
 from app.services.programacion_service import ProgramacionService
 from app.modules.documentos.service import DocumentoModuleService
+from app.modules.search.service import SearchService
 from app.services.topografia_service import TopografiaService
+from app.services.documento_service import DocumentoService
 
 
 def _expediente(*, tenant_id, user_id, suffix: str) -> ExpedienteObra:
@@ -392,3 +394,50 @@ async def test_topography_rejects_volume_between_surfaces_from_different_expedie
             superficie_proyecto_id=sup_b.id,
             creado_por_id=user.id,
         )
+
+
+
+@pytest.mark.asyncio
+async def test_global_search_uses_real_licitacion_folio_field(db_session, tenant_a_user):
+    tenant, _user = tenant_a_user
+
+    result = await SearchService(db_session).busqueda_global(
+        "sin-resultados-audit",
+        dominios=["licitaciones"],
+        tenant_id=tenant.id,
+    )
+
+    assert result["total"] == 0
+    assert result["total_por_dominio"]["licitaciones"] == 0
+
+
+@pytest.mark.asyncio
+async def test_legacy_document_upload_persists_without_passing_unknown_tenant_field(
+    db_session, tenant_a_user, monkeypatch
+):
+    tenant, user = tenant_a_user
+    expediente = _expediente(tenant_id=tenant.id, user_id=user.id, suffix="DOC-UPLOAD")
+    db_session.add(expediente)
+    await db_session.commit()
+    await db_session.refresh(expediente)
+
+    fake_storage = SimpleNamespace(
+        bucket="audit-documents",
+        subir=AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        "app.services.documento_service.storage_documentos",
+        lambda: fake_storage,
+    )
+
+    documento = await DocumentoService(db_session, tenant.id).subir_documento(
+        expediente_id=expediente.id,
+        file_content=b"contenido-auditoria",
+        filename="evidencia.txt",
+        tipo_documental="OTRO",
+        cifrar=False,
+        tenant_id=str(tenant.id),
+        creado_por_id=user.id,
+    )
+
+    assert documento.expediente_id == expediente.id
