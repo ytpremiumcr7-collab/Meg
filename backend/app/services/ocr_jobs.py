@@ -186,6 +186,7 @@ class OCRJobService:
                 ErrorCode.ARCHIVO_ERROR,
                 "No se pudo confirmar la publicación OCR; quedó pendiente para reconciliación.",
                 status_code=503,
+                details={"job_id": str(job.id), "task_id": job.task_id},
             ) from exc
 
         job.status = OCRJobStatus.QUEUED.value
