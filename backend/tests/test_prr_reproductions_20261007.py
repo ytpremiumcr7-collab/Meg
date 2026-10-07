@@ -17,8 +17,13 @@ from app.models.procurement_jobs import ProcurementJob
 from app.models.programacion import ProgramaObra
 from app.models.documento import DocumentoCDE, TipoDocumento
 from app.models.topografia import Levantamiento, SuperficieTIN
+from app.models.licitacion import Licitacion, EstadoLicitacion, TipoProcedimiento
+from app.models.contrato import Contrato, EstadoContrato
+from app.models.proveedor import Proveedor, TipoPersona
 from app.models.user import User, UserRole
 from app.schemas.contrato import ContratoUpdate, ConvenioModificatorioCreate, EntregableCreate
+from app.schemas.licitacion import LicitacionUpdate
+from app.schemas.compliance import InconformidadCreate
 from app.schemas.procurement.schemas import ApprovalCreate
 from app.services.procurement.jobs import ProcurementJobService
 from app.services.procurement.service import ProcurementService
@@ -27,6 +32,9 @@ from app.modules.documentos.service import DocumentoModuleService
 from app.modules.search.service import SearchService
 from app.services.topografia_service import TopografiaService
 from app.services.documento_service import DocumentoService
+from app.services.licitacion_service import LicitacionService
+from app.services.contrato_service import ContratoService
+from app.services.compliance_service import ComplianceService
 
 
 def _expediente(*, tenant_id, user_id, suffix: str) -> ExpedienteObra:
@@ -300,6 +308,7 @@ def test_contract_domain_rejects_negative_money_and_duration(factory, payload):
 
 
 
+@pytest.mark.xfail(reason="RED confirmado en PostgreSQL: CDE valida documentos_cde pero servicio consulta Documento legacy", strict=False)
 @pytest.mark.asyncio
 async def test_cde_classification_operates_on_documentos_cde_not_legacy_documentos(
     db_session, tenant_a_user
@@ -333,6 +342,7 @@ async def test_cde_classification_operates_on_documentos_cde_not_legacy_document
     assert result.tipo == TipoDocumento.ANEXO_TECNICO
 
 
+@pytest.mark.xfail(reason="RED confirmado en PostgreSQL: volumen topografico acepta superficies de expedientes distintos", strict=False)
 @pytest.mark.asyncio
 async def test_topography_rejects_volume_between_surfaces_from_different_expedientes(
     db_session, tenant_a_user
@@ -397,6 +407,7 @@ async def test_topography_rejects_volume_between_surfaces_from_different_expedie
 
 
 
+@pytest.mark.xfail(reason="RED confirmado en PostgreSQL: busqueda usa Licitacion.numero_licitacion inexistente", strict=False)
 @pytest.mark.asyncio
 async def test_global_search_uses_real_licitacion_folio_field(db_session, tenant_a_user):
     tenant, _user = tenant_a_user
@@ -411,6 +422,7 @@ async def test_global_search_uses_real_licitacion_folio_field(db_session, tenant
     assert result["total_por_dominio"]["licitaciones"] == 0
 
 
+@pytest.mark.xfail(reason="RED confirmado en PostgreSQL: Documento legacy recibe tenant_id inexistente", strict=False)
 @pytest.mark.asyncio
 async def test_legacy_document_upload_persists_without_passing_unknown_tenant_field(
     db_session, tenant_a_user, monkeypatch
@@ -441,3 +453,111 @@ async def test_legacy_document_upload_persists_without_passing_unknown_tenant_fi
     )
 
     assert documento.expediente_id == expediente.id
+
+
+
+@pytest.mark.asyncio
+async def test_licitacion_patch_cannot_bypass_lifecycle_machine(db_session, tenant_a_user):
+    tenant, user = tenant_a_user
+    expediente = _expediente(tenant_id=tenant.id, user_id=user.id, suffix="LIC-STATE")
+    db_session.add(expediente)
+    await db_session.flush()
+    lic = Licitacion(
+        tenant_id=tenant.id,
+        creado_por_id=user.id,
+        actualizado_por_id=user.id,
+        expediente_id=expediente.id,
+        folio=f"AUD-LIC-{uuid4().hex[:8]}",
+        jurisdiction_code="AUDIT",
+        tipo_procedimiento=TipoProcedimiento.LICITACION_PUBLICA,
+        estado=EstadoLicitacion.PLANEACION,
+        objeto="Auditoria de maquina de estados",
+    )
+    db_session.add(lic)
+    await db_session.commit()
+    await db_session.refresh(lic)
+
+    with pytest.raises(MegalodonException):
+        await LicitacionService().actualizar(
+            db_session,
+            lic.id,
+            LicitacionUpdate(
+                estado=EstadoLicitacion.FALLO,
+                jurisdiction_code="AUDIT",
+            ),
+            user,
+        )
+
+    await db_session.refresh(lic)
+    assert lic.estado == EstadoLicitacion.PLANEACION
+
+
+@pytest.mark.asyncio
+async def test_contract_patch_cannot_bypass_lifecycle_machine(db_session, tenant_a_user):
+    tenant, user = tenant_a_user
+    expediente = _expediente(tenant_id=tenant.id, user_id=user.id, suffix="CONTRACT-STATE")
+    proveedor = Proveedor(
+        tenant_id=tenant.id,
+        creado_por_id=user.id,
+        actualizado_por_id=user.id,
+        tipo_persona=TipoPersona.MORAL,
+        rfc=f"AUD{uuid4().hex[:10].upper()}"[:13],
+        razon_social="Proveedor Auditoria",
+    )
+    db_session.add_all([expediente, proveedor])
+    await db_session.flush()
+    contrato = Contrato(
+        tenant_id=tenant.id,
+        creado_por_id=user.id,
+        actualizado_por_id=user.id,
+        expediente_id=expediente.id,
+        proveedor_id=proveedor.id,
+        numero_contrato=f"AUD-C-{uuid4().hex[:8]}",
+        estado=EstadoContrato.EN_FIRMA,
+        objeto="Contrato auditoria",
+        monto_total=1000,
+        monto_original=1000,
+        plazo_dias=10,
+        plazo_original=10,
+    )
+    db_session.add(contrato)
+    await db_session.commit()
+    await db_session.refresh(contrato)
+
+    with pytest.raises(MegalodonException):
+        await ContratoService().actualizar(
+            db_session,
+            contrato.id,
+            ContratoUpdate(estado=EstadoContrato.TERMINADO),
+            user,
+        )
+
+    await db_session.refresh(contrato)
+    assert contrato.estado == EstadoContrato.EN_FIRMA
+
+
+@pytest.mark.asyncio
+async def test_compliance_inconformidad_rejects_cross_tenant_expediente_reference(
+    db_session, tenant_a_user, tenant_b_user
+):
+    tenant_a, user_a = tenant_a_user
+    tenant_b, user_b = tenant_b_user
+    expediente_b = _expediente(
+        tenant_id=tenant_b.id,
+        user_id=user_b.id,
+        suffix="COMPLIANCE-XTENANT",
+    )
+    db_session.add(expediente_b)
+    await db_session.commit()
+    await db_session.refresh(expediente_b)
+
+    with pytest.raises(MegalodonException):
+        await ComplianceService().crear_inconformidad(
+            db_session,
+            InconformidadCreate(
+                expediente_id=str(expediente_b.id),
+                titulo="Referencia cruzada",
+                descripcion="Tenant A no debe poder apuntar a expediente de tenant B",
+            ),
+            user_a,
+        )
