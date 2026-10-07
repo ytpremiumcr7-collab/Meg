@@ -157,6 +157,8 @@ def verify_upgrade(before, after, graph):
             row["tenant_id"] = by_id[row["id"]]
             if name == "presupuestos":
                 row.update(factor_riesgo=None, monto_riesgo=None)
+            if name == "partidas":
+                row["metadatos"] = {}
             if name == "insumos":
                 # Historical costs have no fabricated index provenance.
                 row["actualizacion_precio"] = None
