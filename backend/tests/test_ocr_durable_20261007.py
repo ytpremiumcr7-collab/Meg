@@ -4,8 +4,11 @@ from uuid import uuid4
 
 import pytest
 
-from app.engines.ia.ocr_metrados import ResultadoOCR
+from app.engines.ia.ocr_metrados import MetradoExtraido, ResultadoOCR
 from app.models.ocr_job import OCRJob, OCRJobStatus
+from app.models.expediente import ExpedienteObra
+from app.models.presupuesto import Partida, Presupuesto
+from sqlalchemy import select
 from app.services.ocr_jobs import OCRJobService
 
 
@@ -175,3 +178,94 @@ async def test_ocr_idempotency_key_rejects_different_source(
     recovered = await service.recuperar_por_idempotencia(key, first_hash)
     assert recovered is not None
     assert recovered.id == first.id
+
+
+@pytest.mark.asyncio
+async def test_ocr_budget_suggestions_persist_provenance_atomically(
+    db_session, tenant_a_user
+):
+    tenant, user = tenant_a_user
+    expediente = ExpedienteObra(
+        tenant_id=tenant.id,
+        creado_por_id=user.id,
+        actualizado_por_id=user.id,
+        identificador=f"OCR-{uuid4().hex[:10]}",
+        titulo="OCR provenance regression",
+        organo="CI",
+        unidad_administrativa="CI",
+        serie_documental="OBRA_PUBLICA",
+        subserie_documental="LICITACION",
+        responsable_id=user.id,
+    )
+    db_session.add(expediente)
+    await db_session.flush()
+    presupuesto = Presupuesto(
+        tenant_id=tenant.id,
+        creado_por_id=user.id,
+        actualizado_por_id=user.id,
+        expediente_id=expediente.id,
+        identificador=f"OCR-BUD-{uuid4().hex[:8]}",
+        nombre="OCR budget",
+        factor_indirecto=0,
+        factor_utilidad=0,
+        factor_impuesto=0,
+        monto_directo=0,
+        monto_indirecto=0,
+        monto_utilidad=0,
+        monto_impuesto=0,
+        monto_total=0,
+    )
+    db_session.add(presupuesto)
+    await db_session.commit()
+    presupuesto_id = presupuesto.id
+
+    service = OCRJobService(db_session, tenant.id)
+    job_id = uuid4()
+    _, replay = await service.crear(
+        user=user,
+        job_id=job_id,
+        filename="cuantificacion.png",
+        content_type="image/png",
+        storage_path=f"tenant/{tenant.id}/ocr/{job_id}/source.png",
+        source_bytes=b"source",
+        presupuesto_id=presupuesto_id,
+    )
+    assert replay is False
+    _, token = await service.claim(job_id)
+    assert token
+
+    result = ResultadoOCR(
+        documento_id=str(job_id),
+        total_metrados=1,
+        confianza_promedio=91.0,
+        metrados=[
+            MetradoExtraido(
+                concepto="MURO-01",
+                descripcion="Muro de prueba",
+                unidad="m2",
+                cantidad=12.5,
+                confianza=91.0,
+                pagina=2,
+                bbox=(0, 0, 20, 10),
+                texto_original="MURO-01 Muro de prueba 12.5 m2",
+            )
+        ],
+        texto_completo="",
+        paginas_procesadas=2,
+        errores=[],
+    )
+
+    assert await service.completar(job_id, token, result) is True
+
+    partidas = (
+        await db_session.scalars(
+            select(Partida).where(
+                Partida.presupuesto_id == presupuesto_id,
+                Partida.tenant_id == tenant.id,
+            )
+        )
+    ).all()
+    assert len(partidas) == 1
+    assert partidas[0].metadatos["fuente"] == "OCR"
+    assert partidas[0].metadatos["confianza"] == 91.0
+    assert partidas[0].metadatos["pagina"] == 2
