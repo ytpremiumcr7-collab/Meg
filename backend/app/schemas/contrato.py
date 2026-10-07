@@ -19,10 +19,10 @@ class ConvenioModificatorioCreate(BaseModel):
     numero: str = Field(..., max_length=50)
     tipo: TipoModificacion
     descripcion: Optional[str] = None
-    monto_anterior: Optional[float] = None
-    monto_nuevo: Optional[float] = None
-    plazo_anterior: Optional[int] = None
-    plazo_nuevo: Optional[int] = None
+    monto_anterior: Optional[float] = Field(None, ge=0)
+    monto_nuevo: Optional[float] = Field(None, ge=0)
+    plazo_anterior: Optional[int] = Field(None, gt=0)
+    plazo_nuevo: Optional[int] = Field(None, gt=0)
     justificacion: Optional[str] = None
 
 
@@ -77,10 +77,10 @@ class GarantiaOut(BaseModel):
 # ─── Entregable / Estimación ───────────────────────────────────────────
 
 class EntregableCreate(BaseModel):
-    numero_estimacion: int
+    numero_estimacion: int = Field(..., ge=1)
     periodo_inicio: Optional[str] = None
     periodo_fin: Optional[str] = None
-    monto_ejecutado: float = 0
+    monto_ejecutado: float = Field(0, ge=0)
     avance_fisico: float = Field(..., ge=0, le=100)
     avance_financiero: float = Field(0, ge=0, le=100)
 
@@ -148,15 +148,15 @@ class ContratoCreate(BaseModel):
 
 class ContratoUpdate(BaseModel):
     estado: Optional[EstadoContrato] = None
-    monto_total: Optional[float] = None
-    plazo_dias: Optional[int] = None
+    monto_total: Optional[float] = Field(None, ge=0)
+    plazo_dias: Optional[int] = Field(None, gt=0)
     fecha_firma: Optional[str] = None
     fecha_inicio: Optional[str] = None
     fecha_termino: Optional[str] = None
     avance_fisico: Optional[float] = Field(None, ge=0, le=100)
     avance_financiero: Optional[float] = Field(None, ge=0, le=100)
     fecha_finiquito: Optional[str] = None
-    monto_finiquito: Optional[float] = None
+    monto_finiquito: Optional[float] = Field(None, ge=0)
 
 
 class ContratoOut(BaseModel):
