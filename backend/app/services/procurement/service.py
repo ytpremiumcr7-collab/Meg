@@ -2299,6 +2299,25 @@ class ProcurementService:
         ).with_for_update())
         if existing:
             raise MegalodonException(ErrorCode.CONFLICT, f"El rol {data.role} ya emitió una decisión para esta revisión.", 409)
+        if data.decision == "APPROVED":
+            previous_actor_approval = await self.db.scalar(
+                select(TenderApproval).where(
+                    TenderApproval.tender_id == tender.id,
+                    TenderApproval.revision == tender.current_revision,
+                    TenderApproval.tenant_id == self.user.tenant_id,
+                    TenderApproval.decision == "APPROVED",
+                    TenderApproval.creado_por_id == self.user.id,
+                ).with_for_update()
+            )
+            if (
+                previous_actor_approval is not None
+                and previous_actor_approval.role != data.role
+            ):
+                raise MegalodonException(
+                    ErrorCode.PERMISO_DENEGADO,
+                    "Separación de funciones: una misma persona no puede cubrir más de un rol de aprobación en la misma revisión.",
+                    403,
+                )
         row = TenderApproval(
             tender_id=tender.id, role=data.role, decision=data.decision, reason=data.reason, revision=tender.current_revision,
             tenant_id=self.user.tenant_id, creado_por_id=self.user.id, actualizado_por_id=self.user.id,
