@@ -17,6 +17,7 @@ celery_app = Celery(
         "app.workers.bim_tasks",
         "app.workers.process_tasks",
         "app.workers.montecarlo_tasks",
+        "app.workers.montecarlo_reconciliation",
         "app.workers.ocr_tasks",
         "app.workers.pdf_tasks",
         "app.workers.excel_tasks",
@@ -44,6 +45,10 @@ celery_app.conf.update(
         },
         "procurement-job-reconciliation": {
             "task": "app.workers.procurement_reconciliation.reconcile_procurement_jobs",
+            "schedule": 30.0,
+        },
+        "montecarlo-run-reconciliation": {
+            "task": "app.workers.montecarlo_reconciliation.reconcile_montecarlo_runs",
             "schedule": 30.0,
         },
     },
