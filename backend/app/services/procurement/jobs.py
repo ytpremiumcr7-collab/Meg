@@ -5,7 +5,7 @@ from hashlib import sha256
 import json
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -95,14 +95,21 @@ class ProcurementJobService:
                 503,
             ) from exc
 
-        # El worker puede haber consumido el mensaje antes de que este
-        # proceso vuelva del broker. Refrescar evita degradar RUNNING/SUCCEEDED
-        # de vuelta a QUEUED por una carrera entre publisher y worker.
-        await self.db.refresh(job)
-        if job.status == "PENDING":
-            job.status = "QUEUED"
-        job.error_code = None
-        job.error_message = None
+        # Compare-and-set en BD: si el worker ya reclamó PENDING y pasó a
+        # RUNNING, este publisher no puede degradarlo otra vez a QUEUED.
+        await self.db.execute(
+            update(ProcurementJob)
+            .where(
+                ProcurementJob.id == job.id,
+                ProcurementJob.tenant_id == job.tenant_id,
+                ProcurementJob.status == "PENDING",
+            )
+            .values(
+                status="QUEUED",
+                error_code=None,
+                error_message=None,
+            )
+        )
         await self.db.commit()
         await self.db.refresh(job)
         return job
