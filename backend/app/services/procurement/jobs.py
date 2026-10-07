@@ -50,79 +50,74 @@ class ProcurementJobService:
         job: ProcurementJob,
         tender: TenderPackage,
     ) -> ProcurementJob:
-        """Publica un job durable ya persistido.
+        """Publica un job durable serializando sólo este agregado.
 
-        PENDING significa "hay trabajo durable en BD que aún debe publicarse".
-        QUEUED sólo se escribe después de que el broker acepta el mensaje. El
-        task_id es determinista y se persiste antes de publicar, de modo que
-        una caída entre BD y broker deja un registro recuperable.
+        Procurement conserva su propia tabla/estado; no comparte un kernel de
+        jobs con BIM ni Monte Carlo. El row lock evita que dos replays o dos
+        reconciliadores publiquen el mismo PENDING simultáneamente. Se mantiene
+        el lock durante el send acotado del broker para que un worker recibido
+        inmediatamente espere a que QUEUED quede confirmado.
         """
-        if job.status in {"QUEUED", "RUNNING", "SUCCEEDED"}:
-            return job
+        locked = await self.db.scalar(
+            select(ProcurementJob)
+            .where(
+                ProcurementJob.id == job.id,
+                ProcurementJob.tenant_id == job.tenant_id,
+            )
+            .with_for_update()
+        )
+        if locked is None:
+            raise MegalodonException(
+                ErrorCode.TAREA_NO_ENCONTRADA,
+                "Job de Procurement no encontrado.",
+                404,
+            )
 
-        if job.status != "PENDING":
+        if locked.status in {"QUEUED", "RUNNING", "SUCCEEDED"}:
+            return locked
+        if locked.status != "PENDING":
             raise MegalodonException(
                 ErrorCode.CONFLICT,
-                f"El job {job.id} no es publicable desde {job.status}.",
+                f"El job {locked.id} no es publicable desde {locked.status}.",
                 409,
             )
 
-        if not job.task_id:
-            job.task_id = str(job.id)
-            await self.db.commit()
+        if not locked.task_id:
+            # Identidad determinista: si el proceso cae antes del commit, el
+            # siguiente intento reconstruye exactamente el mismo task_id.
+            locked.task_id = str(locked.id)
+            await self.db.flush()
 
         try:
             celery_app.send_task(
                 "app.workers.procurement_tasks.execute_job",
                 args=[
-                    str(job.id),
+                    str(locked.id),
                     str(self.user.id),
                     str(self.user.tenant_id),
                     str(tender.id),
                 ],
-                task_id=job.task_id,
+                task_id=locked.task_id,
             )
         except Exception as exc:
-            await self.db.execute(
-                update(ProcurementJob)
-                .where(
-                    ProcurementJob.id == job.id,
-                    ProcurementJob.tenant_id == job.tenant_id,
-                    ProcurementJob.status == "PENDING",
-                )
-                .values(
-                    error_code="ENQUEUE_FAILED",
-                    error_message=str(exc)[:4000],
-                )
-            )
+            # El error del cliente del broker puede ser ambiguo. Conservamos
+            # PENDING durable y diagnóstico; si el broker sí aceptó el mensaje,
+            # el worker podrá reclamar PENDING apenas liberemos este lock.
+            locked.error_code = "ENQUEUE_FAILED"
+            locked.error_message = str(exc)[:4000]
             await self.db.commit()
-            await self.db.refresh(job)
-            if job.status in {"RUNNING", "SUCCEEDED"}:
-                return job
             raise MegalodonException(
                 ErrorCode.ARCHIVO_ERROR,
-                "No se pudo publicar el job de Procurement; quedó pendiente para reintento.",
+                "No se pudo confirmar la publicación del job de Procurement; quedó pendiente para reconciliación.",
                 503,
             ) from exc
 
-        # Compare-and-set en BD: si el worker ya reclamó PENDING y pasó a
-        # RUNNING, este publisher no puede degradarlo otra vez a QUEUED.
-        await self.db.execute(
-            update(ProcurementJob)
-            .where(
-                ProcurementJob.id == job.id,
-                ProcurementJob.tenant_id == job.tenant_id,
-                ProcurementJob.status == "PENDING",
-            )
-            .values(
-                status="QUEUED",
-                error_code=None,
-                error_message=None,
-            )
-        )
+        locked.status = "QUEUED"
+        locked.error_code = None
+        locked.error_message = None
         await self.db.commit()
-        await self.db.refresh(job)
-        return job
+        await self.db.refresh(locked)
+        return locked
 
     async def create_or_replay(
         self,
