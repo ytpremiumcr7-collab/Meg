@@ -27,6 +27,19 @@ async def _execute(job_id: str, user_id: str, tenant_id: str, tender_id: str):
             raise RuntimeError("Procurement job no encontrado")
         if job.status == "SUCCEEDED":
             return job.result
+        if job.status == "RUNNING":
+            # Redelivery/duplicado: otro worker ya reclamó este job.
+            return {"job_id": str(job.id), "status": "RUNNING"}
+        if job.status == "FAILED":
+            return {
+                "job_id": str(job.id),
+                "status": "FAILED",
+                "error_code": job.error_code,
+            }
+        if job.status not in {"PENDING", "QUEUED"}:
+            raise RuntimeError(
+                f"Estado de Procurement job no ejecutable: {job.status}"
+            )
         job.status = "RUNNING"
         job.progress = 5
         job.started_at = datetime.now(timezone.utc)
