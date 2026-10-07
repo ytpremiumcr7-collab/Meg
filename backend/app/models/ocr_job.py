@@ -53,6 +53,5 @@ class OCRJob(Base, UUIDMixin, TenantMixin, AuditMixin):
             ["tenant_id", "presupuesto_id"],
             ["presupuestos.tenant_id", "presupuestos.id"],
             name="fk_ocr_job_tenant_presupuesto",
-            ondelete="SET NULL",
         ),
     )
