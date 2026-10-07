@@ -5,6 +5,7 @@ Revises: 20261006_intentos_trabajo
 """
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 revision = "20261007_ocr_jobs"
 down_revision = "20261006_intentos_trabajo"
@@ -15,22 +16,22 @@ depends_on = None
 def upgrade():
     op.create_table(
         "ocr_jobs",
-        sa.Column("id", sa.Uuid(), primary_key=True),
-        sa.Column("tenant_id", sa.Uuid(), nullable=False),
-        sa.Column("creado_por_id", sa.Uuid(), nullable=True),
-        sa.Column("actualizado_por_id", sa.Uuid(), nullable=True),
+        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("tenant_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("creado_por_id", postgresql.UUID(as_uuid=True), nullable=True),
+        sa.Column("actualizado_por_id", postgresql.UUID(as_uuid=True), nullable=True),
         sa.Column("task_id", sa.String(64), nullable=False),
         sa.Column("filename", sa.String(500), nullable=False),
         sa.Column("content_type", sa.String(160), nullable=True),
         sa.Column("storage_path", sa.String(1000), nullable=False),
         sa.Column("source_sha256", sa.String(64), nullable=False),
         sa.Column("size_bytes", sa.Integer(), nullable=False),
-        sa.Column("presupuesto_id", sa.Uuid(), nullable=True),
+        sa.Column("presupuesto_id", postgresql.UUID(as_uuid=True), nullable=True),
         sa.Column("status", sa.String(24), nullable=False, server_default="PENDING"),
         sa.Column("progress", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("attempts", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("claim_token", sa.String(36), nullable=True),
-        sa.Column("result", sa.JSON(), nullable=False, server_default=sa.text("'{}'::json")),
+        sa.Column("result", postgresql.JSONB(), nullable=False, server_default=sa.text("'{}'::jsonb")),
         sa.Column("error_code", sa.String(120), nullable=True),
         sa.Column("error_message", sa.Text(), nullable=True),
         sa.Column("queued_at", sa.DateTime(timezone=True), nullable=True),
