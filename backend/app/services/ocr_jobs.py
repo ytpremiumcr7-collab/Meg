@@ -215,7 +215,10 @@ class OCRJobService:
     async def claim(self, job_id: UUID) -> tuple[OCRJob | None, str | None]:
         job = await self.db.scalar(
             select(OCRJob)
-            .where(OCRJob.id == job_id)
+            .where(
+                OCRJob.id == job_id,
+                OCRJob.tenant_id == self.tenant_id,
+            )
             .with_for_update()
         )
         if job is None:
@@ -255,7 +258,10 @@ class OCRJobService:
         """Persiste sugerencias y resultado en la misma transacción."""
         job = await self.db.scalar(
             select(OCRJob)
-            .where(OCRJob.id == job_id)
+            .where(
+                OCRJob.id == job_id,
+                OCRJob.tenant_id == self.tenant_id,
+            )
             .with_for_update()
         )
         if (
@@ -299,7 +305,10 @@ class OCRJobService:
     ) -> str:
         job = await self.db.scalar(
             select(OCRJob)
-            .where(OCRJob.id == job_id)
+            .where(
+                OCRJob.id == job_id,
+                OCRJob.tenant_id == self.tenant_id,
+            )
             .with_for_update()
         )
         if (
