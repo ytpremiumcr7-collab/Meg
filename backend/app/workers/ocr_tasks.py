@@ -25,12 +25,11 @@ from app.workers.celery_app import celery_app
 def extraer_metrados_ocr(self, job_id: str):
     async def _claim():
         from app.models.base import AsyncSessionLocal
+        from app.models.ocr_job import OCRJob
         from app.services.ocr_jobs import OCRJobService
 
         async with AsyncSessionLocal() as db:
-            job = await db.get(__import__(
-                "app.models.ocr_job", fromlist=["OCRJob"]
-            ).OCRJob, UUID(job_id))
+            job = await db.get(OCRJob, UUID(job_id))
             if job is None:
                 return None
             service = OCRJobService(db, job.tenant_id)
