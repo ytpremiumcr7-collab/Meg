@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Optional
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -28,6 +28,9 @@ router = APIRouter()
 async def extraer_metrados(
     file: UploadFile = File(...),
     presupuesto_id: Optional[UUID] = Form(None),
+    idempotency_key: Optional[str] = Header(
+        default=None, alias="Idempotency-Key", max_length=128
+    ),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _rate_limit: bool = Depends(rate_limit_strict),
@@ -36,16 +39,36 @@ async def extraer_metrados(
     content = await read_upload_with_limit(
         file, settings.TENDER_SOURCE_MAX_FILE_SIZE_MB
     )
-    job_id = uuid4()
     filename = Path(file.filename or "documento").name
+    service = OCRJobService(db, current_user.tenant_id)
+    request_hash = service.request_hash(
+        source_bytes=content,
+        filename=filename,
+        presupuesto_id=presupuesto_id,
+    )
+
+    existing = await service.recuperar_por_idempotencia(
+        idempotency_key, request_hash
+    )
+    if existing is not None:
+        if existing.status == OCRJobStatus.PENDING.value:
+            existing = await service.publicar(existing.id)
+        return {
+            "job_id": str(existing.id),
+            "task_id": existing.task_id,
+            "status": existing.status,
+            "progress": existing.progress,
+            "filename": existing.filename,
+            "idempotent_replay": True,
+        }
+
+    await service.validar_presupuesto(presupuesto_id)
+
+    job_id = uuid4()
     suffix = Path(filename).suffix.lower()
     storage_path = (
         f"tenant/{current_user.tenant_id}/ocr/{job_id}/source{suffix}"
     )
-
-    service = OCRJobService(db, current_user.tenant_id)
-    await service.validar_presupuesto(presupuesto_id)
-
     storage = storage_documentos()
     await storage.subir(
         storage_path,
@@ -53,8 +76,9 @@ async def extraer_metrados(
         content_type=file.content_type or "application/octet-stream",
         overwrite=False,
     )
+
     try:
-        job = await service.crear(
+        job, replay = await service.crear(
             user=current_user,
             job_id=job_id,
             filename=filename,
@@ -62,21 +86,30 @@ async def extraer_metrados(
             storage_path=storage_path,
             source_bytes=content,
             presupuesto_id=presupuesto_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
         )
     except Exception:
-        # Compensación del único side effect anterior al registro durable.
         try:
             await storage.eliminar([storage_path])
         finally:
             raise
 
-    job = await service.publicar(job.id)
+    if replay:
+        # Otra request con la misma key ganó mientras subíamos. Su job tiene
+        # su propia fuente; esta subida ya no referencia nada y se compensa.
+        await storage.eliminar([storage_path])
+
+    if job.status == OCRJobStatus.PENDING.value:
+        job = await service.publicar(job.id)
+
     return {
         "job_id": str(job.id),
         "task_id": job.task_id,
         "status": job.status,
         "progress": job.progress,
         "filename": job.filename,
+        "idempotent_replay": replay,
     }
 
 
