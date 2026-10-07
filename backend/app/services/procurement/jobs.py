@@ -254,7 +254,11 @@ class ProcurementJobService:
 
         published = 0
         for job in jobs:
-            user = await db.get(User, job.creado_por_id)
+            user = (
+                await db.get(User, job.creado_por_id)
+                if job.creado_por_id is not None
+                else None
+            )
             tender = await db.scalar(
                 select(TenderPackage).where(
                     TenderPackage.id == job.tender_id,
