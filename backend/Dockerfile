@@ -8,7 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc g++ libpq-dev libgdal-dev tesseract-ocr tesseract-ocr-spa \
+    gcc g++ libpq-dev libgdal-dev tesseract-ocr tesseract-ocr-spa poppler-utils \
     libgl1 libglib2.0-0 ca-certificates curl \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system --gid 10001 megalodon \
