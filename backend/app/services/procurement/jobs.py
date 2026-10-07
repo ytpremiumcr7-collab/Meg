@@ -83,12 +83,22 @@ class ProcurementJobService:
                 task_id=job.task_id,
             )
         except Exception as exc:
-            # No se pierde el intent: queda PENDING para reintento por replay
-            # del request o por el reconciliador periódico.
-            job.status = "PENDING"
-            job.error_code = "ENQUEUE_FAILED"
-            job.error_message = str(exc)[:4000]
+            await self.db.execute(
+                update(ProcurementJob)
+                .where(
+                    ProcurementJob.id == job.id,
+                    ProcurementJob.tenant_id == job.tenant_id,
+                    ProcurementJob.status == "PENDING",
+                )
+                .values(
+                    error_code="ENQUEUE_FAILED",
+                    error_message=str(exc)[:4000],
+                )
+            )
             await self.db.commit()
+            await self.db.refresh(job)
+            if job.status in {"RUNNING", "SUCCEEDED"}:
+                return job
             raise MegalodonException(
                 ErrorCode.ARCHIVO_ERROR,
                 "No se pudo publicar el job de Procurement; quedó pendiente para reintento.",
