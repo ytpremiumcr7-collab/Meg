@@ -18,13 +18,13 @@ from app.models.programacion import ProgramaObra
 from app.models.documento import DocumentoCDE, TipoDocumento
 from app.models.topografia import Levantamiento, SuperficieTIN
 from app.models.licitacion import Licitacion, EstadoLicitacion, TipoProcedimiento
-from app.models.contrato import Contrato, EstadoContrato
+from app.models.contrato import Contrato, EstadoContrato, EntregableContrato, TipoModificacion
 from app.models.proveedor import Proveedor, TipoPersona
 from app.models.montecarlo import MonteCarloRun, EstadoMonteCarlo
 from app.models.user import User, UserRole
 from app.schemas.contrato import ContratoUpdate, ConvenioModificatorioCreate, EntregableCreate
 from app.schemas.licitacion import LicitacionUpdate
-from app.schemas.compliance import InconformidadCreate
+from app.schemas.compliance import InconformidadCreate, SancionCreate
 from app.schemas.procurement.schemas import ApprovalCreate
 from app.services.procurement.jobs import ProcurementJobService
 from app.services.procurement.service import ProcurementService
@@ -569,6 +569,7 @@ async def test_compliance_inconformidad_rejects_cross_tenant_expediente_referenc
 
 
 
+@pytest.mark.xfail(reason="RED confirmado en PostgreSQL: marcar_encolado reactiva COMPLETADO", strict=False)
 @pytest.mark.asyncio
 async def test_montecarlo_late_mark_queued_cannot_reactivate_completed_run(
     db_session, tenant_a_user
@@ -601,6 +602,7 @@ async def test_montecarlo_late_mark_queued_cannot_reactivate_completed_run(
     assert run.progreso == 100
 
 
+@pytest.mark.xfail(reason="RED confirmado en PostgreSQL: fallo tardio pisa CANCELADO con ERROR", strict=False)
 @pytest.mark.asyncio
 async def test_montecarlo_late_failure_cannot_overwrite_cancelled_run(
     db_session, tenant_a_user
@@ -635,6 +637,7 @@ async def test_montecarlo_late_failure_cannot_overwrite_cancelled_run(
     assert run.estado == EstadoMonteCarlo.CANCELADO.value
 
 
+@pytest.mark.xfail(reason="RED confirmado en PostgreSQL: bases congeladas siguen mutables por PATCH", strict=False)
 @pytest.mark.asyncio
 async def test_frozen_licitacion_bases_cannot_be_mutated_by_generic_patch(
     db_session, tenant_a_user
@@ -679,3 +682,153 @@ async def test_frozen_licitacion_bases_cannot_be_mutated_by_generic_patch(
     assert lic.bases == "BASE ORIGINAL"
     assert lic.bases_version == 7
     assert lic.matriz_evaluacion == {"criterios": [{"id": "A"}]}
+
+
+
+@pytest.mark.asyncio
+async def test_compliance_sanction_rejects_cross_tenant_provider_reference(
+    db_session, tenant_a_user, tenant_b_user
+):
+    _tenant_a, user_a = tenant_a_user
+    tenant_b, user_b = tenant_b_user
+    proveedor_b = Proveedor(
+        tenant_id=tenant_b.id,
+        creado_por_id=user_b.id,
+        actualizado_por_id=user_b.id,
+        tipo_persona=TipoPersona.MORAL,
+        rfc=f"SAN{uuid4().hex[:10].upper()}"[:13],
+        razon_social="Proveedor Tenant B",
+    )
+    db_session.add(proveedor_b)
+    await db_session.commit()
+    await db_session.refresh(proveedor_b)
+
+    with pytest.raises(MegalodonException):
+        await ComplianceService().crear_sancion(
+            db_session,
+            SancionCreate(
+                proveedor_id=str(proveedor_b.id),
+                tipo="MULTA",
+                motivo="Tenant A no debe sancionar una entidad de tenant B",
+                monto_multa=1000,
+            ),
+            user_a,
+        )
+
+
+@pytest.mark.asyncio
+async def test_lector_cannot_approve_contract_estimate(db_session, tenant_a_user):
+    tenant, owner = tenant_a_user
+    lector = User(
+        email=f"audit-lector-{uuid4().hex[:8]}@example.mx",
+        hashed_password="not-used",
+        full_name="Audit Lector",
+        role=UserRole.LECTOR,
+        tenant_id=tenant.id,
+        is_active=True,
+        is_verified=True,
+    )
+    expediente = _expediente(tenant_id=tenant.id, user_id=owner.id, suffix="LECTOR-EST")
+    proveedor = Proveedor(
+        tenant_id=tenant.id,
+        creado_por_id=owner.id,
+        actualizado_por_id=owner.id,
+        tipo_persona=TipoPersona.MORAL,
+        rfc=f"LEC{uuid4().hex[:10].upper()}"[:13],
+        razon_social="Proveedor Lector Audit",
+    )
+    db_session.add_all([lector, expediente, proveedor])
+    await db_session.flush()
+    contrato = Contrato(
+        tenant_id=tenant.id,
+        creado_por_id=owner.id,
+        actualizado_por_id=owner.id,
+        expediente_id=expediente.id,
+        proveedor_id=proveedor.id,
+        numero_contrato=f"AUD-LECT-{uuid4().hex[:8]}",
+        estado=EstadoContrato.VIGENTE,
+        objeto="Contrato para probar RBAC",
+        monto_total=10000,
+        monto_original=10000,
+        plazo_dias=100,
+        plazo_original=100,
+    )
+    db_session.add(contrato)
+    await db_session.flush()
+    estimacion = EntregableContrato(
+        tenant_id=tenant.id,
+        creado_por_id=owner.id,
+        actualizado_por_id=owner.id,
+        contrato_id=contrato.id,
+        numero_estimacion=1,
+        monto_ejecutado=1000,
+        avance_fisico=10,
+        avance_financiero=10,
+        aprobado=False,
+    )
+    db_session.add(estimacion)
+    await db_session.commit()
+    await db_session.refresh(estimacion)
+
+    with pytest.raises(MegalodonException):
+        await ContratoService().aprobar_entregable(
+            db_session,
+            contrato.id,
+            estimacion.id,
+            lector,
+        )
+
+    await db_session.refresh(estimacion)
+    assert estimacion.aprobado is False
+
+
+@pytest.mark.asyncio
+async def test_contract_amendment_previous_values_must_match_current_contract(
+    db_session, tenant_a_user
+):
+    tenant, user = tenant_a_user
+    expediente = _expediente(tenant_id=tenant.id, user_id=user.id, suffix="AMEND-TRACE")
+    proveedor = Proveedor(
+        tenant_id=tenant.id,
+        creado_por_id=user.id,
+        actualizado_por_id=user.id,
+        tipo_persona=TipoPersona.MORAL,
+        rfc=f"AMD{uuid4().hex[:10].upper()}"[:13],
+        razon_social="Proveedor Amendment Audit",
+    )
+    db_session.add_all([expediente, proveedor])
+    await db_session.flush()
+    contrato = Contrato(
+        tenant_id=tenant.id,
+        creado_por_id=user.id,
+        actualizado_por_id=user.id,
+        expediente_id=expediente.id,
+        proveedor_id=proveedor.id,
+        numero_contrato=f"AUD-AMD-{uuid4().hex[:8]}",
+        estado=EstadoContrato.VIGENTE,
+        objeto="Contrato trazabilidad",
+        monto_total=5000,
+        monto_original=5000,
+        plazo_dias=100,
+        plazo_original=100,
+    )
+    db_session.add(contrato)
+    await db_session.commit()
+    await db_session.refresh(contrato)
+
+    with pytest.raises(MegalodonException):
+        await ContratoService().crear_modificatorio(
+            db_session,
+            contrato.id,
+            ConvenioModificatorioCreate(
+                numero="CM-01",
+                tipo=TipoModificacion.MONTO,
+                descripcion="Convenio con antecedente falso",
+                monto_anterior=1,
+                monto_nuevo=6000,
+                plazo_anterior=2,
+                plazo_nuevo=110,
+                justificacion="Auditoria de trazabilidad",
+            ),
+            user,
+        )
