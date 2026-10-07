@@ -25,7 +25,7 @@ def upgrade():
         sa.Column("content_type", sa.String(160), nullable=True),
         sa.Column("storage_path", sa.String(1000), nullable=False),
         sa.Column("source_sha256", sa.String(64), nullable=False),
-        sa.Column("size_bytes", sa.Integer(), nullable=False),
+        sa.Column("size_bytes", sa.BigInteger(), nullable=False),
         sa.Column("presupuesto_id", postgresql.UUID(as_uuid=True), nullable=True),
         sa.Column("status", sa.String(24), nullable=False, server_default="PENDING"),
         sa.Column("progress", sa.Integer(), nullable=False, server_default="0"),
