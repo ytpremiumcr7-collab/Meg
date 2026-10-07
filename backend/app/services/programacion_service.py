@@ -69,9 +69,7 @@ class ProgramacionService(BaseService[ProgramaObra]):
         creado_por_id: Optional[UUID] = None,
         tenant_id: Optional[UUID | str] = None,
     ) -> ProgramaObra:
-        """Crea un nuevo programa de obra con actividades."""
-
-        # Validar expediente
+        """Crea programa + actividades + CPM como una sola unidad atómica."""
         result = await self.db.execute(
             select(ExpedienteObra).where(ExpedienteObra.id == expediente_id)
         )
@@ -81,72 +79,92 @@ class ProgramacionService(BaseService[ProgramaObra]):
                 ErrorCode.DOCUMENTO_NO_ENCONTRADO,
                 f"Expediente {expediente_id} no encontrado",
             )
+
         effective_tenant = tenant_id if tenant_id is not None else self.tenant_id
-        effective_tenant = str(effective_tenant) if effective_tenant is not None else None
-        if effective_tenant is not None and str(expediente.tenant_id) != effective_tenant:
+        effective_tenant = (
+            str(effective_tenant) if effective_tenant is not None else None
+        )
+        if (
+            effective_tenant is not None
+            and str(expediente.tenant_id) != effective_tenant
+        ):
             raise MegalodonException(
                 ErrorCode.DOCUMENTO_NO_ENCONTRADO,
                 f"Expediente {expediente_id} no encontrado en el tenant {effective_tenant}",
             )
 
-        # Generar identificador
         count_result = await self.db.execute(
-            select(ProgramaObra).where(ProgramaObra.expediente_id == expediente_id)
+            select(ProgramaObra).where(
+                ProgramaObra.expediente_id == expediente_id
+            )
         )
         count = len(count_result.scalars().all()) + 1
         identificador = f"PRO-{expediente.identificador}-{count:03d}"
 
-        # Crear programa
-        programa = await self.create({
-            "id": uuid4(),
-            "identificador": identificador,
-            "nombre": nombre,
-            "descripcion": descripcion,
-            "expediente_id": expediente_id,
-            "fecha_inicio_plan": fecha_inicio,
-            "estado": EstadoPrograma.PLANIFICADO.value,
-        }, creado_por_id=creado_por_id)
+        programa = ProgramaObra(
+            id=uuid4(),
+            tenant_id=expediente.tenant_id,
+            identificador=identificador,
+            nombre=nombre,
+            descripcion=descripcion,
+            expediente_id=expediente_id,
+            fecha_inicio_plan=fecha_inicio,
+            estado=EstadoPrograma.PLANIFICADO.value,
+            creado_por_id=creado_por_id,
+            actualizado_por_id=creado_por_id,
+        )
 
-        # Crear actividades
-        for i, act_data in enumerate(actividades_data, 1):
-            actividad = ActividadPrograma(
-                id=uuid4(),
-                programa_id=programa.id,
-                identificador=act_data.get("id", f"ACT-{i:03d}"),
-                nombre=act_data["nombre"],
-                descripcion=act_data.get("descripcion", ""),
-                wbs_codigo=act_data.get("wbs_codigo", ""),
-                wbs_nivel=act_data.get("wbs_nivel", 0),
-                duracion=act_data.get("duracion", 0),
-                duracion_optimista=act_data.get("duracion_optimista"),
-                duracion_probable=act_data.get("duracion_probable"),
-                duracion_pesimista=act_data.get("duracion_pesimista"),
-                tipo=act_data.get("tipo", "CONSTRUCCION"),
-                costo_presupuestado=act_data.get("costo_presupuestado", 0),
-                costo_real=act_data.get("costo_real", 0),
-                porcentaje_avance=act_data.get("porcentaje_avance", 0),
-                predecesoras=act_data.get("predecesoras", []),
-                dependencias_tipo=act_data.get("dependencias_tipo", {}),
-                metadatos=act_data.get("metadatos", {}),
-                tenant_id=programa.tenant_id,
+        try:
+            self.db.add(programa)
+            await self.db.flush()
+
+            for i, act_data in enumerate(actividades_data, 1):
+                actividad = ActividadPrograma(
+                    id=uuid4(),
+                    programa_id=programa.id,
+                    identificador=act_data.get("id", f"ACT-{i:03d}"),
+                    nombre=act_data["nombre"],
+                    descripcion=act_data.get("descripcion", ""),
+                    wbs_codigo=act_data.get("wbs_codigo", ""),
+                    wbs_nivel=act_data.get("wbs_nivel", 0),
+                    duracion=act_data.get("duracion", 0),
+                    duracion_optimista=act_data.get("duracion_optimista"),
+                    duracion_probable=act_data.get("duracion_probable"),
+                    duracion_pesimista=act_data.get("duracion_pesimista"),
+                    tipo=act_data.get("tipo", "CONSTRUCCION"),
+                    costo_presupuestado=act_data.get(
+                        "costo_presupuestado", 0
+                    ),
+                    costo_real=act_data.get("costo_real", 0),
+                    porcentaje_avance=act_data.get(
+                        "porcentaje_avance", 0
+                    ),
+                    predecesoras=act_data.get("predecesoras", []),
+                    dependencias_tipo=act_data.get(
+                        "dependencias_tipo", {}
+                    ),
+                    metadatos=act_data.get("metadatos", {}),
+                    tenant_id=programa.tenant_id,
+                )
+                self.db.add(actividad)
+
+            # Flush hace visibles las filas a las consultas del mismo
+            # transaction sin publicar un programa parcialmente válido.
+            await self.db.flush()
+
+            # calcular_cpm valida IDs, predecesoras, tipos y ciclos y su
+            # commit publica programa, actividades y resultados juntos.
+            await self.calcular_cpm(
+                programa.id,
+                expediente_id,
+                fecha_inicio,
+                tenant_id=tenant_id,
             )
-            self.db.add(actividad)
-
-        await self.db.commit()
-        await self.db.refresh(programa)
-
-        # BUG ORIGINAL: esta llamada era `self.calcular_cpm(programa.id,
-        # fecha_inicio)` -- solo 2 posicionales contra una firma
-        # (programa_id, expediente_id, fecha_inicio). fecha_inicio (un
-        # datetime) caía en el parámetro expediente_id (tipado UUID) y
-        # fecha_inicio real quedaba en None. No tronaba porque Python no
-        # valida tipos en runtime y porque calcular_cpm no usaba
-        # expediente_id para nada todavía -- pero era un bug latente que
-        # se iba a activar en cuanto expediente_id empezara a validarse
-        # (como ya pasa ahora, ver abajo).
-        await self.calcular_cpm(programa.id, expediente_id, fecha_inicio, tenant_id=tenant_id)
-
-        return programa
+            await self.db.refresh(programa)
+            return programa
+        except Exception:
+            await self.db.rollback()
+            raise
 
     async def calcular_cpm(
         self,
@@ -242,8 +260,10 @@ class ProgramacionService(BaseService[ProgramaObra]):
         fecha_objetivo: Optional[datetime] = None,
         tenant_id: Optional[UUID | str] = None,
     ) -> ResultadoPERT:
-        """Calcula PERT probabilístico para un programa."""
-        await self._validar_programa_en_expediente(programa_id, expediente_id, tenant_id=tenant_id)
+        """Calcula PERT sin romper el grafo cuando mezcla tareas deterministas."""
+        await self._validar_programa_en_expediente(
+            programa_id, expediente_id, tenant_id=tenant_id
+        )
         programa = await self._get_programa_con_actividades(programa_id)
         if not programa:
             raise MegalodonException(
@@ -254,25 +274,36 @@ class ProgramacionService(BaseService[ProgramaObra]):
         motor = MotorCPM(self.calendario)
 
         for act_db in programa.actividades:
-            if act_db.duracion_optimista and act_db.duracion_probable and act_db.duracion_pesimista:
-                act = Actividad(
-                    id=act_db.identificador,
-                    nombre=act_db.nombre,
-                    duracion=float(act_db.duracion),
-                    duracion_optimista=float(act_db.duracion_optimista),
-                    duracion_probable=float(act_db.duracion_probable),
-                    duracion_pesimista=float(act_db.duracion_pesimista),
-                    predecesoras=act_db.predecesoras or [],
+            optimista = getattr(act_db, "duracion_optimista", None)
+            probable = getattr(act_db, "duracion_probable", None)
+            pesimista = getattr(act_db, "duracion_pesimista", None)
+            act = Actividad(
+                id=act_db.identificador,
+                nombre=act_db.nombre,
+                duracion=float(act_db.duracion),
+                duracion_optimista=(
+                    float(optimista) if optimista is not None else None
+                ),
+                duracion_probable=(
+                    float(probable) if probable is not None else None
+                ),
+                duracion_pesimista=(
+                    float(pesimista) if pesimista is not None else None
+                ),
+                predecesoras=list(
+                    getattr(act_db, "predecesoras", None) or []
+                ),
+            )
+            tipos = getattr(act_db, "dependencias_tipo", None) or {}
+            for pred in act.predecesoras:
+                act.dependencias[pred] = TipoDependencia(
+                    tipos.get(pred, TipoDependencia.FIN_INICIO.value)
                 )
-                motor.agregar_actividad(act)
+            motor.agregar_actividad(act)
 
-        # Calcular sucesoras
-        for act in motor.actividades.values():
-            for other in motor.actividades.values():
-                if act.id in other.predecesoras:
-                    act.sucesoras.append(other.id)
-
-        resultado = motor.calcular_pert(programa.fecha_inicio_plan, fecha_objetivo)
+        resultado = motor.calcular_pert(
+            programa.fecha_inicio_plan, fecha_objetivo
+        )
 
         programa.resultado_pert = resultado.to_dict()
         await self.db.commit()
