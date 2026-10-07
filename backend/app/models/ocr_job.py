@@ -25,6 +25,8 @@ class OCRJob(Base, UUIDMixin, TenantMixin, AuditMixin):
     __tablename__ = "ocr_jobs"
 
     task_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     filename: Mapped[str] = mapped_column(String(500), nullable=False)
     content_type: Mapped[str | None] = mapped_column(String(160), nullable=True)
     storage_path: Mapped[str] = mapped_column(String(1000), nullable=False)
@@ -48,6 +50,7 @@ class OCRJob(Base, UUIDMixin, TenantMixin, AuditMixin):
 
     __table_args__ = (
         UniqueConstraint("tenant_id", "id", name="uq_ocr_jobs_tenant_id"),
+        UniqueConstraint("tenant_id", "idempotency_key", name="uq_ocr_jobs_tenant_idempotency"),
         Index("ix_ocr_jobs_tenant_status_created", "tenant_id", "status", "created_at"),
         ForeignKeyConstraint(
             ["tenant_id", "presupuesto_id"],
