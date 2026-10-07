@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import Enum
 from uuid import UUID as UUIDType
 
-from sqlalchemy import DateTime, ForeignKeyConstraint, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKeyConstraint, BigInteger, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.types import JSONB, UUID
@@ -29,7 +29,7 @@ class OCRJob(Base, UUIDMixin, TenantMixin, AuditMixin):
     content_type: Mapped[str | None] = mapped_column(String(160), nullable=True)
     storage_path: Mapped[str] = mapped_column(String(1000), nullable=False)
     source_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
-    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
     presupuesto_id: Mapped[UUIDType | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
 
