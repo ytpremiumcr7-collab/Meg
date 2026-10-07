@@ -110,6 +110,7 @@ class ProcurementJobService:
                 ErrorCode.ARCHIVO_ERROR,
                 "No se pudo confirmar la publicación del job de Procurement; quedó pendiente para reconciliación.",
                 503,
+                details={"job_id": str(locked.id), "task_id": locked.task_id},
             ) from exc
 
         locked.status = "QUEUED"
