@@ -71,10 +71,12 @@ class OCRService:
             )
 
         presupuesto = await self.db.scalar(
-            select(Presupuesto).where(
+            select(Presupuesto)
+            .where(
                 Presupuesto.id == presupuesto_id,
                 Presupuesto.tenant_id == self.tenant_id,
             )
+            .with_for_update()
         )
         if presupuesto is None:
             raise MegalodonException(
