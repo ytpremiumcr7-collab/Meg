@@ -679,7 +679,7 @@ class MotorCPM:
             varianza_total=varianza_total,
             desviacion_estandar=desviacion,
             probabilidad_terminar_a_tiempo=probabilidad,
-            fecha_probable_terminacion=fecha_inicio + timedelta(days=duracion_esperada),
+            fecha_probable_terminacion=resultado_cpm.ruta_critica.fecha_fin,
             percentiles=percentiles,
         )
 
