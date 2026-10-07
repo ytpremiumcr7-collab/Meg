@@ -95,7 +95,12 @@ class ProcurementJobService:
                 503,
             ) from exc
 
-        job.status = "QUEUED"
+        # El worker puede haber consumido el mensaje antes de que este
+        # proceso vuelva del broker. Refrescar evita degradar RUNNING/SUCCEEDED
+        # de vuelta a QUEUED por una carrera entre publisher y worker.
+        await self.db.refresh(job)
+        if job.status == "PENDING":
+            job.status = "QUEUED"
         job.error_code = None
         job.error_message = None
         await self.db.commit()
