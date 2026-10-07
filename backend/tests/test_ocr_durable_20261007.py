@@ -17,7 +17,7 @@ async def test_ocr_broker_message_contains_only_durable_job_id(
     service = OCRJobService(db_session, tenant.id)
     job_id = uuid4()
     source = b"not-the-broker-payload"
-    job = await service.crear(
+    job, replay = await service.crear(
         user=user,
         job_id=job_id,
         filename="plano.png",
@@ -26,6 +26,8 @@ async def test_ocr_broker_message_contains_only_durable_job_id(
         source_bytes=source,
         presupuesto_id=None,
     )
+
+    assert replay is False
 
     sent = []
 
@@ -56,7 +58,7 @@ async def test_ocr_stale_attempt_cannot_complete_after_new_claim(
     tenant, user = tenant_a_user
     service = OCRJobService(db_session, tenant.id)
     job_id = uuid4()
-    await service.crear(
+    _, replay = await service.crear(
         user=user,
         job_id=job_id,
         filename="plano.png",
@@ -65,6 +67,8 @@ async def test_ocr_stale_attempt_cannot_complete_after_new_claim(
         source_bytes=b"source",
         presupuesto_id=None,
     )
+
+    assert replay is False
 
     first, token1 = await service.claim(job_id)
     assert first is not None and token1
@@ -104,7 +108,7 @@ async def test_ocr_publish_failure_keeps_durable_pending_intent(
     tenant, user = tenant_a_user
     service = OCRJobService(db_session, tenant.id)
     job_id = uuid4()
-    await service.crear(
+    _, replay = await service.crear(
         user=user,
         job_id=job_id,
         filename="plano.pdf",
@@ -113,6 +117,8 @@ async def test_ocr_publish_failure_keeps_durable_pending_intent(
         source_bytes=b"%PDF-audit",
         presupuesto_id=None,
     )
+
+    assert replay is False
 
     def unavailable(*_args, **_kwargs):
         raise ConnectionError("broker down")
@@ -130,3 +136,42 @@ async def test_ocr_publish_failure_keeps_durable_pending_intent(
     assert row.status == OCRJobStatus.PENDING.value
     assert row.task_id == str(job_id)
     assert row.error_code == "ENQUEUE_FAILED"
+
+
+@pytest.mark.asyncio
+async def test_ocr_idempotency_key_rejects_different_source(
+    db_session, tenant_a_user
+):
+    tenant, user = tenant_a_user
+    service = OCRJobService(db_session, tenant.id)
+    key = "same-client-request"
+    first_id = uuid4()
+    first_hash = service.request_hash(
+        source_bytes=b"one",
+        filename="plano.png",
+        presupuesto_id=None,
+    )
+    first, replay = await service.crear(
+        user=user,
+        job_id=first_id,
+        filename="plano.png",
+        content_type="image/png",
+        storage_path=f"tenant/{tenant.id}/ocr/{first_id}/source.png",
+        source_bytes=b"one",
+        presupuesto_id=None,
+        idempotency_key=key,
+        request_hash=first_hash,
+    )
+    assert replay is False
+
+    second_hash = service.request_hash(
+        source_bytes=b"two",
+        filename="plano.png",
+        presupuesto_id=None,
+    )
+    with pytest.raises(Exception):
+        await service.recuperar_por_idempotencia(key, second_hash)
+
+    recovered = await service.recuperar_por_idempotencia(key, first_hash)
+    assert recovered is not None
+    assert recovered.id == first.id
