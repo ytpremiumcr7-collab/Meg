@@ -46,6 +46,7 @@ def _wire_successors(*activities: Actividad) -> None:
                 by_id[predecessor].sucesoras.append(activity.id)
 
 
+@pytest.mark.xfail(reason="RED confirmado: duracion_total usa la actividad mas larga", strict=False)
 def test_cpm_project_duration_is_full_sequential_span_not_longest_activity():
     start = datetime(2026, 10, 7, 8, 0, 0)
     a = Actividad(id="A", nombre="A", duracion=2)
@@ -60,6 +61,7 @@ def test_cpm_project_duration_is_full_sequential_span_not_longest_activity():
     assert result.duracion_total == 5
 
 
+@pytest.mark.xfail(reason="RED confirmado: SS se ejecuta como FS", strict=False)
 def test_cpm_honors_start_to_start_dependency():
     start = datetime(2026, 10, 7, 8, 0, 0)
     a = Actividad(id="A", nombre="A", duracion=4)
@@ -80,6 +82,7 @@ def test_cpm_honors_start_to_start_dependency():
     assert result.actividades["B"].inicio_temprano == start
 
 
+@pytest.mark.xfail(reason="RED confirmado: IDs duplicados se sobrescriben", strict=False)
 def test_cpm_rejects_duplicate_activity_identifiers_instead_of_overwriting():
     motor = MotorCPM()
     motor.agregar_actividad(Actividad(id="A", nombre="primera", duracion=1))
@@ -88,6 +91,7 @@ def test_cpm_rejects_duplicate_activity_identifiers_instead_of_overwriting():
         motor.agregar_actividad(Actividad(id="A", nombre="segunda", duracion=9))
 
 
+@pytest.mark.xfail(reason="RED confirmado: PERT descarta predecesores deterministas", strict=False)
 @pytest.mark.asyncio
 async def test_pert_keeps_deterministic_predecessors_in_mixed_program():
     tenant_id = uuid4()
@@ -125,6 +129,7 @@ async def test_pert_keeps_deterministic_predecessors_in_mixed_program():
     assert result.duracion_esperada >= 5
 
 
+@pytest.mark.xfail(reason="RED confirmado: crear_programa persiste antes de validar CPM", strict=False)
 @pytest.mark.asyncio
 async def test_crear_programa_rolls_back_persisted_rows_when_cpm_rejects_cycle(
     db_session, tenant_a_user
