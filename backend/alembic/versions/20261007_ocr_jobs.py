@@ -21,6 +21,8 @@ def upgrade():
         sa.Column("creado_por_id", postgresql.UUID(as_uuid=True), nullable=True),
         sa.Column("actualizado_por_id", postgresql.UUID(as_uuid=True), nullable=True),
         sa.Column("task_id", sa.String(64), nullable=False),
+        sa.Column("idempotency_key", sa.String(128), nullable=True),
+        sa.Column("request_hash", sa.String(64), nullable=False),
         sa.Column("filename", sa.String(500), nullable=False),
         sa.Column("content_type", sa.String(160), nullable=True),
         sa.Column("storage_path", sa.String(1000), nullable=False),
@@ -49,6 +51,7 @@ def upgrade():
         ),
         sa.UniqueConstraint("task_id", name="uq_ocr_jobs_task_id"),
         sa.UniqueConstraint("tenant_id", "id", name="uq_ocr_jobs_tenant_id"),
+        sa.UniqueConstraint("tenant_id", "idempotency_key", name="uq_ocr_jobs_tenant_idempotency"),
     )
     op.create_index("ix_ocr_jobs_tenant_id", "ocr_jobs", ["tenant_id"])
     op.create_index("ix_ocr_jobs_creado_por_id", "ocr_jobs", ["creado_por_id"])
