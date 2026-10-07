@@ -243,13 +243,13 @@ def run_rehearsal(backup, uri, env):
         expected_tables = set(tables) | ({"bridge_field_contracts"} if revision == HISTORICAL else set())
         indices_tables = {'series_indices_costos', 'observaciones_indices_costos',
                          'vinculos_indices_insumos', 'retiros_indices_costos', 'cargas_indices_costos'}
-        expected_tables |= indices_tables
-        expected_tables.add('trabajos_proceso')
+        durable_tables = {'trabajos_proceso', 'ocr_jobs'}
+        expected_tables |= indices_tables | durable_tables
         require(target == HEAD and set(current) == expected_tables, "Unexpected revision or historical table changes")
-        for table in (indices_tables | {'trabajos_proceso'}) - set(tables):
+        for table in (indices_tables | durable_tables) - set(tables):
             with conn.cursor() as cursor:
                 cursor.execute(sql.SQL('SELECT count(*) FROM {}').format(sql.Identifier('public', table)))
-                require(cursor.fetchone()[0] == 0, 'Historical upgrade must not invent observations, mappings or job parameters')
+                require(cursor.fetchone()[0] == 0, 'Historical upgrade must not invent observations, mappings or durable jobs')
         after = fingerprints(conn, tables, migrated=revision != HEAD,
                              historical_profile_ids=profile_ids if revision == HISTORICAL else None)
         compare(expected, after)
