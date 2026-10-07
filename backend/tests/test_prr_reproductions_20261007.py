@@ -14,12 +14,14 @@ from app.engines.programacion.cpm import Actividad, MotorCPM, TipoDependencia
 from app.models.expediente import ExpedienteObra
 from app.models.procurement import TenderPackage, TenderState
 from app.models.procurement_jobs import ProcurementJob
+from app.models.montecarlo import EstadoMonteCarlo, MonteCarloRun
 from app.models.programacion import ProgramaObra
 from app.models.user import User, UserRole
 from app.schemas.contrato import ContratoUpdate, ConvenioModificatorioCreate, EntregableCreate
 from app.schemas.procurement.schemas import ApprovalCreate
 from app.services.procurement.jobs import ProcurementJobService
 from app.services.procurement.service import ProcurementService
+from app.services.montecarlo_service import MonteCarloService
 from app.services.programacion_service import ProgramacionService
 
 
@@ -311,3 +313,149 @@ async def test_procurement_job_cannot_remain_queued_without_broker_publication(
 def test_contract_domain_rejects_negative_money_and_duration(factory, payload):
     with pytest.raises(ValidationError):
         factory(**payload)
+
+
+def _montecarlo_run(*, tenant_id, user_id, estado: str) -> MonteCarloRun:
+    return MonteCarloRun(
+        tenant_id=tenant_id,
+        creado_por_id=user_id,
+        actualizado_por_id=user_id,
+        task_id=str(uuid4()),
+        idempotency_key=f"audit-{uuid4().hex[:12]}",
+        request_hash="a" * 64,
+        estado=estado,
+        progreso=17,
+        iteraciones=1000,
+        seed=7,
+        presupuesto_base=1000,
+        presupuesto_maximo=1200,
+        variables=[
+            {
+                "nombre": "riesgo",
+                "distribucion": "normal",
+                "parametros": {"media": 0.0, "desviacion": 0.01},
+                "impacto": "costo_pct",
+            }
+        ],
+        configuracion={
+            "presupuesto_base": 1000,
+            "presupuesto_maximo": 1200,
+            "iteraciones": 1000,
+            "variables": [
+                {
+                    "nombre": "riesgo",
+                    "distribucion": "normal",
+                    "parametros": {"media": 0.0, "desviacion": 0.01},
+                    "impacto": "costo_pct",
+                }
+            ],
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_montecarlo_late_progress_cannot_resurrect_cancelled_run(
+    db_session, tenant_a_user
+):
+    tenant, user = tenant_a_user
+    run = _montecarlo_run(
+        tenant_id=tenant.id,
+        user_id=user.id,
+        estado=EstadoMonteCarlo.CANCELADO.value,
+    )
+    run.progreso = 41
+    db_session.add(run)
+    await db_session.commit()
+
+    changed = await MonteCarloService(
+        db_session, tenant.id
+    ).actualizar_progreso(run.task_id, 90)
+
+    await db_session.refresh(run)
+    assert changed is False
+    assert run.estado == EstadoMonteCarlo.CANCELADO.value
+    assert run.progreso == 41
+
+
+@pytest.mark.asyncio
+async def test_montecarlo_late_enqueue_ack_cannot_downgrade_running_worker(
+    db_session, tenant_a_user
+):
+    tenant, user = tenant_a_user
+    run = _montecarlo_run(
+        tenant_id=tenant.id,
+        user_id=user.id,
+        estado=EstadoMonteCarlo.EN_PROCESO.value,
+    )
+    run.progreso = 35
+    db_session.add(run)
+    await db_session.commit()
+
+    changed = await MonteCarloService(
+        db_session, tenant.id
+    ).marcar_encolado(run.id)
+
+    await db_session.refresh(run)
+    assert changed is False
+    assert run.estado == EstadoMonteCarlo.EN_PROCESO.value
+    assert run.progreso == 35
+
+
+@pytest.mark.asyncio
+async def test_montecarlo_pending_publication_reuses_persisted_task_id(
+    db_session, tenant_a_user, monkeypatch
+):
+    tenant, user = tenant_a_user
+    run = _montecarlo_run(
+        tenant_id=tenant.id,
+        user_id=user.id,
+        estado=EstadoMonteCarlo.PENDIENTE.value,
+    )
+    db_session.add(run)
+    await db_session.commit()
+    await db_session.refresh(run)
+
+    sent = []
+
+    def accept(*args, **kwargs):
+        sent.append((args, kwargs))
+        return SimpleNamespace(id=kwargs["task_id"])
+
+    monkeypatch.setattr(
+        "app.workers.celery_app.celery_app.send_task",
+        accept,
+    )
+
+    published = await MonteCarloService(
+        db_session, tenant.id
+    ).publicar_pendiente(run)
+
+    await db_session.refresh(run)
+    assert published is True
+    assert run.estado == EstadoMonteCarlo.ENCOLADO.value
+    assert len(sent) == 1
+    assert sent[0][1]["task_id"] == run.task_id
+    assert sent[0][0][0] == "app.workers.montecarlo_tasks.ejecutar_simulacion"
+
+
+@pytest.mark.asyncio
+async def test_montecarlo_late_failure_cannot_overwrite_cancelled_run(
+    db_session, tenant_a_user
+):
+    tenant, user = tenant_a_user
+    run = _montecarlo_run(
+        tenant_id=tenant.id,
+        user_id=user.id,
+        estado=EstadoMonteCarlo.CANCELADO.value,
+    )
+    db_session.add(run)
+    await db_session.commit()
+
+    changed = await MonteCarloService(
+        db_session, tenant.id
+    ).fallar(run.task_id, RuntimeError("late worker"))
+
+    await db_session.refresh(run)
+    assert changed is False
+    assert run.estado == EstadoMonteCarlo.CANCELADO.value
+    assert run.error_mensaje is None
