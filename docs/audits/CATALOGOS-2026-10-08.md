@@ -57,11 +57,30 @@ perdería partidas CMIC/CFE.
    → presupuesto → exportación usando sus registros auténticos.
 
 El verificador pasó estructura del paquete CMIC/CFE y de la copia diagnóstica
-con los dos conteos Varela corregidos. No pudo cotejar los SHA de sus PDF fuente
-con los 21 adjuntos presentes: éstos son documentos diferentes de los originales
-de extracción. Esto describe el cotejo local, no la autenticidad de las fuentes
-ni su disponibilidad en otras carpetas. Las marcas `VALIDADO_ESTRUCTURAL` tampoco
-certifican revisión visual completa.
+con los dos conteos Varela corregidos. El primer cotejo de PDF se limitó a los
+21 adjuntos presentes, que eran documentos diferentes de los originales de
+extracción. El cotejo ampliado de biblioteca de la sección siguiente supera
+ese límite. Las marcas `VALIDADO_ESTRUCTURAL` tampoco certifican revisión visual
+completa.
+
+## Cotejo ampliado de originales de biblioteca
+
+Se encontraron los ocho PDF CMIC/CFE por sus nombres originales y el archivo
+`libro-costos-ene-2026-dividido-por-secciones.zip`, que contiene las 34 secciones
+Varela. Cada PDF recuperado coincide byte a byte mediante SHA-256 con su fuente
+registrada; se abrió con un lector PDF y se comprobó el número de páginas.
+No fue necesario reconstruir secciones ni aceptar otra edición por parecido
+de nombre. No falta ninguno de los 42 originales de estos paquetes.
+
+El verificador real, ejecutado contra esos originales, confirma ocho fuentes y
+2,321 páginas para CMIC/CFE, y 42 fuentes y 2,985 páginas para el paquete conjunto
+con los dos conteos corregidos. Sigue conservando la incidencia abierta del
+primer paquete y las 99 del segundo. El detalle por fuente está en
+`CATALOGOS_FUENTES_COTEJO_2026-10-08.json`.
+
+La identidad de los originales está demostrada; no se convierte ese cotejo en
+certificación visual de cada fila ni en prueba de importación/costeo operativo.
+La ausencia de archivos deja de ser un pendiente de estos dos paquetes.
 
 ## Preservación y siguiente cierre
 
