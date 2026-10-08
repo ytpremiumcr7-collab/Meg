@@ -472,10 +472,11 @@ async def test_montecarlo_expired_worker_cannot_write_into_reclaimed_attempt(
                           estado=EstadoMonteCarlo.PENDIENTE.value)
     db_session.add(run)
     await db_session.commit()
+    run_id, task_id = str(run.id), run.task_id
     service = MonteCarloService(db_session, tenant.id)
-    old_token = await service.marcar_en_proceso(str(run.id))
+    old_token = await service.marcar_en_proceso(run_id)
     assert old_token is not None
-    assert await service.actualizar_progreso(run.task_id, 20, token=old_token)
+    assert await service.actualizar_progreso(task_id, 20, token=old_token)
     run.lease_expires_at = datetime.now(timezone.utc) - timedelta(seconds=5)
     await db_session.commit()
 
@@ -488,16 +489,16 @@ async def test_montecarlo_expired_worker_cannot_write_into_reclaimed_attempt(
     await db_session.refresh(run)
     assert run.estado == EstadoMonteCarlo.ENCOLADO.value
     assert run.execution_token is None
-    assert published == [run.task_id]
+    assert published == [task_id]
 
-    new_token = await service.marcar_en_proceso(str(run.id))
+    new_token = await service.marcar_en_proceso(run_id)
     assert new_token is not None and new_token != old_token
     assert run.attempt == 2
-    assert not await service.actualizar_progreso(run.task_id, 99, token=old_token)
-    assert not await service.completar(run.task_id, {"old": True}, 1, token=old_token)
-    assert not await service.fallar(run.task_id, RuntimeError("old"), token=old_token)
-    assert await service.actualizar_progreso(run.task_id, 44, token=new_token)
-    assert await service.completar(run.task_id, {"new": True}, 17, token=new_token)
+    assert not await service.actualizar_progreso(task_id, 99, token=old_token)
+    assert not await service.completar(task_id, {"old": True}, 1, token=old_token)
+    assert not await service.fallar(task_id, RuntimeError("old"), token=old_token)
+    assert await service.actualizar_progreso(task_id, 44, token=new_token)
+    assert await service.completar(task_id, {"new": True}, 17, token=new_token)
     await db_session.refresh(run)
     assert run.resultado == {"new": True}
     assert run.estado == EstadoMonteCarlo.COMPLETADO.value
