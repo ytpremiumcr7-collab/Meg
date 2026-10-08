@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -8,6 +8,7 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from app.core.errors import MegalodonException
 from app.engines.programacion.cpm import Actividad, MotorCPM, TipoDependencia
@@ -15,6 +16,7 @@ from app.models.expediente import ExpedienteObra
 from app.models.procurement import TenderPackage, TenderState
 from app.models.procurement_jobs import ProcurementJob
 from app.models.montecarlo import EstadoMonteCarlo, MonteCarloRun
+from app.models.presupuesto import Presupuesto
 from app.models.programacion import ProgramaObra
 from app.models.user import User, UserRole
 from app.schemas.contrato import ContratoUpdate, ConvenioModificatorioCreate, EntregableCreate
@@ -369,7 +371,7 @@ async def test_montecarlo_late_progress_cannot_resurrect_cancelled_run(
 
     changed = await MonteCarloService(
         db_session, tenant.id
-    ).actualizar_progreso(run.task_id, 90)
+    ).actualizar_progreso(run.task_id, 90, token=uuid4())
 
     await db_session.refresh(run)
     assert changed is False
@@ -453,9 +455,128 @@ async def test_montecarlo_late_failure_cannot_overwrite_cancelled_run(
 
     changed = await MonteCarloService(
         db_session, tenant.id
-    ).fallar(run.task_id, RuntimeError("late worker"))
+    ).fallar(run.task_id, RuntimeError("late worker"), token=uuid4())
 
     await db_session.refresh(run)
     assert changed is False
     assert run.estado == EstadoMonteCarlo.CANCELADO.value
     assert run.error_mensaje is None
+
+
+@pytest.mark.asyncio
+async def test_montecarlo_expired_worker_cannot_write_into_reclaimed_attempt(
+    db_session, tenant_a_user, monkeypatch
+):
+    tenant, user = tenant_a_user
+    run = _montecarlo_run(tenant_id=tenant.id, user_id=user.id,
+                          estado=EstadoMonteCarlo.PENDIENTE.value)
+    db_session.add(run)
+    await db_session.commit()
+    service = MonteCarloService(db_session, tenant.id)
+    old_token = await service.marcar_en_proceso(str(run.id))
+    assert old_token is not None
+    assert await service.actualizar_progreso(run.task_id, 20, token=old_token)
+    run.lease_expires_at = datetime.now(timezone.utc) - timedelta(seconds=5)
+    await db_session.commit()
+
+    published = []
+    def accept(*args, **kwargs):
+        published.append(kwargs["task_id"])
+        return SimpleNamespace(id=kwargs["task_id"])
+    monkeypatch.setattr("app.workers.celery_app.celery_app.send_task", accept)
+    assert await MonteCarloService.reconciliar_pendientes(db_session) == 1
+    await db_session.refresh(run)
+    assert run.estado == EstadoMonteCarlo.ENCOLADO.value
+    assert run.execution_token is None
+    assert published == [run.task_id]
+
+    new_token = await service.marcar_en_proceso(str(run.id))
+    assert new_token is not None and new_token != old_token
+    assert run.attempt == 2
+    assert not await service.actualizar_progreso(run.task_id, 99, token=old_token)
+    assert not await service.completar(run.task_id, {"old": True}, 1, token=old_token)
+    assert not await service.fallar(run.task_id, RuntimeError("old"), token=old_token)
+    assert await service.actualizar_progreso(run.task_id, 44, token=new_token)
+    assert await service.completar(run.task_id, {"new": True}, 17, token=new_token)
+    await db_session.refresh(run)
+    assert run.resultado == {"new": True}
+    assert run.estado == EstadoMonteCarlo.COMPLETADO.value
+
+
+@pytest.mark.asyncio
+async def test_montecarlo_run_and_budget_projection_commit_together(
+    db_session, tenant_a_user
+):
+    tenant, user = tenant_a_user
+    expediente = _expediente(tenant_id=tenant.id, user_id=user.id,
+                            suffix="MONTE-ATOMIC")
+    db_session.add(expediente)
+    await db_session.flush()
+    budget = Presupuesto(
+        tenant_id=tenant.id,
+        expediente_id=expediente.id,
+        identificador=f"MONTE-{uuid4().hex[:8]}",
+        nombre="Presupuesto de verificación",
+        factor_indirecto=0,
+        factor_utilidad=0,
+        factor_impuesto=0.16,
+    )
+    db_session.add(budget)
+    await db_session.flush()
+    run = _montecarlo_run(tenant_id=tenant.id, user_id=user.id,
+                          estado=EstadoMonteCarlo.PENDIENTE.value)
+    run.presupuesto_id = budget.id
+    run.expediente_id = expediente.id
+    db_session.add(run)
+    await db_session.commit()
+
+    service = MonteCarloService(db_session, tenant.id)
+    token = await service.marcar_en_proceso(str(run.id))
+    assert token is not None
+    assert await service.completar(run.task_id, {"p80": 1190}, 37, token=token)
+    await db_session.refresh(run)
+    await db_session.refresh(budget)
+    assert run.estado == EstadoMonteCarlo.COMPLETADO.value
+    assert run.resultado == {"p80": 1190}
+    assert budget.resultado_montecarlo["run_id"] == str(run.id)
+    assert budget.resultado_montecarlo["p80"] == 1190
+
+
+@pytest.mark.asyncio
+async def test_montecarlo_failed_budget_commit_rolls_back_run_completion(
+    db_session, tenant_a_user
+):
+    tenant, user = tenant_a_user
+    expediente = _expediente(tenant_id=tenant.id, user_id=user.id,
+                            suffix="MONTE-ROLLBACK")
+    db_session.add(expediente)
+    await db_session.flush()
+    budget = Presupuesto(
+        tenant_id=tenant.id,
+        expediente_id=expediente.id,
+        identificador=f"MONTE-{uuid4().hex[:8]}",
+        nombre="Presupuesto de rollback",
+        factor_indirecto=0,
+        factor_utilidad=0,
+        factor_impuesto=0.16,
+    )
+    db_session.add(budget)
+    await db_session.flush()
+    run = _montecarlo_run(tenant_id=tenant.id, user_id=user.id,
+                          estado=EstadoMonteCarlo.PENDIENTE.value)
+    run.presupuesto_id = budget.id
+    run.expediente_id = expediente.id
+    db_session.add(run)
+    await db_session.commit()
+
+    service = MonteCarloService(db_session, tenant.id)
+    token = await service.marcar_en_proceso(str(run.id))
+    budget.factor_impuesto = 2
+    with pytest.raises(IntegrityError):
+        await service.completar(run.task_id, {"p80": 1200}, 14, token=token)
+    await db_session.refresh(run)
+    await db_session.refresh(budget)
+    assert run.estado == EstadoMonteCarlo.EN_PROCESO.value
+    assert run.resultado is None
+    assert budget.resultado_montecarlo is None
+    assert float(budget.factor_impuesto) == 0.16
