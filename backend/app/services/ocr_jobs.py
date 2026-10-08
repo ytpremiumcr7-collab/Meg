@@ -151,7 +151,7 @@ class OCRJobService:
                 OCRJob.id == job_id,
                 OCRJob.tenant_id == self.tenant_id,
             )
-            .with_for_update()
+            .with_for_update().execution_options(populate_existing=True)
         )
         if job is None:
             raise MegalodonException(
@@ -219,7 +219,7 @@ class OCRJobService:
                 OCRJob.id == job_id,
                 OCRJob.tenant_id == self.tenant_id,
             )
-            .with_for_update()
+            .with_for_update().execution_options(populate_existing=True)
         )
         if job is None:
             return None, None
@@ -262,7 +262,7 @@ class OCRJobService:
                 OCRJob.id == job_id,
                 OCRJob.tenant_id == self.tenant_id,
             )
-            .with_for_update()
+            .with_for_update().execution_options(populate_existing=True)
         )
         if (
             job is None
@@ -309,7 +309,7 @@ class OCRJobService:
                 OCRJob.id == job_id,
                 OCRJob.tenant_id == self.tenant_id,
             )
-            .with_for_update()
+            .with_for_update().execution_options(populate_existing=True)
         )
         if (
             job is None
@@ -350,7 +350,7 @@ class OCRJobService:
                 )
                 .order_by(OCRJob.started_at)
                 .limit(limit)
-                .with_for_update(skip_locked=True)
+                .with_for_update(skip_locked=True).execution_options(populate_existing=True)
             )
         ).all()
         for job in stale:

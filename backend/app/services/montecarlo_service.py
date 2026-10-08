@@ -257,7 +257,7 @@ class MonteCarloService:
                 MonteCarloRun.id == run_id,
                 MonteCarloRun.tenant_id == self._effective_tenant(tenant_id),
             )
-            .with_for_update()
+            .with_for_update().execution_options(populate_existing=True)
         )
         if run is None:
             return False
@@ -292,7 +292,7 @@ class MonteCarloService:
             select(MonteCarloRun).where(
                 MonteCarloRun.id == UUID(run_id),
                 MonteCarloRun.tenant_id == self._effective_tenant(tenant_id),
-            ).with_for_update()
+            ).with_for_update().execution_options(populate_existing=True)
         )
         if run is None or run.estado not in {
             EstadoMonteCarlo.PENDIENTE.value,
@@ -321,7 +321,7 @@ class MonteCarloService:
             select(MonteCarloRun).where(
                 MonteCarloRun.task_id == task_id,
                 MonteCarloRun.tenant_id == self._effective_tenant(tenant_id),
-            ).with_for_update()
+            ).with_for_update().execution_options(populate_existing=True)
         )
         if run is None or not self._token_vigente(run, token):
             await self.db.rollback()
@@ -341,7 +341,7 @@ class MonteCarloService:
                 select(MonteCarloRun).where(
                     MonteCarloRun.task_id == task_id,
                     MonteCarloRun.tenant_id == self._effective_tenant(tenant_id),
-                ).with_for_update()
+                ).with_for_update().execution_options(populate_existing=True)
             )
             if run is None or not self._token_vigente(run, token):
                 await self.db.rollback()
@@ -352,7 +352,7 @@ class MonteCarloService:
                         Presupuesto.id == run.presupuesto_id,
                         Presupuesto.tenant_id == run.tenant_id,
                         Presupuesto.expediente_id == run.expediente_id,
-                    ).with_for_update()
+                    ).with_for_update().execution_options(populate_existing=True)
                 )
                 if presupuesto is None:
                     raise MegalodonException(
@@ -384,7 +384,7 @@ class MonteCarloService:
             select(MonteCarloRun).where(
                 MonteCarloRun.task_id == task_id,
                 MonteCarloRun.tenant_id == tenant_id,
-            ).with_for_update()
+            ).with_for_update().execution_options(populate_existing=True)
         )
         if run is None:
             raise MegalodonException(
@@ -420,7 +420,7 @@ class MonteCarloService:
             select(MonteCarloRun).where(
                 MonteCarloRun.task_id == task_id,
                 MonteCarloRun.tenant_id == self._effective_tenant(tenant_id),
-            ).with_for_update()
+            ).with_for_update().execution_options(populate_existing=True)
         )
         if run is None or not self._token_vigente(run, token):
             await self.db.rollback()
@@ -444,7 +444,7 @@ class MonteCarloService:
             select(MonteCarloRun).where(
                 MonteCarloRun.task_id == task_id,
                 MonteCarloRun.tenant_id == self._effective_tenant(tenant_id),
-            ).with_for_update()
+            ).with_for_update().execution_options(populate_existing=True)
         )
         if run is None or not self._token_vigente(run, token):
             await self.db.rollback()
@@ -483,7 +483,7 @@ class MonteCarloService:
                 MonteCarloRun.id == run.id,
                 MonteCarloRun.tenant_id == run.tenant_id,
             )
-            .with_for_update()
+            .with_for_update().execution_options(populate_existing=True)
         )
         if locked is None or locked.estado != EstadoMonteCarlo.PENDIENTE.value:
             await self.db.rollback()
@@ -527,7 +527,7 @@ class MonteCarloService:
                 )
                 .order_by(MonteCarloRun.lease_expires_at)
                 .limit(limite)
-                .with_for_update(skip_locked=True)
+                .with_for_update(skip_locked=True).execution_options(populate_existing=True)
             )
         ).all()
         for run in stale:
@@ -557,7 +557,7 @@ class MonteCarloService:
                 )
                 .order_by(MonteCarloRun.updated_at)
                 .limit(limite)
-                .with_for_update(skip_locked=True)
+                .with_for_update(skip_locked=True).execution_options(populate_existing=True)
             )
         ).all()
         for run in unclaimed:
