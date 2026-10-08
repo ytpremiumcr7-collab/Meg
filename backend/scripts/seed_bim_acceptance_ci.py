@@ -70,6 +70,9 @@ async def main():
         db.add(CatalogoAPU(tenant_id=tenant.id, clave='CI-WALL-ONLY',
             descripcion='Muro de prueba sintética CI', tipo='CONCEPTO', unidad='m3',
             precio_unitario=125, fuente='CI_SYNTHETIC_NOT_MARKET_PRICE'))
+        db.add(CatalogoAPU(tenant_id=tenant.id, clave='CI-EARTHWORK',
+            descripcion='Movimiento de tierras sintético CI', tipo='CONCEPTO', unidad='m3',
+            precio_unitario=100, fuente='CI_SYNTHETIC_NOT_MARKET_PRICE'))
         fuente = CatalogoFuente(nombre='CI sintético: catálogo de aceptación', tipo='CUSTOM',
             vigencia_inicio='2020-01-01', vigencia_fin='2020-12-31', moneda='MXN', activo=True)
         db.add(fuente); await db.flush()

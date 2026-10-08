@@ -26,6 +26,7 @@ class ResultadoVolumen:
     volumen_neto_m3: float  # fill - cut
     area_analizada_m2: float
     num_triangulos_analizados: int
+    cobertura: dict
 
 
 def _surface(points, *, preserve_indices=False) -> np.ndarray:
@@ -155,12 +156,23 @@ class MotorVolumenes:
             raise MegalodonException(ErrorCode.TOPOGRAFIA_ERROR, "Las superficies no tienen área común; no se solapan")
         if not np.isfinite([cut, fill, area_total]).all():
             raise MegalodonException(ErrorCode.TOPOGRAFIA_ERROR, "Volumen fuera del rango de cálculo")
+        area_existente = sum(p.area for p in ex_polygons)
+        area_proyecto = sum(p.area for p in pr_polygons)
+        tolerancia = max(1e-9, max(area_existente, area_proyecto) * 1e-10)
+        pendientes = [max(0.0, area - area_total) for area in (area_existente, area_proyecto)]
+        pendientes = [0.0 if area <= tolerancia else area for area in pendientes]
         return ResultadoVolumen(
             volumen_corte_m3=round(cut, 3),
             volumen_terraplen_m3=round(fill, 3),
             volumen_neto_m3=round(fill - cut, 3),
             area_analizada_m2=round(area_total, 3),
             num_triangulos_analizados=triangles,
+            cobertura={
+                "completa": not any(pendientes), "area_existente_m2": area_existente,
+                "area_proyecto_m2": area_proyecto, "area_comun_m2": area_total,
+                "area_existente_pendiente_m2": pendientes[0],
+                "area_proyecto_pendiente_m2": pendientes[1],
+            },
         )
 
     def calcular_contra_elevacion_referencia(

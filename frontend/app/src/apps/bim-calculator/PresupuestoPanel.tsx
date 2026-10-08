@@ -3,6 +3,7 @@ import { megalodonClient } from '@/lib/api-client';
 import type { Presupuesto } from '@/lib/megalodon-client';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { permisosBim } from '@/lib/bim-permissions';
+import CatalogoPartidaPicker from './CatalogoPartidaPicker';
 
 const money = (value: number) => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(value);
 const buttonClass = 'px-3 py-2 rounded-md text-xs border border-(--border-subtle) disabled:opacity-40 disabled:cursor-not-allowed';
@@ -26,8 +27,10 @@ export default function PresupuestoPanel({ expedienteId, nuevoId }: { expediente
   }, [expedienteId, nuevoId]);
   const budget = items.find(p => p.id === selectedId);
   const coverage = budget?.metadatos?.bim_cobertura;
+  const topografia = budget?.metadatos?.topografia_cobertura;
   const pending = budget?.partidas.filter(p => !(p.cantidad > 0 && p.precio_unitario > 0 && p.importe > 0)) || [];
-  const complete = coverage?.completa !== false && !!budget?.partidas.length && pending.length === 0 && budget.monto_total > 0;
+  const topografiaSinEvidencia = !!budget && (!!topografia || budget.partidas.some(p => p.metadatos?.topografia != null)) && !budget.metadatos?.topografia_evidencia;
+  const complete = !topografiaSinEvidencia && coverage?.completa !== false && topografia?.completa !== false && !!budget?.partidas.length && pending.length === 0 && budget.monto_total > 0;
   async function change(state: 'CALCULADO' | 'VALIDADO' | 'APROBADO') {
     if (!budget || busy) return;
     setBusy(true); setError('');
@@ -63,6 +66,8 @@ export default function PresupuestoPanel({ expedienteId, nuevoId }: { expediente
       {budget && <>
         <div className="flex justify-between text-sm"><span role="status">Estado: {budget.estado}</span><strong>{money(budget.monto_total)}</strong></div>
         {coverage && <p role="status" className="text-xs">{coverage.completa ? 'Mediciones completas' : 'Presupuesto PARCIAL'}: {coverage.elementos_medidos} de {coverage.elementos_totales} elementos medidos. {coverage.capturas.length} capturas con referencia.</p>}
+        {topografia && <p role="status" className="text-xs">{topografia.completa ? 'Cobertura topográfica completa' : 'Presupuesto PARCIAL: cobertura topográfica pendiente'}. Área común: {topografia.area_comun_m2.toLocaleString('es-MX')} m². Pendiente: {topografia.area_existente_pendiente_m2.toLocaleString('es-MX')} m² en terreno y {topografia.area_proyecto_pendiente_m2.toLocaleString('es-MX')} m² en proyecto.</p>}
+        {topografiaSinEvidencia && <p role="alert" className="text-xs text-(--danger)">Falta la evidencia del terreno. Genera una nueva versión antes de aprobar o exportar.</p>}
         {!!coverage?.capturas.length && <details className="text-xs space-y-2">
           <summary className="cursor-pointer">Ver fuentes de las cantidades capturadas</summary>
           {coverage.capturas.map(capture => <div key={capture.elemento_id} className="p-2 rounded bg-(--surface-elevated) break-words">
@@ -71,11 +76,16 @@ export default function PresupuestoPanel({ expedienteId, nuevoId }: { expediente
             <p className="text-(--text-muted) break-all">Usuario: {capture.usuario_id} · {new Date(capture.capturado_en).toLocaleString('es-MX')}</p>
           </div>)}
         </details>}
-        {!complete && <p className="text-xs text-(--warning)">Lo medido ya está costeado cuando tiene precio. Quedan {coverage?.elementos_pendientes.length || 0} elementos sin medición y {pending.length} partida(s) pendientes. Completa las mediciones arriba y asigna precios para generar una nueva versión. La aprobación está bloqueada.</p>}
+        {!complete && <p className="text-xs text-(--warning)">Lo medido ya está costeado cuando tiene precio. {coverage && <>Quedan {coverage.elementos_pendientes.length} elementos sin medición. </>}{pending.length} partida(s) requieren cantidad o precio. Completa la cobertura y asigna los conceptos correspondientes. La aprobación está bloqueada.</p>}
         <div className="overflow-x-auto"><table className="w-full text-xs"><caption className="sr-only">Partidas del presupuesto</caption>
           <thead><tr><th className="text-left p-1">Concepto</th><th>Cantidad</th><th>Unidad</th><th>Precio</th><th>Importe</th></tr></thead>
           <tbody>{budget.partidas.map(p => <tr key={p.id} className="border-t border-(--border-subtle)">
-            <td className="p-2">{p.descripcion}</td><td>{p.cantidad}</td><td>{p.unidad}</td>
+            <td className="p-2">{p.descripcion}
+              {p.metadatos?.catalogo_asignado && <p className="mt-1 text-(--text-muted)">{p.metadatos.catalogo_asignado.descripcion} · {p.metadatos.catalogo_asignado.fuente} · {p.metadatos.catalogo_asignado.vigencia_inicio || 'Vigencia sin registrar'}</p>}
+              {p.metadatos?.topografia != null && canWrite && !['VALIDADO', 'APROBADO'].includes(budget.estado) &&
+                <CatalogoPartidaPicker key={p.id} expedienteId={expedienteId} presupuestoId={budget.id} partida={p}
+                  onSaved={result => setItems(previous => previous.map(item => item.id === result.id ? result : item))} />}
+            </td><td>{p.cantidad}</td><td>{p.unidad}</td>
             <td>{p.precio_unitario > 0 ? money(p.precio_unitario) : 'Pendiente'}</td><td>{money(p.importe)}</td>
           </tr>)}</tbody></table></div>
         <div className="flex flex-wrap gap-2">

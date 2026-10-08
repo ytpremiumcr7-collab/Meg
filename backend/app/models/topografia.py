@@ -180,6 +180,8 @@ class CalculoVolumen(Base, UUIDMixin, AuditMixin):
     volumen_terraplen_m3: Mapped[float] = mapped_column(Numeric(18, 3), nullable=False)
     volumen_neto_m3: Mapped[float] = mapped_column(Numeric(18, 3), nullable=False)
     area_analizada_m2: Mapped[float] = mapped_column(Numeric(18, 3), nullable=False)
+    # NULL historical evidence is intentional: it must be recalculated, never fabricated.
+    evidencia: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     # Puente hacia costeo, igual que ElementoBIM.partida_id.
     partida_id: Mapped[UUID | None] = mapped_column(

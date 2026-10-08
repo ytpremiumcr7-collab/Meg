@@ -225,7 +225,37 @@ test('user creates an obra, resumes an IFC job after restart, approves and expor
     const volume=await volumeCreated.json();
     assert.equal(volume.volumen_corte_m3,.042);
     assert.equal(volume.volumen_terraplen_m3,.208);
+    assert.equal(volume.evidencia.cobertura.completa,true);
     await page.getByRole('button',{name:'Generar presupuesto de movimiento de tierras',exact:true}).waitFor();
+    await page.getByLabel('Referencia de parámetros topográficos').fill('CI: revisión sintética del terreno');
+    const [earthBudgetResponse] = await Promise.all([
+      page.waitForResponse(r=>r.request().method()==='POST' && /\/topografia\/[^/]+\/volumenes\/[^/]+\/generar-presupuesto$/.test(new URL(r.url()).pathname)),
+      page.getByRole('button',{name:'Generar presupuesto de movimiento de tierras',exact:true}).click()]);
+    assert.equal(earthBudgetResponse.status(),200);
+    const earthBudget = await earthBudgetResponse.json();
+    assert.equal(earthBudget.partidas.length,2);
+    assert.ok(earthBudget.partidas.every(p=>p.metadatos.topografia.calculo_id===volume.id));
+    const earthReview=page.getByRole('region',{name:'Revisión del presupuesto'});
+    for (const number of [1,2]) {
+      await earthReview.getByLabel(`Buscar concepto para partida ${number}`).fill('CI-EARTHWORK');
+      const select=earthReview.getByLabel(`Concepto para partida ${number}`);
+      await select.locator('option').filter({hasText:'Movimiento de tierras sintético CI'}).waitFor({state:'attached'});
+      const option=await select.locator('option').filter({hasText:'Movimiento de tierras sintético CI'}).getAttribute('value');
+      await select.selectOption(option);
+      const [priced] = await Promise.all([
+        page.waitForResponse(r=>r.request().method()==='PUT' && /\/partidas\/[^/]+\/catalogo$/.test(new URL(r.url()).pathname)),
+        earthReview.getByRole('button',{name:`Asignar concepto a partida ${number}`,exact:true}).click()]);
+      assert.equal(priced.status(),200);
+      const result=await priced.json();
+      assert.ok(result.partidas.every(p=>p.metadatos.topografia.calculo_id===volume.id));
+    }
+    await earthReview.getByRole('status').filter({hasText:'Estado: CALCULADO'}).waitFor();
+    await earthReview.getByRole('button',{name:'Validar presupuesto',exact:true}).click();
+    await earthReview.getByRole('status').filter({hasText:'Estado: VALIDADO'}).waitFor();
+    await earthReview.getByRole('button',{name:'Aprobar presupuesto',exact:true}).click();
+    await earthReview.getByRole('status').filter({hasText:'Estado: APROBADO'}).waitFor();
+    const [earthDownload]=await Promise.all([page.waitForEvent('download'),earthReview.getByRole('button',{name:'Descargar Excel',exact:true}).click()]);
+    await earthDownload.saveAs(join(evidence,'earthwork-budget.xlsx'));
     await page.screenshot({path:join(evidence,'10-topografia-utm.png'),fullPage:true});
     await page.getByLabel('Elevación de referencia').fill('1');
     assert.equal(await page.getByRole('button',{name:'Generar presupuesto de movimiento de tierras',exact:true}).count(),0);

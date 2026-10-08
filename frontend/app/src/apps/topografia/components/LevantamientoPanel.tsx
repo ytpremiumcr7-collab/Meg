@@ -9,6 +9,7 @@ import * as THREE from 'three';
 import { Upload, Loader2, AlertCircle, Layers3, Calculator, FileSpreadsheet, Plus } from 'lucide-react';
 import { megalodonClient } from '@/lib/api-client';
 import type { Levantamiento, SuperficieTIN, CalculoVolumen } from '@/lib/megalodon-client';
+import PresupuestoPanel from '@/apps/bim-calculator/PresupuestoPanel';
 
 function rampaColor(t: number): [number, number, number] {
   const c = t < 0.5
@@ -122,6 +123,8 @@ export default function LevantamientoPanel({
   const [calculando, setCalculando] = useState(false);
   const [resultadoVolumen, setResultadoVolumen] = useState<CalculoVolumen | null>(null);
   const [mensajePresupuesto, setMensajePresupuesto] = useState('');
+  const [generandoPresupuesto, setGenerandoPresupuesto] = useState(false);
+  const [presupuestoCreadoId, setPresupuestoCreadoId] = useState('');
   const [factorIndirecto, setFactorIndirecto] = useState(0);
   const [factorUtilidad, setFactorUtilidad] = useState(0);
   const [factorImpuesto, setFactorImpuesto] = useState(0);
@@ -175,6 +178,7 @@ export default function LevantamientoPanel({
   useEffect(() => {
     setResultadoVolumen(null);
     setMensajePresupuesto('');
+    setPresupuestoCreadoId('');
   }, [superficieA, superficieB, elevacionRef, activo?.id, expedienteId]);
 
   useEffect(() => { onLevantamientoChange?.(activo); }, [activo, onLevantamientoChange]);
@@ -221,12 +225,13 @@ export default function LevantamientoPanel({
   };
 
   const generarPresupuesto = async () => {
-    if (!resultadoVolumen) return;
+    if (!resultadoVolumen || generandoPresupuesto) return;
     if (!referenciaParametros.trim()) {
       setMensajePresupuesto('Indica la referencia o fuente de los parámetros de costeo.');
       return;
     }
     setMensajePresupuesto('');
+    setGenerandoPresupuesto(true);
     try {
       const presupuesto = await megalodonClient.topografia.generarPresupuestoMovimientoTierras(
         resultadoVolumen.id,
@@ -242,8 +247,13 @@ export default function LevantamientoPanel({
           },
         },
       );
-      setMensajePresupuesto(`Presupuesto ${presupuesto.identificador} creado (solo cantidades — falta capturar precios unitarios).`);
-    } catch (e) { setMensajePresupuesto(e instanceof Error ? e.message : 'No se pudo generar el presupuesto'); }
+      if (contextoActual.current === contextoVolumen) {
+        setPresupuestoCreadoId(presupuesto.id);
+        setMensajePresupuesto(`Presupuesto ${presupuesto.identificador} creado con origen de cada cantidad. Falta capturar precios unitarios.${resultadoVolumen.evidencia?.cobertura.completa === false ? ' La cobertura pendiente bloquea la aprobación.' : ''}`);
+      }
+    } catch (e) {
+      if (contextoActual.current === contextoVolumen) setMensajePresupuesto(e instanceof Error ? e.message : 'No se pudo generar el presupuesto');
+    } finally { setGenerandoPresupuesto(false); }
   };
 
   return (
@@ -342,6 +352,10 @@ export default function LevantamientoPanel({
                 <div className="flex justify-between"><span style={{ color: 'var(--text-muted)' }}>Corte</span><span style={{ color: 'var(--danger)' }}>{resultadoVolumen.volumen_corte_m3.toLocaleString('es-MX')} m³</span></div>
                 <div className="flex justify-between"><span style={{ color: 'var(--text-muted)' }}>Relleno</span><span style={{ color: 'var(--success)' }}>{resultadoVolumen.volumen_terraplen_m3.toLocaleString('es-MX')} m³</span></div>
                 <div className="flex justify-between font-semibold"><span style={{ color: 'var(--text-muted)' }}>Neto</span><span>{resultadoVolumen.volumen_neto_m3.toLocaleString('es-MX')} m³</span></div>
+                {resultadoVolumen.evidencia && <p role="status" style={{ color: resultadoVolumen.evidencia.cobertura.completa ? 'var(--text-muted)' : 'var(--warning)' }}>
+                  {resultadoVolumen.evidencia.cobertura.completa ? 'Cobertura completa' : 'Medición parcial'} · Área común: {resultadoVolumen.evidencia.cobertura.area_comun_m2.toLocaleString('es-MX')} m².
+                  {!resultadoVolumen.evidencia.cobertura.completa && <> Pendiente: {resultadoVolumen.evidencia.cobertura.area_existente_pendiente_m2.toLocaleString('es-MX')} m² en terreno y {resultadoVolumen.evidencia.cobertura.area_proyecto_pendiente_m2.toLocaleString('es-MX')} m² en proyecto. Puedes costear lo medido; la aprobación requiere completar la cobertura.</>}
+                </p>}
                 <div className="grid grid-cols-3 gap-1 pt-1.5">
                   <label className="space-y-0.5">
                     <span style={{ color: 'var(--text-muted)' }}>Indirectos %</span>
@@ -356,9 +370,10 @@ export default function LevantamientoPanel({
                     <input type="number" min="0" max="100" step="0.01" value={factorImpuesto * 100} onChange={(e) => setFactorImpuesto(Number(e.target.value) / 100)} className="w-full h-7 rounded px-1.5 outline-hidden" style={{ background: 'var(--surface-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }} />
                   </label>
                 </div>
-                <input value={referenciaParametros} onChange={(e) => setReferenciaParametros(e.target.value)} placeholder="Fuente o referencia de los parámetros" className="w-full h-7 rounded px-2 outline-hidden" style={{ background: 'var(--surface-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }} />
-                <button onClick={() => void generarPresupuesto()} disabled={!referenciaParametros.trim()} className="w-full mt-1.5 h-7 rounded text-[11px] disabled:opacity-40" style={{ border: '1px solid var(--border-active)', color: 'var(--text-secondary)' }}>Generar presupuesto de movimiento de tierras</button>
+                <input aria-label="Referencia de parámetros topográficos" value={referenciaParametros} onChange={(e) => setReferenciaParametros(e.target.value)} placeholder="Fuente o referencia de los parámetros" className="w-full h-7 rounded px-2 outline-hidden" style={{ background: 'var(--surface-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }} />
+                <button onClick={() => void generarPresupuesto()} disabled={generandoPresupuesto || !referenciaParametros.trim()} className="w-full mt-1.5 h-7 rounded text-[11px] disabled:opacity-40" style={{ border: '1px solid var(--border-active)', color: 'var(--text-secondary)' }}>{generandoPresupuesto ? 'Guardando presupuesto…' : 'Generar presupuesto de movimiento de tierras'}</button>
                 {mensajePresupuesto && <p style={{ color: 'var(--text-muted)' }}>{mensajePresupuesto}</p>}
+                {presupuestoCreadoId && <PresupuestoPanel key={expedienteId} expedienteId={expedienteId} nuevoId={presupuestoCreadoId} />}
               </div>
             )}
           </div>

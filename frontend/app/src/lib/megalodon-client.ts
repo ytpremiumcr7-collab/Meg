@@ -751,6 +751,24 @@ export interface SuperficieTIN {
   creado_por_id?: string;
 }
 
+export interface CoberturaTopografia {
+  completa: boolean;
+  area_existente_m2: number;
+  area_proyecto_m2: number;
+  area_comun_m2: number;
+  area_existente_pendiente_m2: number;
+  area_proyecto_pendiente_m2: number;
+}
+
+export interface EvidenciaTopografia {
+  version: number;
+  calculo_id: string;
+  sha256: string;
+  cobertura: CoberturaTopografia;
+  existente: { superficie_id: string; levantamiento_id: string; crs: string; malla_sha256: string };
+  proyecto: EvidenciaTopografia['existente'] | null;
+}
+
 export interface CalculoVolumen {
   id: string;
   /** Denormalizado, mismo motivo que en SuperficieTIN. */
@@ -762,6 +780,7 @@ export interface CalculoVolumen {
   volumen_terraplen_m3: number;
   volumen_neto_m3: number;
   area_analizada_m2: number;
+  evidencia?: EvidenciaTopografia | null;
   creado_por_id?: string;
 }
 
@@ -993,6 +1012,11 @@ export interface Partida {
   cantidad: number;
   precio_unitario: number;
   importe: number;
+  metadatos?: {
+    catalogo_asignado?: { catalogo_id: string; descripcion: string; fuente: string;
+      vigencia_inicio: string | null; precio_observado: string; precio_aplicado: string };
+    [key: string]: unknown;
+  };
   conceptos: ConceptoPresupuesto[];
 }
 
@@ -1018,6 +1042,8 @@ export interface Presupuesto {
   factor_riesgo?: number | null;
   metadatos?: {
     parametros_costeo?: ParametrosCosteoSnapshot;
+    topografia_cobertura?: CoberturaTopografia;
+    topografia_evidencia?: EvidenciaTopografia;
     bim_cobertura?: { completa: boolean; elementos_totales: number; elementos_medidos: number;
       elementos_pendientes: string[]; capturas: Array<{ elemento_id: string; unidad: string;
         cantidad: number; referencia: string; usuario_id: string; capturado_en: string }> };
@@ -1493,6 +1519,10 @@ export class MegalodonClient {
 
     recalcular: async (expedienteId: string, presupuestoId: string): Promise<Presupuesto> => {
       return this.request<Presupuesto>("POST", `/presupuestos/${expedienteId}/presupuestos/${presupuestoId}/recalcular`);
+    },
+    asignarCatalogoPartida: async (expedienteId: string, presupuestoId: string, partidaId: string, catalogoId: string): Promise<Presupuesto> => {
+      return this.request<Presupuesto>('PUT', `/presupuestos/${expedienteId}/presupuestos/${presupuestoId}/partidas/${partidaId}/catalogo`,
+        { catalogo_apu_id: catalogoId });
     },
 
     actualizarParametrosCosteo: async (

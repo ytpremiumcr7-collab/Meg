@@ -14,6 +14,8 @@ como funcionalidad, solo como scaffolding.
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID, uuid4
 import math
+from copy import deepcopy
+from decimal import Decimal
 
 from pyproj import CRS
 from pyproj.exceptions import CRSError
@@ -27,6 +29,7 @@ from app.models.topografia import Levantamiento, PuntoTopografico, SuperficieTIN
 from app.models.expediente import ExpedienteObra
 from app.engines.topografia.triangulacion import MotorTriangulacion
 from app.engines.topografia.volumenes import MotorVolumenes
+from app.engines.topografia import evidencia as evidencia_tin
 from app.engines.topografia.geodesia import MotorGeodesia
 from app.engines.topografia.levantamientos import MotorPerfiles
 from app.engines.topografia.coordenadas import ImportadorPuntos
@@ -84,7 +87,8 @@ class TopografiaService:
             ExpedienteObra, ExpedienteObra.id == Levantamiento.expediente_id,
         ).where(Levantamiento.id == superficie.levantamiento_id,
                 Levantamiento.expediente_id == superficie.expediente_id,
-                ExpedienteObra.tenant_id == self._require_tenant()))
+                ExpedienteObra.tenant_id == self._require_tenant()).with_for_update(of=Levantamiento, read=True)
+                .execution_options(populate_existing=True))
         if levantamiento is None:
             raise MegalodonException(ErrorCode.SUPERFICIE_NO_ENCONTRADA, "La superficie no pertenece al levantamiento indicado")
         return self._crs_metrico(levantamiento)
@@ -316,7 +320,8 @@ class TopografiaService:
         return superficie
 
     async def _puntos_desde_superficie(self, superficie_id: UUID) -> Tuple[SuperficieTIN, List[Tuple[float, float, float]]]:
-        superficie = await self.db.scalar(select(SuperficieTIN).join(Levantamiento, Levantamiento.id == SuperficieTIN.levantamiento_id).join(ExpedienteObra, ExpedienteObra.id == Levantamiento.expediente_id).where(SuperficieTIN.id == superficie_id, ExpedienteObra.tenant_id == self._require_tenant()))
+        superficie = await self.db.scalar(select(SuperficieTIN).join(Levantamiento, Levantamiento.id == SuperficieTIN.levantamiento_id).join(ExpedienteObra, ExpedienteObra.id == Levantamiento.expediente_id).where(SuperficieTIN.id == superficie_id, ExpedienteObra.tenant_id == self._require_tenant())
+            .with_for_update(of=SuperficieTIN, read=True).execution_options(populate_existing=True))
         if not superficie:
             raise MegalodonException(ErrorCode.SUPERFICIE_NO_ENCONTRADA, f"Superficie {superficie_id} no encontrada")
         v = superficie.malla_vertices
@@ -338,6 +343,12 @@ class TopografiaService:
                 ErrorCode.TOPOGRAFIA_ERROR,
                 "Seleccione una sola referencia: superficie de proyecto o elevación plana, ambas son excluyentes",
             )
+        if elevacion_referencia is not None and (
+            not math.isfinite(elevacion_referencia) or abs(elevacion_referencia) > 999999.9999
+            or Decimal(str(elevacion_referencia)).quantize(Decimal('.0001')) != Decimal(str(elevacion_referencia))
+        ):
+            raise MegalodonException(ErrorCode.TOPOGRAFIA_ERROR,
+                "La elevación de referencia debe ser finita y admitir como máximo cuatro decimales en metros")
 
         superficie_existente, puntos_existente = await self._puntos_desde_superficie(superficie_existente_id)
         crs_existente = await self._marco_superficie(superficie_existente)
@@ -375,6 +386,11 @@ class TopografiaService:
             actualizado_por_id=creado_por_id,
         )
         self.db.add(calculo)
+        calculo.evidencia = evidencia_tin.crear(
+            calculo, resultado, evidencia_tin.fuente(superficie_existente, crs_existente),
+            evidencia_tin.fuente(superficie_proyecto, crs_proyecto) if superficie_proyecto_id else None,
+            self._require_tenant(),
+        )
         await self.db.commit()
         await self.db.refresh(calculo)
         return calculo
@@ -383,6 +399,7 @@ class TopografiaService:
         self, *, calculo_volumen_id: UUID, expediente_id: UUID,
         parametros_costeo: ParametrosCosteoSnapshot,
         nombre: str = "Presupuesto - Movimiento de tierras",
+        creado_por_id: Optional[UUID] = None,
     ):
         """Crea un presupuesto con 2 partidas (corte y terraplén) a partir
         de un cálculo de volumen ya hecho -- mismo patrón que
@@ -390,9 +407,25 @@ class TopografiaService:
         precio unitario todavía)."""
         from app.services.presupuesto_service import PresupuestoService
 
-        calculo = await self.db.scalar(select(CalculoVolumen).join(SuperficieTIN, SuperficieTIN.id == CalculoVolumen.superficie_existente_id).join(Levantamiento, Levantamiento.id == SuperficieTIN.levantamiento_id).join(ExpedienteObra, ExpedienteObra.id == Levantamiento.expediente_id).where(CalculoVolumen.id == calculo_volumen_id, ExpedienteObra.tenant_id == self._require_tenant()))
+        calculo = await self.db.scalar(select(CalculoVolumen).join(SuperficieTIN, SuperficieTIN.id == CalculoVolumen.superficie_existente_id).join(Levantamiento, Levantamiento.id == SuperficieTIN.levantamiento_id).join(ExpedienteObra, ExpedienteObra.id == Levantamiento.expediente_id).where(CalculoVolumen.id == calculo_volumen_id, CalculoVolumen.expediente_id == expediente_id, ExpedienteObra.tenant_id == self._require_tenant())
+            .with_for_update(of=CalculoVolumen, read=True).execution_options(populate_existing=True))
         if not calculo:
             raise MegalodonException(ErrorCode.TOPOGRAFIA_ERROR, f"Cálculo de volumen {calculo_volumen_id} no encontrado")
+
+        evidencia = evidencia_tin.verificar(calculo, self._require_tenant())
+        for key, sid in (("existente", calculo.superficie_existente_id), ("proyecto", calculo.superficie_proyecto_id)):
+            if sid is None:
+                if evidencia[key] is not None:
+                    raise MegalodonException(ErrorCode.TOPOGRAFIA_ERROR, "La referencia del cálculo cambió; vuelva a calcular")
+                continue
+            superficie, _ = await self._puntos_desde_superficie(sid)
+            crs = await self._marco_superficie(superficie)
+            if superficie.expediente_id != expediente_id or evidencia_tin.fuente(superficie, crs) != evidencia[key]:
+                raise MegalodonException(ErrorCode.TOPOGRAFIA_ERROR, "La superficie cambió después del cálculo; vuelva a calcular el volumen")
+        referencia = evidencia["elevacion_referencia"]
+        if ((referencia is None) != (calculo.elevacion_referencia is None)
+                or referencia is not None and Decimal(str(referencia)) != calculo.elevacion_referencia):
+            raise MegalodonException(ErrorCode.TOPOGRAFIA_ERROR, "La elevación de referencia cambió; vuelva a calcular")
 
         partidas_data = []
         if float(calculo.volumen_corte_m3) > 0:
@@ -411,19 +444,25 @@ class TopografiaService:
             raise MegalodonException(ErrorCode.TOPOGRAFIA_ERROR, "El cálculo de volumen no tiene corte ni terraplén (¿superficies idénticas?)")
 
         presupuesto_service = PresupuestoService(self.db, self._require_tenant())
-        presupuesto = await presupuesto_service.crear_desde_costeo(
-            expediente_id=expediente_id,
-            nombre=nombre,
-            partidas_data=partidas_data,
-            parametros_costeo=parametros_costeo,
-        )
-
-        # Nota: el enlace partida_id -> calculo_volumen (para saber cuál
-        # partida del presupuesto corresponde a este cálculo) se deja
-        # pendiente hasta que exista un endpoint de "detalle de
-        # presupuesto con partidas anidadas" -- misma limitación ya
-        # documentada para BIM en CONEXION_BACKEND.md.
-        return presupuesto
+        try:
+            presupuesto = await presupuesto_service.crear_desde_costeo(
+                expediente_id=expediente_id, nombre=nombre, partidas_data=partidas_data,
+                parametros_costeo=parametros_costeo, creado_por_id=creado_por_id, auto_commit=False,
+            )
+            presupuesto.metadatos = {**presupuesto.metadatos,
+                "topografia_evidencia": deepcopy(evidencia), "topografia_cobertura": deepcopy(evidencia["cobertura"])}
+            tipos = (["CORTE"] if float(calculo.volumen_corte_m3) > 0 else []) + (
+                ["TERRAPLEN"] if float(calculo.volumen_terraplen_m3) > 0 else [])
+            for partida, tipo in zip(sorted(presupuesto.partidas, key=lambda p: p.numero), tipos):
+                partida.metadatos = {**(partida.metadatos or {}), "topografia": {
+                    "calculo_id": str(calculo.id), "evidencia_sha256": evidencia["sha256"],
+                    "tipo": tipo, "cantidad_original_m3": str(partida.cantidad), "unidad": "m3",
+                }}
+            await self.db.commit()
+        except Exception:
+            await self.db.rollback()
+            raise
+        return await presupuesto_service._reconstruir_partidas_desde_db(presupuesto.id, expediente_id)
 
     # ─── Curvas de nivel y perfiles ──────────────────────────────────
 

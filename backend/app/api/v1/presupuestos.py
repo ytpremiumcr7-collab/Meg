@@ -98,6 +98,7 @@ class PartidaOut(BaseModel):
     cantidad: float
     precio_unitario: float
     importe: float
+    metadatos: dict = Field(default_factory=dict)
     conceptos: List[ConceptoOut] = Field(default_factory=list)
 
     class Config:
@@ -111,6 +112,10 @@ class AgregarPartidaCatalogoRequest(BaseModel):
 
 class ActualizarCantidadPartidaRequest(BaseModel):
     cantidad: float = Field(..., gt=0)
+
+
+class AsignarCatalogoPartidaRequest(BaseModel):
+    catalogo_apu_id: UUID
 
 
 class PresupuestoOut(BaseModel):
@@ -277,6 +282,16 @@ async def eliminar_partida(
         presupuesto_id, expediente_id=expediente_id, partida_id=partida_id,
         actualizado_por_id=current_user.id,
     )
+
+
+@router.put('/{expediente_id}/presupuestos/{presupuesto_id}/partidas/{partida_id}/catalogo', response_model=PresupuestoOut)
+async def asignar_catalogo_partida(
+    expediente_id: UUID, presupuesto_id: UUID, partida_id: UUID, data: AsignarCatalogoPartidaRequest,
+    db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
+    _rate_limit: bool = Depends(rate_limit_strict),
+):
+    return await PresupuestoService(db, current_user.tenant_id).asignar_catalogo_partida(
+        presupuesto_id, expediente_id, partida_id, data.catalogo_apu_id, current_user.id)
 
 
 @router.post("/{expediente_id}/presupuestos/{presupuesto_id}/recalcular", response_model=PresupuestoOut)

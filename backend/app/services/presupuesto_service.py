@@ -8,7 +8,7 @@ PresupuestoService - Gestión de presupuestos programables con costeo.
 """
 from typing import List, Optional, Dict, Any
 from uuid import UUID, uuid4
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from copy import deepcopy
 
 from sqlalchemy import select
@@ -29,9 +29,25 @@ def partidas_pendientes(partidas) -> list[int]:
 
 
 def presupuesto_completo(presupuesto) -> bool:
-    coverage = (getattr(presupuesto, "metadatos", None) or {}).get("bim_cobertura", {})
-    return bool(coverage.get("completa", True) and presupuesto.partidas and not partidas_pendientes(presupuesto.partidas)
+    return bool(cobertura_completa(presupuesto) and presupuesto.partidas and not partidas_pendientes(presupuesto.partidas)
                 and presupuesto.monto_total and presupuesto.monto_total > 0)
+
+
+def cobertura_completa(presupuesto) -> bool:
+    from app.engines.topografia.evidencia import partidas_coinciden
+    metadata = getattr(presupuesto, "metadatos", None) or {}
+    return (all(metadata.get(key, {}).get("completa", True) for key in ("bim_cobertura", "topografia_cobertura"))
+            and partidas_coinciden(presupuesto))
+
+
+def nombre_exportacion(presupuesto) -> str:
+    metadata = presupuesto.metadatos or {}
+    pendientes = []
+    if not metadata.get("bim_cobertura", {}).get("completa", True):
+        pendientes.append("mediciones BIM")
+    if not metadata.get("topografia_cobertura", {}).get("completa", True):
+        pendientes.append("cobertura topográfica")
+    return presupuesto.nombre + (" [PARCIAL: falta " + " y ".join(pendientes) + "]" if pendientes else "")
 
 
 class PresupuestoService(BaseService[Presupuesto]):
@@ -86,6 +102,7 @@ class PresupuestoService(BaseService[Presupuesto]):
         zona_economica: str = "CENTRO",
         creado_por_id: Optional[UUID] = None,
         evidencia_bim: Optional[dict] = None,
+        auto_commit: bool = True,
     ) -> Presupuesto:
         """Crea presupuesto desde datos de costeo con cálculo completo.
 
@@ -332,7 +349,10 @@ class PresupuestoService(BaseService[Presupuesto]):
 
         if referencias_indices:
             presupuesto.metadatos = {**presupuesto.metadatos, 'actualizaciones_indices': referencias_indices}
-        await self.db.commit()
+        if auto_commit:
+            await self.db.commit()
+        else:
+            await self.db.flush()
 
         # BUG EVITADO: db.refresh(presupuesto) solo recarga columnas
         # escalares, no relaciones -- si el caller (o el response_model)
@@ -381,6 +401,7 @@ class PresupuestoService(BaseService[Presupuesto]):
         a PartidaCosteo, preservando el precio manual de partidas tipo
         tabulador (las que no tienen conceptos)."""
         from app.engines.costos.indices import verificar_snapshot
+        self._verificar_catalogos_asignados(presupuesto)
         referencias = (presupuesto.metadatos or {}).get('actualizaciones_indices', {})
         encontradas = {}
         try:
@@ -515,9 +536,7 @@ class PresupuestoService(BaseService[Presupuesto]):
 
         presupuesto_costeo = PresupuestoCosteo(
             identificador=presupuesto.identificador,
-            nombre=(presupuesto.nombre + " [PARCIAL: faltan mediciones BIM]"
-                    if not (presupuesto.metadatos or {}).get("bim_cobertura", {}).get("completa", True)
-                    else presupuesto.nombre),
+            nombre=nombre_exportacion(presupuesto),
             partidas=partidas_costeo,
             parametros=self._parametros_desde_orm(presupuesto),
         )
@@ -543,7 +562,7 @@ class PresupuestoService(BaseService[Presupuesto]):
         # dejar una aprobación "vieja" apuntando a montos que ya no son
         # los que están en pantalla.
         nuevo_estado = (EstadoPresupuesto.CALCULADO.value if presupuesto_completo(presupuesto_costeo)
-            and (presupuesto.metadatos or {}).get('bim_cobertura', {}).get('completa', True)
+            and cobertura_completa(presupuesto)
             else EstadoPresupuesto.BORRADOR.value)
 
         await self.update(
@@ -568,16 +587,16 @@ class PresupuestoService(BaseService[Presupuesto]):
     async def generar_excel(self, presupuesto_id: UUID, expediente_id: UUID) -> bytes:
         """Genera Excel del presupuesto a partir de los datos reales en BD."""
         presupuesto = await self._reconstruir_partidas_desde_db(presupuesto_id, expediente_id)
+        self._validar_origen_topografia(presupuesto)
         partidas_costeo = self._partidas_costeo_desde_orm(presupuesto)
 
         presupuesto_costeo = PresupuestoCosteo(
             identificador=presupuesto.identificador,
-            nombre=(presupuesto.nombre + " [PARCIAL: faltan mediciones BIM]"
-                    if not (presupuesto.metadatos or {}).get("bim_cobertura", {}).get("completa", True)
-                    else presupuesto.nombre),
+            nombre=nombre_exportacion(presupuesto),
             partidas=partidas_costeo,
             parametros=self._parametros_desde_orm(presupuesto),
             cobertura_bim=(presupuesto.metadatos or {}).get("bim_cobertura"),
+            evidencia_topografia=(presupuesto.metadatos or {}).get("topografia_evidencia"),
         )
         presupuesto_costeo = self.motor_costeo.calcular_presupuesto(presupuesto_costeo)
 
@@ -600,6 +619,7 @@ class PresupuestoService(BaseService[Presupuesto]):
         ningún mecanismo para esto porque el campo `estado` tampoco
         existía antes de esta ronda de unificación."""
         presupuesto = await self._reconstruir_partidas_desde_db(presupuesto_id, expediente_id, bloquear=True)
+        self._verificar_catalogos_asignados(presupuesto)
         if nuevo_estado not in {e.value for e in EstadoPresupuesto}:
             raise MegalodonException(
                 ErrorCode.PRESUPUESTO_ERROR,
@@ -610,8 +630,9 @@ class PresupuestoService(BaseService[Presupuesto]):
             pendientes = partidas_pendientes(presupuesto.partidas)
             if not presupuesto_completo(presupuesto):
                 raise MegalodonException(ErrorCode.PRESUPUESTO_ERROR,
-                    "Presupuesto incompleto: capture cantidades y precios antes de validar o aprobar",
-                    details={"partidas_pendientes": pendientes})
+                    "Presupuesto incompleto: complete cantidades, precios y cobertura antes de validar o aprobar",
+                    details={"partidas_pendientes": pendientes,
+                             "topografia_cobertura": (presupuesto.metadatos or {}).get("topografia_cobertura")})
         permitidas = self._TRANSICIONES_ESTADO.get(presupuesto.estado, set())
         if nuevo_estado not in permitidas:
             raise MegalodonException(
@@ -628,20 +649,64 @@ class PresupuestoService(BaseService[Presupuesto]):
         """Genera PDF del presupuesto a partir de los datos reales en BD.
         Mismo patrón que generar_excel()."""
         presupuesto = await self._reconstruir_partidas_desde_db(presupuesto_id, expediente_id)
+        self._validar_origen_topografia(presupuesto)
         partidas_costeo = self._partidas_costeo_desde_orm(presupuesto)
 
         presupuesto_costeo = PresupuestoCosteo(
             identificador=presupuesto.identificador,
-            nombre=(presupuesto.nombre + " [PARCIAL: faltan mediciones BIM]"
-                    if not (presupuesto.metadatos or {}).get("bim_cobertura", {}).get("completa", True)
-                    else presupuesto.nombre),
+            nombre=nombre_exportacion(presupuesto),
             partidas=partidas_costeo,
             parametros=self._parametros_desde_orm(presupuesto),
             cobertura_bim=(presupuesto.metadatos or {}).get("bim_cobertura"),
+            evidencia_topografia=(presupuesto.metadatos or {}).get("topografia_evidencia"),
         )
         presupuesto_costeo = self.motor_costeo.calcular_presupuesto(presupuesto_costeo)
 
         return self.motor_costeo.generar_pdf(presupuesto_costeo)
+
+    @staticmethod
+    def _validar_origen_topografia(presupuesto):
+        from app.engines.topografia.evidencia import partidas_coinciden
+        if not partidas_coinciden(presupuesto):
+            raise MegalodonException(ErrorCode.PRESUPUESTO_ERROR,
+                "Las cantidades no corresponden a su evidencia topográfica; genere una nueva versión desde el terreno")
+
+    @staticmethod
+    def _verificar_catalogos_asignados(presupuesto):
+        from app.engines.topografia.evidencia import huella
+        from decimal import InvalidOperation
+        try:
+            for partida in presupuesto.partidas:
+                metadata = partida.metadatos or {}
+                snapshot = metadata.get('catalogo_asignado')
+                if snapshot is None:
+                    if metadata.get('topografia') and partida.precio_unitario > 0:
+                        raise ValueError('Falta el origen del precio medido')
+                    continue
+                payload = dict(snapshot)
+                digest = payload.pop('sha256')
+                if digest != huella(payload) or Decimal(snapshot['precio_aplicado']) != partida.precio_unitario:
+                    raise ValueError('Precio o huella distintos de la revisión asignada')
+                if snapshot['desglose']:
+                    if len(partida.conceptos) != 1:
+                        raise ValueError('Cambió el APU asignado')
+                    concepto = partida.conceptos[0]
+                    if (concepto.clave != snapshot['clave'] or concepto.descripcion != snapshot['descripcion']
+                            or concepto.unidad != partida.unidad or concepto.cantidad != 1
+                            or concepto.costo_directo_unitario != Decimal(snapshot['precio_aplicado'])):
+                        raise ValueError('Cambió la identidad del APU asignado')
+                    campos = ('clave', 'descripcion', 'tipo', 'unidad', 'cantidad', 'precio_unitario', 'rendimiento')
+                    def values(item):
+                        return tuple(Decimal(str(item[key])) if key in campos[4:] else item[key] for key in campos)
+                    expected = sorted(values(item) for item in snapshot['desglose'])
+                    actual = sorted(values({key: getattr(item,key) for key in campos}) for item in concepto.insumos)
+                    if expected != actual or any(i.actualizacion_precio is not None for i in concepto.insumos):
+                        raise ValueError('Cambió el desglose del precio asignado')
+                elif partida.conceptos:
+                    raise ValueError('Un precio observado fue sustituido por otro APU')
+        except (KeyError, TypeError, ValueError, InvalidOperation) as exc:
+            raise MegalodonException(ErrorCode.PRESUPUESTO_ERROR,
+                'El precio o APU no corresponde al catálogo asignado; revise el concepto antes de recalcular, aprobar o exportar') from exc
 
     async def validar_sobrecostos(
         self,
@@ -858,9 +923,78 @@ class PresupuestoService(BaseService[Presupuesto]):
                 ErrorCode.DOCUMENTO_NO_ENCONTRADO,
                 f"Partida {partida_id} no encontrada en el presupuesto {presupuesto_id}",
             )
+        if (partida.metadatos or {}).get('topografia'):
+            raise MegalodonException(ErrorCode.PRESUPUESTO_ERROR,
+                'Corrija el terreno y genere una nueva versión; la cantidad conserva el cálculo topográfico de origen.')
         partida.cantidad = nueva_cantidad
         await self.db.flush()
         return await self.recalcular(presupuesto_id, expediente_id, actualizado_por_id)
+
+    async def asignar_catalogo_partida(
+        self, presupuesto_id: UUID, expediente_id: UUID, partida_id: UUID,
+        catalogo_apu_id: UUID, actualizado_por_id: UUID,
+    ) -> Presupuesto:
+        """Price a measured line without replacing its quantity or source."""
+        from app.schemas.apu_costeo import InsumoCosteoInput
+        from app.engines.topografia.evidencia import huella
+        from pydantic import ValidationError
+        presupuesto = await self._reconstruir_partidas_desde_db(presupuesto_id, expediente_id, bloquear=True)
+        self._validar_origen_topografia(presupuesto)
+        if presupuesto.estado in (EstadoPresupuesto.VALIDADO.value, EstadoPresupuesto.APROBADO.value):
+            raise MegalodonException(ErrorCode.PRESUPUESTO_ERROR, 'Genere una revisión para cambiar un precio validado o aprobado')
+        partida = next((p for p in presupuesto.partidas if p.id == partida_id), None)
+        if partida is None:
+            raise MegalodonException(ErrorCode.DOCUMENTO_NO_ENCONTRADO, 'Partida no encontrada en el presupuesto')
+        if not (partida.metadatos or {}).get('topografia'):
+            raise MegalodonException(ErrorCode.PRESUPUESTO_ERROR, 'Esta asignación conserva partidas medidas de topografía')
+        catalogo = await self.db.scalar(select(CatalogoAPU).where(
+            CatalogoAPU.id == catalogo_apu_id, CatalogoAPU.tenant_id == self.tenant_id,
+        ).with_for_update(read=True).execution_options(populate_existing=True))
+        if catalogo is None:
+            raise MegalodonException(ErrorCode.DOCUMENTO_NO_ENCONTRADO, 'Concepto de catálogo no encontrado')
+        normalizar = lambda unidad: unidad.strip().lower().replace('³', '3').replace('²', '2')
+        if normalizar(catalogo.unidad) != normalizar(partida.unidad) or catalogo.tipo != 'CONCEPTO':
+            raise MegalodonException(ErrorCode.PRESUPUESTO_ERROR, 'Seleccione un concepto cotizable con la misma unidad de la partida')
+        if catalogo.incluye_iva:
+            raise MegalodonException(ErrorCode.PRESUPUESTO_ERROR, 'Se requiere un precio sin IVA; el impuesto se calcula en el presupuesto')
+        try:
+            insumos = [InsumoCosteoInput.model_validate(item) for item in (catalogo.desglose or {}).get('insumos', [])]
+        except ValidationError as exc:
+            raise MegalodonException(ErrorCode.PRESUPUESTO_ERROR, 'El desglose del catálogo requiere revisión') from exc
+        if any(item.actualizacion_precio is not None for item in insumos):
+            raise MegalodonException(ErrorCode.PRESUPUESTO_ERROR, 'Revise la actualización de índices antes de asignar este desglose')
+        concepto = None
+        if insumos:
+            concepto_costeo = ConceptoCosteo(clave=catalogo.clave, descripcion=catalogo.descripcion,
+                unidad=partida.unidad, insumos=[InsumoCosteo(**item.model_dump(exclude={'actualizacion_precio'})) for item in insumos])
+            precio = concepto_costeo.costo_directo_unitario
+            concepto = Concepto(id=uuid4(), tenant_id=self.tenant_id, clave=catalogo.clave,
+                descripcion=catalogo.descripcion, unidad=partida.unidad, cantidad=1, costo_directo_unitario=precio,
+                insumos=[Insumo(id=uuid4(), tenant_id=self.tenant_id, clave=item.clave, descripcion=item.descripcion,
+                    tipo=item.tipo, unidad=item.unidad, cantidad=item.cantidad, precio_unitario=item.precio_unitario,
+                    rendimiento=item.rendimiento, importe=item.importe) for item in concepto_costeo.insumos])
+        else:
+            precio = Decimal(str(catalogo.precio_unitario))
+        precio = precio.quantize(Decimal('.01'), rounding=ROUND_HALF_UP)
+        if not precio.is_finite() or precio <= 0:
+            raise MegalodonException(ErrorCode.PRESUPUESTO_ERROR, 'El concepto no tiene un precio positivo verificable')
+        snapshot = {'catalogo_id': str(catalogo.id), 'clave': catalogo.clave, 'descripcion': catalogo.descripcion,
+            'unidad': catalogo.unidad, 'fuente': catalogo.fuente, 'vigencia_inicio': catalogo.vigencia_inicio,
+            'vigencia_fin': catalogo.vigencia_fin, 'zona_economica': catalogo.zona_economica,
+            'precio_observado': str(catalogo.precio_unitario), 'precio_aplicado': str(precio),
+            'desglose': [item.model_dump(mode='json') for item in insumos], 'usuario_id': str(actualizado_por_id)}
+        snapshot['sha256'] = huella(snapshot)
+        try:
+            partida.conceptos.clear()
+            if concepto is not None:
+                partida.conceptos.append(concepto)
+            partida.precio_unitario = precio
+            partida.metadatos = {**partida.metadatos, 'catalogo_asignado': snapshot}
+            await self.db.flush()
+            return await self.recalcular(presupuesto_id, expediente_id, actualizado_por_id)
+        except Exception:
+            await self.db.rollback()
+            raise
 
     async def eliminar_partida(
         self,
@@ -879,6 +1013,9 @@ class PresupuestoService(BaseService[Presupuesto]):
                 ErrorCode.DOCUMENTO_NO_ENCONTRADO,
                 f"Partida {partida_id} no encontrada en el presupuesto {presupuesto_id}",
             )
+        if (partida.metadatos or {}).get('topografia'):
+            raise MegalodonException(ErrorCode.PRESUPUESTO_ERROR,
+                'Las partidas de movimiento de tierras conservan el cálculo de origen; genere una nueva versión.')
         await self.db.delete(partida)
         if (presupuesto.metadatos or {}).get('actualizaciones_indices'):
             eliminados = {str(i.id) for c in partida.conceptos for i in c.insumos}

@@ -131,7 +131,7 @@ class SuperficieResumenOut(BaseModel):
 class VolumenRequest(BaseModel):
     superficie_existente_id: UUID
     superficie_proyecto_id: Optional[UUID] = None
-    elevacion_referencia: Optional[float] = Field(default=None, allow_inf_nan=False)
+    elevacion_referencia: Optional[float] = Field(default=None, allow_inf_nan=False, ge=-999999.9999, le=999999.9999)
 
 
 class GenerarPresupuestoMovimientoRequest(BaseModel):
@@ -148,6 +148,7 @@ class VolumenOut(BaseModel):
     volumen_terraplen_m3: float
     volumen_neto_m3: float
     area_analizada_m2: float
+    evidencia: Optional[dict] = None
 
     class Config:
         from_attributes = True
@@ -351,6 +352,7 @@ async def generar_presupuesto_movimiento_tierras(
         expediente_id=expediente_id,
         nombre=data.nombre,
         parametros_costeo=data.parametros_costeo.to_domain(),
+        creado_por_id=current_user.id,
     )
     return PresupuestoOut.model_validate(presupuesto)
 

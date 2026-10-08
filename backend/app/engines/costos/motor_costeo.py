@@ -116,6 +116,7 @@ class PresupuestoCosteo:
     parametros: ParametrosCosteoSnapshot
     partidas: List[PartidaCosteo] = field(default_factory=list)
     cobertura_bim: Optional[dict] = None
+    evidencia_topografia: Optional[dict] = None
 
     @property
     def factor_indirecto(self) -> Decimal:
@@ -321,6 +322,31 @@ class MotorCosteo:
             evidence.column_dimensions['A'].width = 65
             evidence.column_dimensions['D'].width = 60
             wb.active = 0
+        if presupuesto.evidencia_topografia is not None:
+            source = presupuesto.evidencia_topografia
+            coverage = source['cobertura']
+            evidence = wb.create_sheet('Topografía', 0)
+            evidence.append(['MEDICIONES COMPLETAS' if coverage['completa'] else 'PRESUPUESTO PARCIAL: falta cobertura topográfica'])
+            evidence.append(['Cálculo', source['calculo_id'], 'Algoritmo', source['algoritmo']])
+            evidence.append(['Huella de evidencia', source['sha256']])
+            evidence.append(['Área común (m2)', coverage['area_comun_m2']])
+            evidence.append(['Terreno sin analizar (m2)', coverage['area_existente_pendiente_m2']])
+            evidence.append(['Proyecto sin analizar (m2)', coverage['area_proyecto_pendiente_m2']])
+            evidence.append(['Corte medido (m3)', source['resultados']['volumen_corte_m3']])
+            evidence.append(['Relleno medido (m3)', source['resultados']['volumen_terraplen_m3']])
+            evidence.append(['Elevación de referencia (m)', source['elevacion_referencia']])
+            evidence.append(['Fuente', 'Superficie', 'Levantamiento', 'CRS', 'Huella de malla'])
+            for key in ('existente', 'proyecto'):
+                surface = source[key]
+                if surface:
+                    evidence.append([key, surface['superficie_id'], surface['levantamiento_id'], surface['crs'], surface['malla_sha256']])
+            for row in evidence:
+                for cell in row:
+                    if isinstance(cell.value, str):
+                        cell.data_type = 's'
+            evidence.column_dimensions['A'].width = 50
+            evidence.column_dimensions['B'].width = 70
+            wb.active = 0
         wb.save(buffer)
         return buffer.getvalue()
 
@@ -354,6 +380,13 @@ class MotorCosteo:
         elementos = []
         elementos.append(Paragraph(presupuesto.nombre, titulo_style))
         elementos.append(Paragraph(f"Identificador: {presupuesto.identificador}", subtitulo_style))
+        if presupuesto.evidencia_topografia is not None:
+            source = presupuesto.evidencia_topografia
+            coverage = source['cobertura']
+            elementos.append(Paragraph(
+                f"Topografía: cálculo {source['calculo_id']}. Área común: {coverage['area_comun_m2']:.3f} m². "
+                f"Pendiente en terreno: {coverage['area_existente_pendiente_m2']:.3f} m²; "
+                f"en proyecto: {coverage['area_proyecto_pendiente_m2']:.3f} m².", subtitulo_style))
         elementos.append(Spacer(1, 0.5 * cm))
 
         header = ["No.", "Descripción", "Unidad", "Cantidad", "P.U.", "Importe"]
