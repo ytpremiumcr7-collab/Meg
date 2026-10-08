@@ -64,6 +64,11 @@ class MonteCarloRun(Base, UUIDMixin, TenantMixin, AuditMixin):
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     execution_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # Per-run fencing. A redelivered or expired worker must never mutate the
+    # result of a newer claim, even when both share the same Celery task_id.
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    execution_token: Mapped[Optional[UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    lease_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         UniqueConstraint("tenant_id", "idempotency_key", name="uq_monte_carlo_tenant_idempotency"),
