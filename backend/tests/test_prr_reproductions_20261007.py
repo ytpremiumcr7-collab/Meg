@@ -581,3 +581,33 @@ async def test_montecarlo_failed_budget_commit_rolls_back_run_completion(
     assert run.resultado is None
     assert budget.resultado_montecarlo is None
     assert float(budget.factor_impuesto) == 0.16
+
+
+@pytest.mark.asyncio
+async def test_montecarlo_old_queued_run_is_reoffered_after_broker_loss(
+    db_session, tenant_a_user, monkeypatch
+):
+    tenant, user = tenant_a_user
+    run = _montecarlo_run(
+        tenant_id=tenant.id,
+        user_id=user.id,
+        estado=EstadoMonteCarlo.ENCOLADO.value,
+    )
+    run.updated_at = datetime.now(timezone.utc) - timedelta(seconds=1800)
+    db_session.add(run)
+    await db_session.commit()
+    task_id = run.task_id
+    sent = []
+
+    def accept(*args, **kwargs):
+        sent.append(kwargs["task_id"])
+        return SimpleNamespace(id=kwargs["task_id"])
+
+    monkeypatch.setattr("app.workers.celery_app.celery_app.send_task", accept)
+    assert await MonteCarloService.reconciliar_pendientes(
+        db_session, limite=10, stale_after_seconds=1320
+    ) == 1
+    await db_session.refresh(run)
+    assert run.estado == EstadoMonteCarlo.ENCOLADO.value
+    assert run.attempt == 0
+    assert sent == [task_id]
