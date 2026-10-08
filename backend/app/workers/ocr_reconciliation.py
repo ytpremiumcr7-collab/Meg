@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from app.models.base import AsyncSessionLocal
+from app.workers.database import AsyncSessionLocal
 from app.services.ocr_jobs import OCRJobService
 from app.workers.celery_app import celery_app
 

@@ -276,6 +276,7 @@ class OCRJobService:
                 .with_for_update().execution_options(populate_existing=True)
             )
             if not self._vigente(job, claim_token):
+                await self.db.rollback()
                 return False
 
             if job.presupuesto_id is not None and resultado.metrados:
@@ -287,6 +288,9 @@ class OCRJobService:
                     auto_commit=False,
                 )
 
+            if not self._vigente(job, claim_token):
+                await self.db.rollback()
+                return False
             job.result = {
                 "status": "SUCCESS",
                 "filename": job.filename,

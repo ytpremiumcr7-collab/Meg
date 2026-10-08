@@ -24,38 +24,38 @@ def ejecutar_simulacion(self, task_id: str, run_id: str, data: dict):
     claim_token: UUID | None = None
 
     async def _db_progress(progress: int) -> bool:
-        from app.models.base import AsyncSessionLocal
+        from app.workers.database import AsyncSessionLocal
         from app.services.montecarlo_service import MonteCarloService
 
         async with AsyncSessionLocal() as db:
             return await MonteCarloService(db, UUID(data["_tenant_id"])).actualizar_progreso(task_id, progress, token=claim_token)
 
     async def _mark_started() -> UUID | None:
-        from app.models.base import AsyncSessionLocal
+        from app.workers.database import AsyncSessionLocal
         from app.services.montecarlo_service import MonteCarloService
         async with AsyncSessionLocal() as db:
             return await MonteCarloService(db, UUID(data["_tenant_id"])).marcar_en_proceso(run_id)
 
     async def _is_cancelled() -> bool:
-        from app.models.base import AsyncSessionLocal
+        from app.workers.database import AsyncSessionLocal
         from app.services.montecarlo_service import MonteCarloService
         async with AsyncSessionLocal() as db:
             return await MonteCarloService(db, UUID(data["_tenant_id"])).esta_cancelada(task_id)
 
     async def _mark_complete(resultado: dict, execution_ms: int) -> bool:
-        from app.models.base import AsyncSessionLocal
+        from app.workers.database import AsyncSessionLocal
         from app.services.montecarlo_service import MonteCarloService
         async with AsyncSessionLocal() as db:
             return await MonteCarloService(db, UUID(data["_tenant_id"])).completar(task_id, resultado, execution_ms, token=claim_token)
 
     async def _mark_failed(exc: Exception, execution_ms: int) -> bool:
-        from app.models.base import AsyncSessionLocal
+        from app.workers.database import AsyncSessionLocal
         from app.services.montecarlo_service import MonteCarloService
         async with AsyncSessionLocal() as db:
             return await MonteCarloService(db, UUID(data["_tenant_id"])).fallar(task_id, exc, execution_ms, token=claim_token)
 
     async def _prepare_retry() -> bool:
-        from app.models.base import AsyncSessionLocal
+        from app.workers.database import AsyncSessionLocal
         from app.services.montecarlo_service import MonteCarloService
         async with AsyncSessionLocal() as db:
             return await MonteCarloService(db, UUID(data["_tenant_id"])).preparar_reintento(task_id, token=claim_token)

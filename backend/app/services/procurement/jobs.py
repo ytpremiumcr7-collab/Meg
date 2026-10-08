@@ -5,7 +5,7 @@ from hashlib import sha256
 import json
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import select, or_, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +14,7 @@ from app.models.procurement import TenderPackage
 from app.models.procurement_jobs import ProcurementIdempotency, ProcurementJob
 from app.models.user import User
 from app.workers.celery_app import celery_app
+from app.services.procurement.preparation_runs import fail_attempt_trace
 
 
 PROCUREMENT_WORKER_HARD_LIMIT_SECONDS = 1800
@@ -64,7 +65,7 @@ class ProcurementJobService:
                 ProcurementJob.id == job.id,
                 ProcurementJob.tenant_id == job.tenant_id,
             )
-            .with_for_update()
+            .with_for_update().execution_options(populate_existing=True)
         )
         if locked is None:
             raise MegalodonException(
@@ -203,6 +204,9 @@ class ProcurementJobService:
                 )
             )
             if existing is not None:
+                if existing.request_hash != request_hash:
+                    raise MegalodonException(ErrorCode.CONFLICT,
+                        "La Idempotency-Key ya fue utilizada para otra operación.", 409)
                 job = await self.db.get(ProcurementJob, existing.job_id)
                 if job is not None:
                     if job.status == "PENDING":
@@ -236,19 +240,26 @@ class ProcurementJobService:
             await db.scalars(
                 select(ProcurementJob)
                 .where(
-                    ProcurementJob.status == "RUNNING",
-                    ProcurementJob.started_at.is_not(None),
-                    ProcurementJob.started_at < stale_before,
+                    or_(
+                        (ProcurementJob.status == "RUNNING") &
+                        (ProcurementJob.lease_expires_at <= now),
+                        (ProcurementJob.status == "QUEUED") &
+                        (ProcurementJob.claim_token.is_(None)) &
+                        (ProcurementJob.updated_at < stale_before),
+                    ),
                 )
                 .order_by(ProcurementJob.started_at)
                 .limit(limit)
-                .with_for_update(skip_locked=True)
+                .with_for_update(skip_locked=True).execution_options(populate_existing=True)
             )
         ).all()
         for job in stale:
+            await fail_attempt_trace(db, job, code="WORKER_LEASE_EXPIRED", detail="El intento durable venció.")
             job.status = "PENDING"
             job.progress = 0
             job.started_at = None
+            job.claim_token = None
+            job.lease_expires_at = None
             job.error_code = "WORKER_LEASE_EXPIRED"
             job.error_message = (
                 "El worker excedió su límite de ejecución; el job será republicado."
@@ -301,6 +312,58 @@ class ProcurementJobService:
             published += 1
 
         return published
+
+    @staticmethod
+    def attempt_is_current(job: ProcurementJob | None, token: UUID) -> bool:
+        if job is None or job.status != "RUNNING" or job.claim_token != token:
+            return False
+        expires = job.lease_expires_at
+        if expires is None:
+            return False
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+        return expires > datetime.now(timezone.utc)
+
+    async def claim(self, job_id: UUID) -> tuple[ProcurementJob, UUID | None]:
+        job = await self.db.scalar(select(ProcurementJob).where(
+            ProcurementJob.id == job_id, ProcurementJob.tenant_id == self.user.tenant_id,
+        ).with_for_update().execution_options(populate_existing=True))
+        if job is None:
+            raise RuntimeError("Procurement job no encontrado")
+        if job.status not in {"PENDING", "QUEUED"}:
+            return job, None
+        if job.creado_por_id != self.user.id or not self.user.is_active:
+            raise RuntimeError("Invalid durable Procurement user context")
+        token = uuid4()
+        job.attempt += 1
+        job.claim_token = token
+        job.lease_expires_at = datetime.now(timezone.utc) + timedelta(
+            seconds=PROCUREMENT_WORKER_HARD_LIMIT_SECONDS + PROCUREMENT_STALE_GRACE_SECONDS)
+        job.status = "RUNNING"
+        job.progress = 5
+        job.started_at = datetime.now(timezone.utc)
+        job.error_code = None
+        job.error_message = None
+        job.finished_at = None
+        await self.db.commit()
+        return job, token
+
+    async def fail_attempt(self, job_id: UUID, token: UUID, exc: Exception) -> bool:
+        job = await self.db.scalar(select(ProcurementJob).where(
+            ProcurementJob.id == job_id, ProcurementJob.tenant_id == self.user.tenant_id,
+        ).with_for_update().execution_options(populate_existing=True))
+        if not self.attempt_is_current(job, token):
+            return False
+        await fail_attempt_trace(self.db, job, code=type(exc).__name__, detail=str(exc))
+        job.status = "FAILED"
+        job.progress = 100
+        job.error_code = type(exc).__name__
+        job.error_message = str(exc)[:4000]
+        job.finished_at = datetime.now(timezone.utc)
+        job.claim_token = None
+        job.lease_expires_at = None
+        await self.db.commit()
+        return True
 
     async def get(self, job_id: UUID) -> ProcurementJob:
         job = await self.db.scalar(

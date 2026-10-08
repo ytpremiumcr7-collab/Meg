@@ -24,7 +24,7 @@ from app.workers.celery_app import celery_app
 )
 def extraer_metrados_ocr(self, job_id: str):
     async def _claim():
-        from app.models.base import AsyncSessionLocal
+        from app.workers.database import AsyncSessionLocal
         from app.models.ocr_job import OCRJob
         from app.services.ocr_jobs import OCRJobService
 
@@ -46,7 +46,7 @@ def extraer_metrados_ocr(self, job_id: str):
             }
 
     async def _complete(token: str, resultado) -> bool:
-        from app.models.base import AsyncSessionLocal
+        from app.workers.database import AsyncSessionLocal
         from app.models.ocr_job import OCRJob
         from app.services.ocr_jobs import OCRJobService
 
@@ -59,7 +59,7 @@ def extraer_metrados_ocr(self, job_id: str):
             ).completar(UUID(job_id), token, resultado)
 
     async def _fail(token: str, exc: Exception) -> str:
-        from app.models.base import AsyncSessionLocal
+        from app.workers.database import AsyncSessionLocal
         from app.models.ocr_job import OCRJob
         from app.services.ocr_jobs import OCRJobService
 
@@ -85,9 +85,11 @@ def extraer_metrados_ocr(self, job_id: str):
     try:
         from app.integrations.supabase_storage import storage_documentos
 
-        file_bytes = asyncio.run(
-            storage_documentos().descargar(claim["storage_path"])
-        )
+        async def download():
+            from app.integrations.supabase_storage import worker_storage_scope
+            async with worker_storage_scope():
+                return await storage_documentos().descargar(claim["storage_path"])
+        file_bytes = asyncio.run(download())
         digest = sha256(file_bytes).hexdigest()
         if digest != claim["source_sha256"]:
             raise RuntimeError(

@@ -366,6 +366,10 @@ class MonteCarloService:
                     if run.created_at else None,
                     **resultado,
                 }
+            # Waiting for the budget lock may have consumed the remaining lease.
+            if not self._token_vigente(run, token):
+                await self.db.rollback()
+                return False
             run.estado = EstadoMonteCarlo.COMPLETADO.value
             run.progreso = 100
             run.resultado = resultado

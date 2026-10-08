@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from app.models.base import AsyncSessionLocal
+from app.workers.database import AsyncSessionLocal
 from app.services.procurement.jobs import ProcurementJobService
 from app.services.procurement.storage_guard import ProcurementStorageGuard
 from app.workers.celery_app import celery_app
@@ -17,7 +17,11 @@ from app.workers.celery_app import celery_app
     acks_late=True,
 )
 def reconcile_procurement_storage(self):
-    return asyncio.run(ProcurementStorageGuard().reconcile(max_rows=250))
+    async def reconcile():
+        from app.integrations.supabase_storage import worker_storage_scope
+        async with worker_storage_scope():
+            return await ProcurementStorageGuard(session_factory=AsyncSessionLocal).reconcile(max_rows=250)
+    return asyncio.run(reconcile())
 
 
 @celery_app.task(

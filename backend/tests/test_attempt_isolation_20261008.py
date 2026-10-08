@@ -237,3 +237,27 @@ async def test_ocr_api_removes_source_when_database_confirms_no_job(db_session, 
             presupuesto_id=None, idempotency_key=None, db=db_session,
             current_user=user, _rate_limit=True)
     assert storage.eliminar.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_postgresql_montecarlo_worker_runs_across_separate_event_loops(db_session, tenant_a_user):
+    if db_session.bind.dialect.name != "postgresql":
+        pytest.skip("Requires migrated PostgreSQL and real Redis Celery backend")
+    import asyncio
+    from app.workers.montecarlo_tasks import ejecutar_simulacion
+    tenant, user = tenant_a_user
+    for _ in range(2):
+        run = _montecarlo_run(tenant_id=tenant.id, user_id=user.id,
+                             estado=EstadoMonteCarlo.PENDIENTE.value)
+        db_session.add(run)
+        await db_session.commit()
+        run_id, task_id = run.id, run.task_id
+        payload = MonteCarloService.payload_worker(run)
+        result = await asyncio.to_thread(ejecutar_simulacion.apply,
+            args=[task_id, str(run_id), payload], task_id=task_id, throw=True)
+        assert result.result["status"] == "SUCCESS"
+        async with AsyncSessionLocalTest() as fresh:
+            saved = await fresh.get(MonteCarloRun, run_id)
+            assert saved.estado == EstadoMonteCarlo.COMPLETADO.value
+            assert saved.resultado
+            assert saved.execution_token is None

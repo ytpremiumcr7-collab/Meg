@@ -20,6 +20,8 @@ como la identidad de servicio (service role key) en cada llamada, así que
 un cliente compartido (singleton) es seguro.
 """
 import asyncio
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from typing import List, Optional
 
 from app.config import settings
@@ -29,9 +31,39 @@ _client = None
 _client_lock = asyncio.Lock()
 
 
+_worker_scope = ContextVar("worker_storage_scope", default=None)
+
+
+@asynccontextmanager
+async def worker_storage_scope():
+    """Own worker HTTP connections inside the current task's event loop."""
+    scope = {"client": None, "http": None}
+    token = _worker_scope.set(scope)
+    try:
+        yield
+    finally:
+        try:
+            if scope["http"] is not None:
+                await scope["http"].aclose()
+        finally:
+            _worker_scope.reset(token)
+
+
 async def get_storage_client():
     """Cliente async compartido de Supabase."""
     global _client
+    scope = _worker_scope.get()
+    if scope is not None:
+        if scope["client"] is None:
+            if not settings.SUPABASE_URL or not settings.SUPABASE_SERVICE_KEY:
+                raise MegalodonException(ErrorCode.ARCHIVO_ERROR, "Supabase Storage no configurado")
+            import httpx
+            from supabase import acreate_client
+            from supabase.lib.client_options import AsyncClientOptions
+            scope["http"] = httpx.AsyncClient(timeout=60.0)
+            scope["client"] = await acreate_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_KEY,
+                options=AsyncClientOptions(httpx_client=scope["http"], auto_refresh_token=False, persist_session=False))
+        return scope["client"]
     if _client is None:
         async with _client_lock:
             if _client is None:

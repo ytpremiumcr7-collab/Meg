@@ -82,16 +82,18 @@ class ProcurementService:
                 409,
             ) from exc
 
-    def __init__(self, db: AsyncSession, user: User) -> None:
+    def __init__(self, db: AsyncSession, user: User, *, independent_sessions=None, preparation_correlation_id=None) -> None:
         self.db = db
         self.user = user
+        self.independent_sessions = independent_sessions
+        self.preparation_correlation_id = preparation_correlation_id
         self.orchestrator = TenderOrchestrator()
         self.compiler = ProcurementArtifactCompiler()
         self.jurisdiction = JurisdictionResolver()
         self.extractor = TenderSourceExtractor()
         self.requirement_mapper = ProcurementRequirementMapper()
         self.rule_compiler = DeterministicRuleCompiler()
-        self.storage_guard = ProcurementStorageGuard()
+        self.storage_guard = ProcurementStorageGuard(session_factory=independent_sessions)
 
 
 
@@ -535,7 +537,7 @@ class ProcurementService:
             # NO KEY UPDATE so the independently committed preparation trace
             # can acquire its FK KEY SHARE lock on this same tender. FOR UPDATE
             # caused run() to wait forever on its own trace transaction.
-            stmt = stmt.with_for_update(key_share=True)
+            stmt = stmt.with_for_update(key_share=True).execution_options(populate_existing=True)
         tender = await self.db.scalar(stmt)
         if tender is None:
             raise MegalodonException(ErrorCode.DOCUMENTO_NO_ENCONTRADO, "TenderPackage no encontrado.", 404)
@@ -1896,7 +1898,7 @@ class ProcurementService:
             ).order_by(TenderArtifact.version.desc()).limit(1)) or 0)
             version = prior + 1
             extension = ".xlsx" if media.endswith("spreadsheetml.sheet") else ".pdf"
-            path = f"tenders/{tender.tenant_id}/{tender.id}/r{tender.current_revision}/{code}-v{version}{extension}"
+            path = f"tenders/{tender.tenant_id}/{tender.id}/r{tender.current_revision}/{code}-v{version}-{content_hash}{extension}"
             await self.storage_guard.upload_verified(tenant_id=self.user.tenant_id, job_id=None, bucket_name=get_settings().SUPABASE_BUCKET_EXPORTS, path=path, content=content, content_type=media, entity_type="TenderArtifact")
             # Artifacts materialized from a reference/case pack are working documents.
             # They are never submission-eligible unless the source model explicitly
@@ -2009,8 +2011,8 @@ class ProcurementService:
         tender = await self._get(tender_id, for_update=True)
         if tender.frozen:
             raise MegalodonException(ErrorCode.BAD_REQUEST, "No se puede ejecutar un expediente congelado.", 400)
-        tracker = PreparationRunTracker(self.db, tender, self.user.id)
-        await tracker.start()
+        tracker = PreparationRunTracker(self.db, tender, self.user.id, session_factory=self.independent_sessions)
+        await tracker.start(correlation_id=self.preparation_correlation_id)
         tracker_terminal = False
 
         try:
@@ -2145,7 +2147,7 @@ class ProcurementService:
             result["review_state"] = tender.review_state
             await tracker.finish_stage(status="PASS", output_refs={"advanced_states": advanced_states, "state": tender.state, "review_state": tender.review_state})
             final_status = PreparationRunStatus.READY_FOR_HUMAN_REVIEW.value if tender.state == TenderState.READY_FOR_HUMAN_REVIEW.value else PreparationRunStatus.RUNNING.value
-            await tracker.finish(final_status)
+            await tracker.finish(final_status, atomic=True)
             tracker_terminal = True
             await self._commit()
             return result
