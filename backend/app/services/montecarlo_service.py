@@ -268,23 +268,42 @@ class MonteCarloService:
         await self.db.commit()
         return True
 
-    async def marcar_en_proceso(self, run_id: str, tenant_id: UUID | None = None) -> bool:
-        """Reclama una corrida exactamente una vez para un intento activo."""
+    @staticmethod
+    def _token_vigente(run: MonteCarloRun, token: UUID) -> bool:
+        return (
+            run.estado == EstadoMonteCarlo.EN_PROCESO.value
+            and run.execution_token is not None
+            and run.execution_token == token
+            and run.lease_expires_at is not None
+            and (
+                run.lease_expires_at.replace(tzinfo=timezone.utc)
+                if run.lease_expires_at.tzinfo is None
+                else run.lease_expires_at
+            ) > datetime.now(timezone.utc)
+        )
+
+    @staticmethod
+    def _next_lease() -> datetime:
+        # Celery hard limit is 1200 s; grace accounts for delivery delay.
+        return datetime.now(timezone.utc) + timedelta(seconds=1320)
+
+    async def marcar_en_proceso(self, run_id: str, tenant_id: UUID | None = None) -> UUID | None:
         run = await self.db.scalar(
-            select(MonteCarloRun)
-            .where(
+            select(MonteCarloRun).where(
                 MonteCarloRun.id == UUID(run_id),
                 MonteCarloRun.tenant_id == self._effective_tenant(tenant_id),
-            )
-            .with_for_update()
+            ).with_for_update()
         )
-        if run is None:
-            return False
-        if run.estado not in {
+        if run is None or run.estado not in {
             EstadoMonteCarlo.PENDIENTE.value,
             EstadoMonteCarlo.ENCOLADO.value,
         }:
-            return False
+            await self.db.rollback()
+            return None
+        token = uuid4()
+        run.attempt = (run.attempt or 0) + 1
+        run.execution_token = token
+        run.lease_expires_at = self._next_lease()
         run.estado = EstadoMonteCarlo.EN_PROCESO.value
         run.started_at = datetime.now(timezone.utc)
         run.finished_at = None
@@ -292,71 +311,80 @@ class MonteCarloService:
         run.error_codigo = None
         run.error_mensaje = None
         await self.db.commit()
-        return True
+        return token
 
-    async def actualizar_progreso(self, task_id: str, progreso: int, tenant_id: UUID | None = None) -> bool:
-        """Actualiza progreso sólo mientras el intento sigue vivo.
-
-        CANCELADO/ERROR/COMPLETADO son terminales: un callback tardío jamás
-        puede resucitar la corrida.
-        """
+    async def actualizar_progreso(
+        self, task_id: str, progreso: int, *,
+        token: UUID, tenant_id: UUID | None = None,
+    ) -> bool:
         run = await self.db.scalar(
-            select(MonteCarloRun)
-            .where(
+            select(MonteCarloRun).where(
                 MonteCarloRun.task_id == task_id,
                 MonteCarloRun.tenant_id == self._effective_tenant(tenant_id),
-            )
-            .with_for_update()
+            ).with_for_update()
         )
-        if run is None or run.estado != EstadoMonteCarlo.EN_PROCESO.value:
+        if run is None or not self._token_vigente(run, token):
+            await self.db.rollback()
             return False
-        run.progreso = max(run.progreso, max(0, min(100, int(progreso))))
+        run.progreso = max(run.progreso, max(0, min(99, int(progreso))))
+        run.lease_expires_at = self._next_lease()
         await self.db.commit()
         return True
 
-    async def completar(self, task_id: str, resultado: dict[str, Any], execution_ms: int, tenant_id: UUID | None = None) -> bool:
+    async def completar(
+        self, task_id: str, resultado: dict[str, Any], execution_ms: int, *,
+        token: UUID, tenant_id: UUID | None = None,
+    ) -> bool:
+        """Commit one run and its optional budget projection in one transaction."""
         run = await self.db.scalar(
-            select(MonteCarloRun)
-            .where(
+            select(MonteCarloRun).where(
                 MonteCarloRun.task_id == task_id,
                 MonteCarloRun.tenant_id == self._effective_tenant(tenant_id),
-            )
-            .with_for_update()
+            ).with_for_update()
         )
-        if run is None or run.estado != EstadoMonteCarlo.EN_PROCESO.value:
+        if run is None or not self._token_vigente(run, token):
+            await self.db.rollback()
             return False
-        run.estado = EstadoMonteCarlo.COMPLETADO.value
-        run.progreso = 100
-        run.resultado = resultado
-        run.execution_ms = execution_ms
-        run.finished_at = datetime.now(timezone.utc)
-        await self.db.commit()
-
-        if run.presupuesto_id:
-            presupuesto = await self.db.scalar(
-                select(Presupuesto).where(
-                    Presupuesto.id == run.presupuesto_id,
-                    Presupuesto.expediente_id == run.expediente_id,
+        try:
+            if run.presupuesto_id is not None:
+                presupuesto = await self.db.scalar(
+                    select(Presupuesto).where(
+                        Presupuesto.id == run.presupuesto_id,
+                        Presupuesto.tenant_id == run.tenant_id,
+                        Presupuesto.expediente_id == run.expediente_id,
+                    ).with_for_update()
                 )
-            )
-            if presupuesto is not None and presupuesto.expediente_id == run.expediente_id:
+                if presupuesto is None:
+                    raise MegalodonException(
+                        ErrorCode.VALIDACION_FALLIDA,
+                        "No existe el presupuesto asociado a la simulación.",
+                    )
                 presupuesto.resultado_montecarlo = {
                     "run_id": str(run.id),
                     "task_id": run.task_id,
-                    "created_at": run.created_at.isoformat() if run.created_at else None,
+                    "created_at": run.created_at.isoformat()
+                    if run.created_at else None,
                     **resultado,
                 }
-                await self.db.commit()
-        return True
+            run.estado = EstadoMonteCarlo.COMPLETADO.value
+            run.progreso = 100
+            run.resultado = resultado
+            run.execution_ms = execution_ms
+            run.finished_at = datetime.now(timezone.utc)
+            run.execution_token = None
+            run.lease_expires_at = None
+            await self.db.commit()
+            return True
+        except Exception:
+            await self.db.rollback()
+            raise
 
     async def cancelar(self, task_id: str, tenant_id: UUID) -> MonteCarloRun:
         run = await self.db.scalar(
-            select(MonteCarloRun)
-            .where(
+            select(MonteCarloRun).where(
                 MonteCarloRun.task_id == task_id,
                 MonteCarloRun.tenant_id == tenant_id,
-            )
-            .with_for_update()
+            ).with_for_update()
         )
         if run is None:
             raise MegalodonException(
@@ -370,13 +398,12 @@ class MonteCarloService:
             EstadoMonteCarlo.CANCELADO.value,
         }:
             return run
-        estado_anterior = run.estado
+        before = run.estado
         run.estado = EstadoMonteCarlo.CANCELADO.value
-        if estado_anterior in {
-            EstadoMonteCarlo.PENDIENTE.value,
-            EstadoMonteCarlo.ENCOLADO.value,
-        }:
+        if before in {EstadoMonteCarlo.PENDIENTE.value, EstadoMonteCarlo.ENCOLADO.value}:
             run.progreso = 0
+        run.execution_token = None
+        run.lease_expires_at = None
         run.finished_at = datetime.now(timezone.utc)
         await self.db.commit()
         return run
@@ -385,20 +412,18 @@ class MonteCarloService:
         run = await self.db.scalar(select(MonteCarloRun.estado).where(MonteCarloRun.task_id == task_id, MonteCarloRun.tenant_id == self._effective_tenant(tenant_id)))
         return run == EstadoMonteCarlo.CANCELADO.value
 
-    async def fallar(self, task_id: str, exc: Exception, execution_ms: int = 0, tenant_id: UUID | None = None) -> bool:
+    async def fallar(
+        self, task_id: str, exc: Exception, execution_ms: int = 0, *,
+        token: UUID, tenant_id: UUID | None = None,
+    ) -> bool:
         run = await self.db.scalar(
-            select(MonteCarloRun)
-            .where(
+            select(MonteCarloRun).where(
                 MonteCarloRun.task_id == task_id,
                 MonteCarloRun.tenant_id == self._effective_tenant(tenant_id),
-            )
-            .with_for_update()
+            ).with_for_update()
         )
-        if run is None or run.estado in {
-            EstadoMonteCarlo.CANCELADO.value,
-            EstadoMonteCarlo.COMPLETADO.value,
-            EstadoMonteCarlo.ERROR.value,
-        }:
+        if run is None or not self._token_vigente(run, token):
+            await self.db.rollback()
             return False
         run.estado = EstadoMonteCarlo.ERROR.value
         run.error_codigo = getattr(
@@ -407,28 +432,28 @@ class MonteCarloService:
         run.error_mensaje = str(exc)
         run.finished_at = datetime.now(timezone.utc)
         run.execution_ms = execution_ms
+        run.execution_token = None
+        run.lease_expires_at = None
         await self.db.commit()
         return True
 
-    async def preparar_reintento(self, task_id: str, tenant_id: UUID | None = None) -> bool:
-        """Devuelve un intento fallido transitorio a ENCOLADO.
-
-        Se usa justo antes de self.retry(); una cancelación concurrente gana y
-        no puede ser sobrescrita.
-        """
+    async def preparar_reintento(
+        self, task_id: str, *, token: UUID, tenant_id: UUID | None = None,
+    ) -> bool:
         run = await self.db.scalar(
-            select(MonteCarloRun)
-            .where(
+            select(MonteCarloRun).where(
                 MonteCarloRun.task_id == task_id,
                 MonteCarloRun.tenant_id == self._effective_tenant(tenant_id),
-            )
-            .with_for_update()
+            ).with_for_update()
         )
-        if run is None or run.estado != EstadoMonteCarlo.EN_PROCESO.value:
+        if run is None or not self._token_vigente(run, token):
+            await self.db.rollback()
             return False
         run.estado = EstadoMonteCarlo.ENCOLADO.value
         run.progreso = 0
         run.started_at = None
+        run.execution_token = None
+        run.lease_expires_at = None
         await self.db.commit()
         return True
 
