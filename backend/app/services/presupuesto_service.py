@@ -454,6 +454,7 @@ class PresupuestoService(BaseService[Presupuesto]):
                 cantidad=Decimal(str(p.cantidad)),
                 conceptos=conceptos,
                 precio_unitario_manual=precio_manual,
+                origen_catalogo=deepcopy((p.metadatos or {}).get('catalogo_asignado')),
             ))
         return partidas_costeo
 

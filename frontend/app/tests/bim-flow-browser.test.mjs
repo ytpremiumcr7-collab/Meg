@@ -1,7 +1,7 @@
 // Real browser/API/PostGIS/Redis/worker/filesystem flow. No intercepted routes.
 import assert from 'node:assert/strict';
 import { before, after, test } from 'node:test';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import { createWriteStream } from 'node:fs';
 import { readFile, mkdir } from 'node:fs/promises';
@@ -236,9 +236,10 @@ test('user creates an obra, resumes an IFC job after restart, approves and expor
     assert.equal(earthBudget.partidas.length,2);
     assert.ok(earthBudget.partidas.every(p=>p.metadatos.topografia.calculo_id===volume.id));
     const earthReview=page.getByRole('region',{name:'Revisión del presupuesto'});
+    let pricedEarthBudget;
     for (const number of [1,2]) {
       await earthReview.getByLabel(`Buscar concepto para partida ${number}`).fill('CI-EARTHWORK');
-      const select=earthReview.getByLabel(`Concepto para partida ${number}`);
+      const select=earthReview.getByLabel(`Concepto para partida ${number}`,{exact:true});
       await select.locator('option').filter({hasText:'Movimiento de tierras sintético CI'}).waitFor({state:'attached'});
       const option=await select.locator('option').filter({hasText:'Movimiento de tierras sintético CI'}).getAttribute('value');
       await select.selectOption(option);
@@ -248,14 +249,56 @@ test('user creates an obra, resumes an IFC job after restart, approves and expor
       assert.equal(priced.status(),200);
       const result=await priced.json();
       assert.ok(result.partidas.every(p=>p.metadatos.topografia.calculo_id===volume.id));
+      pricedEarthBudget=result;
     }
     await earthReview.getByRole('status').filter({hasText:'Estado: CALCULADO'}).waitFor();
     await earthReview.getByRole('button',{name:'Validar presupuesto',exact:true}).click();
     await earthReview.getByRole('status').filter({hasText:'Estado: VALIDADO'}).waitFor();
     await earthReview.getByRole('button',{name:'Aprobar presupuesto',exact:true}).click();
     await earthReview.getByRole('status').filter({hasText:'Estado: APROBADO'}).waitFor();
-    const [earthDownload]=await Promise.all([page.waitForEvent('download'),earthReview.getByRole('button',{name:'Descargar Excel',exact:true}).click()]);
-    await earthDownload.saveAs(join(evidence,'earthwork-budget.xlsx'));
+    for (const format of ['Excel','PDF']) {
+      const [download]=await Promise.all([page.waitForEvent('download'),
+        earthReview.getByRole('button',{name:`Descargar ${format}`,exact:true}).click()]);
+      await download.saveAs(join(evidence,format==='Excel'?'earthwork-budget.xlsx':'earthwork-budget.pdf'));
+    }
+    // Reopen the files actually downloaded through the UI and check their contents.
+    const exported=execFileSync(join(backend,'.venv/bin/python'),['-c',`
+import json, sys, zipfile
+from openpyxl import load_workbook
+from pypdf import PdfReader
+expected=json.loads(sys.argv[3])
+with zipfile.ZipFile(sys.argv[1]) as archive:
+    assert archive.testzip() is None
+workbook=load_workbook(sys.argv[1], data_only=True)
+assert workbook['Topografía']['B2'].value == expected['calculo_id']
+assert workbook['Topografía']['B3'].value == expected['sha256']
+rows={row[0]:row for row in list(workbook['Presupuesto'].values)[1:] if isinstance(row[0],int)}
+source_rows=list(workbook['Fuentes de precio'].values)[1:]
+sources={row[0]:row for row in source_rows}
+assert len(rows) == len(source_rows) == len(sources) == 2
+assert set(rows) == set(sources) == {line['numero'] for line in expected['partidas']}
+for line in expected['partidas']:
+    row, source = rows[line['numero']], sources[line['numero']]
+    assert row[0] == source[0] == line['numero']
+    assert row[2] == 'm3' and row[3] == line['cantidad']
+    assert row[4] == line['precio_unitario'] and row[5] == round(line['cantidad']*line['precio_unitario'],2)
+    assert source[1] == line['catalogo_id'] and source[2] == 'CI-EARTHWORK'
+    assert source[5] == 'CI_SYNTHETIC_NOT_MARKET_PRICE' and source[11] == line['sha256']
+text=''.join(page.extract_text() for page in PdfReader(sys.argv[2]).pages)
+assert 'CI-EARTHWORK' in text and 'CI_SYNTHETIC_NOT_MARKET_PRICE' in text
+compact=''.join(text.split())
+assert expected['calculo_id'] in compact
+for line in expected['partidas']:
+    visible=f"m3{line['cantidad']:,.4f}$"+f"{line['precio_unitario']:,.2f}$"+f"{line['cantidad']*line['precio_unitario']:,.2f}"
+    assert visible in compact, (visible, text)
+print(json.dumps({'xlsx':'verified','pdf':'verified','calculo_id':expected['calculo_id']}))
+`,join(evidence,'earthwork-budget.xlsx'),join(evidence,'earthwork-budget.pdf'),JSON.stringify({
+      calculo_id:volume.id,sha256:volume.evidencia.sha256,
+      partidas:[...pricedEarthBudget.partidas].sort((a,b)=>a.numero-b.numero).map(p=>({
+        numero:p.numero,cantidad:p.cantidad,precio_unitario:p.precio_unitario,
+        catalogo_id:p.metadatos.catalogo_asignado.catalogo_id,sha256:p.metadatos.catalogo_asignado.sha256}))
+    })],{cwd:backend,env,encoding:'utf8',timeout:20000});
+    assert.equal(JSON.parse(exported).xlsx,'verified');
     await page.screenshot({path:join(evidence,'10-topografia-utm.png'),fullPage:true});
     await page.getByLabel('Elevación de referencia').fill('1');
     assert.equal(await page.getByRole('button',{name:'Generar presupuesto de movimiento de tierras',exact:true}).count(),0);

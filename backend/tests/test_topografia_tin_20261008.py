@@ -199,6 +199,7 @@ async def test_postgis_keeps_survey_srid_and_rejects_direct_frame_drift(db_sessi
 async def test_cut_and_fill_budget_keeps_source_for_both_lines_and_exports(db_session, tenant_a_user, monkeypatch):
     from io import BytesIO
     from openpyxl import load_workbook
+    from pypdf import PdfReader
     tenant, user = tenant_a_user
     existing, _ = await surfaces(db_session, tenant, user)
     # Saved non-planar triangles have both cut and fill against this plane.
@@ -236,6 +237,13 @@ async def test_cut_and_fill_budget_keeps_source_for_both_lines_and_exports(db_se
     assert exported.active.title == 'Topografía'
     assert exported.active['B2'].value == str(calc.id)
     assert exported.active['B3'].value == evidence['sha256']
+    assert exported['Fuentes de precio']['B2'].value == str(catalog.id)
+    assert exported['Fuentes de precio']['F2'].value == 'TEST_SYNTHETIC'
+    pdf = PdfReader(BytesIO(await presupuestos.generar_pdf(budget.id, existing.expediente_id)))
+    compact = ''.join(''.join(page.extract_text() for page in pdf.pages).split())
+    assert str(calc.id) in compact
+    for p in budget.partidas:
+        assert f"m3{p.cantidad:,.4f}${p.precio_unitario:,.2f}${p.importe:,.2f}" in compact
     assert budget.metadatos['topografia_evidencia'] == evidence
     for operation in [lambda: presupuestos.actualizar_cantidad_partida(budget.id, existing.expediente_id, budget.partidas[0].id, 3),
                       lambda: presupuestos.eliminar_partida(budget.id, existing.expediente_id, budget.partidas[0].id)]:
@@ -280,6 +288,7 @@ async def test_partial_overlap_keeps_measured_cost_but_blocks_approval(db_sessio
     assert workbook.active['B5'].value == .5
     pdf = PdfReader(BytesIO(await presupuestos.generar_pdf(budget.id, existing.expediente_id)))
     assert 'PARCIAL' in ''.join(page.extract_text() for page in pdf.pages)
+    assert 'TEST_SYNTHETIC' in ''.join(page.extract_text() for page in pdf.pages)
 
 
 @pytest.mark.asyncio

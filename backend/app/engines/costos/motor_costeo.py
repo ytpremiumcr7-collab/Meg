@@ -86,6 +86,7 @@ class PartidaCosteo:
     cantidad: Decimal
     conceptos: List[ConceptoCosteo] = field(default_factory=list)
     precio_unitario_manual: Optional[Decimal] = None
+    origen_catalogo: Optional[dict] = None
 
     @property
     def precio_unitario(self) -> Decimal:
@@ -288,6 +289,21 @@ class MotorCosteo:
 
         actualizaciones = [i for p in presupuesto.partidas for c in p.conceptos
                            for i in c.insumos if i.actualizacion_precio]
+        if any(p.origen_catalogo for p in presupuesto.partidas):
+            sources = wb.create_sheet('Fuentes de precio')
+            sources.append(['Partida', 'Catálogo ID', 'Clave', 'Descripción', 'Unidad', 'Fuente',
+                'Vigencia inicio', 'Vigencia fin', 'Zona', 'Precio observado MXN', 'Precio aplicado MXN', 'Evidencia SHA256'])
+            for p in sorted(presupuesto.partidas, key=lambda p: p.numero):
+                source = p.origen_catalogo
+                if source:
+                    sources.append([p.numero, *[source[key] for key in ('catalogo_id', 'clave', 'descripcion', 'unidad',
+                        'fuente', 'vigencia_inicio', 'vigencia_fin', 'zona_economica', 'precio_observado', 'precio_aplicado', 'sha256')]])
+            for row in sources:
+                for cell in row:
+                    if isinstance(cell.value, str):
+                        cell.data_type = 's'
+            sources.column_dimensions['D'].width = 55
+            sources.column_dimensions['F'].width = 35
         if actualizaciones:
             evidencia = wb.create_sheet('Actualizacion materiales')
             evidencia.append(['Insumo', 'Serie', 'Mes base', 'Mes destino', 'Precio original MXN',
@@ -365,6 +381,7 @@ class MotorCosteo:
         from reportlab.lib.units import cm
         from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from xml.sax.saxutils import escape
 
         buffer = _io.BytesIO()
         doc = SimpleDocTemplate(
@@ -392,11 +409,16 @@ class MotorCosteo:
         header = ["No.", "Descripción", "Unidad", "Cantidad", "P.U.", "Importe"]
         filas = [header]
         for p in presupuesto.partidas:
+            descripcion = escape(p.descripcion)
+            if p.origen_catalogo:
+                source = p.origen_catalogo
+                descripcion += '<br/>Fuente: ' + escape(str(source['fuente'])) + ' · ' + escape(str(source['clave']))
+                descripcion += ' · Vigencia: ' + escape(str(source['vigencia_inicio'] or 'sin registrar'))
             filas.append([
                 str(p.numero),
-                Paragraph(p.descripcion, celda_desc_style),
+                Paragraph(descripcion, celda_desc_style),
                 p.unidad,
-                f"{p.cantidad:,.2f}",
+                f"{p.cantidad:,.4f}",
                 f"${p.precio_unitario:,.2f}",
                 f"${p.importe:,.2f}",
             ])
