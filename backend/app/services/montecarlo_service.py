@@ -335,17 +335,17 @@ class MonteCarloService:
         self, task_id: str, resultado: dict[str, Any], execution_ms: int, *,
         token: UUID, tenant_id: UUID | None = None,
     ) -> bool:
-        """Commit one run and its optional budget projection in one transaction."""
-        run = await self.db.scalar(
-            select(MonteCarloRun).where(
-                MonteCarloRun.task_id == task_id,
-                MonteCarloRun.tenant_id == self._effective_tenant(tenant_id),
-            ).with_for_update()
-        )
-        if run is None or not self._token_vigente(run, token):
-            await self.db.rollback()
-            return False
+        """Run outcome and budget projection form one DB transaction."""
         try:
+            run = await self.db.scalar(
+                select(MonteCarloRun).where(
+                    MonteCarloRun.task_id == task_id,
+                    MonteCarloRun.tenant_id == self._effective_tenant(tenant_id),
+                ).with_for_update()
+            )
+            if run is None or not self._token_vigente(run, token):
+                await self.db.rollback()
+                return False
             if run.presupuesto_id is not None:
                 presupuesto = await self.db.scalar(
                     select(Presupuesto).where(
