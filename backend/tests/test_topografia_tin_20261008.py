@@ -164,6 +164,18 @@ async def test_postgis_keeps_survey_srid_and_rejects_direct_frame_drift(db_sessi
     row = (await db_session.execute(text('SELECT ST_SRID(geom), ST_NDims(geom), z FROM puntos_topograficos WHERE id=:id')
         .bindparams(bindparam('id', type_=DBUUID(as_uuid=True))), dict(id=point_id))).one()
     assert tuple(row) == (32614, 2, None)
+    known = await svc.agregar_puntos(survey_id, [dict(identificador='P2', x=500001, y=2200000, z=123.456)])
+    known_id = known[0].id
+    row = (await db_session.execute(text('SELECT ST_SRID(geom), ST_NDims(geom), ST_Z(geom), z FROM puntos_topograficos WHERE id=:id')
+        .bindparams(bindparam('id', type_=DBUUID(as_uuid=True))), dict(id=known_id))).one()
+    assert tuple(row[:2]) == (32614, 3)
+    assert float(row[2]) == pytest.approx(123.456)
+    assert float(row[3]) == pytest.approx(123.456)
+    await db_session.rollback()
+    with pytest.raises(IntegrityError, match='ck_punto_tipo_geometria'):
+        await db_session.execute(text("UPDATE puntos_topograficos SET geom=ST_GeomFromText('LINESTRING(0 0,1 1)',32614) WHERE id=:id")
+            .bindparams(bindparam('id', type_=DBUUID(as_uuid=True))), dict(id=point_id))
+        await db_session.commit()
     await db_session.rollback()
     with pytest.raises(IntegrityError, match='SRID'):
         await db_session.execute(text('UPDATE puntos_topograficos SET geom=ST_SetSRID(geom,6362) WHERE id=:id')

@@ -10,7 +10,7 @@ from datetime import datetime
 from uuid import uuid4
 
 from geoalchemy2 import Geometry
-from sqlalchemy import String, Text, Numeric, ForeignKey, Index, Integer, JSON, DateTime, func, UniqueConstraint
+from sqlalchemy import CheckConstraint, String, Text, Numeric, ForeignKey, Index, Integer, JSON, DateTime, func, UniqueConstraint
 from app.db.types import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -95,9 +95,9 @@ class PuntoTopografico(Base, UUIDMixin):
 
     # Geometría PostGIS
     geom = mapped_column(
-        # Horizontal position uses the survey SRID; nullable elevation is z.
-        # A missing elevation must not be encoded as a measured zero in geom.
-        Geometry("POINT", srid=-1, spatial_index=True),
+        # Points can carry measured Z; two-dimensional capture has NULL numeric z.
+        # A PostGIS check restricts geometry to POINT, with the survey's SRID.
+        Geometry(geometry_type=None, srid=-1, spatial_index=True),
         nullable=False,
     )
 
@@ -113,6 +113,8 @@ class PuntoTopografico(Base, UUIDMixin):
 
     __table_args__ = (
         Index("idx_puntos_levantamiento", "levantamiento_id"),
+        CheckConstraint("GeometryType(geom) = 'POINT' AND ST_NDims(geom) IN (2, 3)",
+                        name="ck_punto_tipo_geometria").ddl_if(dialect="postgresql"),
     )
 
 

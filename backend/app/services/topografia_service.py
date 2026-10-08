@@ -178,7 +178,7 @@ class TopografiaService:
                 x=p["x"], y=p["y"], z=z,
                 precision_xy=p.get("precision_xy", 0.02),
                 precision_z=p.get("precision_z"),
-                geom=from_shape(Point(p["x"], p["y"]), srid=levantamiento.srid),
+                geom=from_shape(Point(p["x"], p["y"]) if z is None else Point(p["x"], p["y"], z), srid=levantamiento.srid),
                 fuente=p.get("fuente"),
             )
             self.db.add(punto)

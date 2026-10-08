@@ -10,7 +10,9 @@ depends_on = None
 def upgrade():
     # Keep historical horizontal coordinates/SRID and authoritative numeric z.
     # Do not relabel coordinates or invent a transformation for historical rows.
-    op.execute("ALTER TABLE puntos_topograficos ALTER COLUMN geom TYPE geometry(POINT) USING ST_Force2D(geom)")
+    op.execute("ALTER TABLE puntos_topograficos ALTER COLUMN geom TYPE geometry USING geom")
+    op.create_check_constraint("ck_punto_tipo_geometria", "puntos_topograficos",
+                               "GeometryType(geom) = 'POINT' AND ST_NDims(geom) IN (2, 3)")
     op.execute("""DO $$ BEGIN
         IF EXISTS (SELECT 1 FROM puntos_topograficos p JOIN levantamientos l
                    ON l.id = p.levantamiento_id WHERE ST_SRID(p.geom) <> l.srid) THEN
@@ -58,6 +60,7 @@ def downgrade():
     op.execute("DROP TRIGGER ck_levantamiento_marco_puntos ON levantamientos")
     op.execute("DROP FUNCTION comprobar_srid_punto_topografico()")
     op.execute("DROP FUNCTION comprobar_srid_levantamiento()")
+    op.drop_constraint("ck_punto_tipo_geometria", "puntos_topograficos", type_="check")
     op.execute("""ALTER TABLE puntos_topograficos ALTER COLUMN geom TYPE geometry(POINTZ,6362)
         USING ST_SetSRID(ST_MakePoint(x::double precision, y::double precision,
                                      COALESCE(z,0)::double precision),6362)""")
