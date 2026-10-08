@@ -543,6 +543,31 @@ class MonteCarloService:
         if stale:
             await db.commit()
 
+        # A broker acknowledgment does not prove that the message still
+        # exists after Redis loss. Reoffer old, unclaimed ENCOLADO runs.
+        # A live claim changes the status to EN_PROCESO under the same lock.
+        queued_before = now - timedelta(seconds=stale_after_seconds)
+        unclaimed = (
+            await db.scalars(
+                select(MonteCarloRun)
+                .where(
+                    MonteCarloRun.estado == EstadoMonteCarlo.ENCOLADO.value,
+                    MonteCarloRun.execution_token.is_(None),
+                    MonteCarloRun.updated_at < queued_before,
+                )
+                .order_by(MonteCarloRun.updated_at)
+                .limit(limite)
+                .with_for_update(skip_locked=True)
+            )
+        ).all()
+        for run in unclaimed:
+            run.estado = EstadoMonteCarlo.PENDIENTE.value
+            run.progreso = 0
+            run.error_codigo = "QUEUE_DELIVERY_EXPIRED"
+            run.error_mensaje = "La publicación no fue reclamada; se intentará entregar otra vez."
+        if unclaimed:
+            await db.commit()
+
         ids = (
             await db.scalars(
                 select(MonteCarloRun.id)
