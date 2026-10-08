@@ -59,7 +59,7 @@ class OCRService:
         adivinar/probar un UUID. Ahora se exige tenant_id y se verifica
         pertenencia antes de escribir.
         """
-        from app.models.presupuesto import Partida, Presupuesto
+        from app.models.presupuesto import Partida, Presupuesto, EstadoPresupuesto
         from app.core.errors import MegalodonException, ErrorCode
         from sqlalchemy import select
 
@@ -76,13 +76,22 @@ class OCRService:
                 Presupuesto.id == presupuesto_id,
                 Presupuesto.tenant_id == self.tenant_id,
             )
-            .with_for_update()
+            .with_for_update().execution_options(populate_existing=True)
         )
         if presupuesto is None:
             raise MegalodonException(
                 ErrorCode.DOCUMENTO_NO_ENCONTRADO,
                 f"Presupuesto {presupuesto_id} no encontrado",
             )
+
+        if presupuesto.estado in {EstadoPresupuesto.VALIDADO.value, EstadoPresupuesto.APROBADO.value}:
+            raise MegalodonException(
+                ErrorCode.CONFLICT,
+                "El presupuesto validado o aprobado requiere una revisión antes de agregar metrados OCR.",
+                status_code=409,
+            )
+        # New unpriced suggestions invalidate the previous calculated coverage.
+        presupuesto.estado = EstadoPresupuesto.BORRADOR.value
 
         # Obtener siguiente número de partida
         result = await self.db.execute(

@@ -115,3 +115,125 @@ async def test_montecarlo_budget_write_failure_reverts_both_rows(db_session, ten
         if not sqlite:
             await db_session.execute(text("DROP FUNCTION reject_mc_projection()"))
         await db_session.commit()
+
+
+@pytest.mark.asyncio
+async def test_ocr_lost_queued_message_is_republished(db_session, tenant_a_user, monkeypatch):
+    tenant, user = tenant_a_user
+    job_id = uuid4()
+    job, _ = await OCRJobService(db_session, tenant.id).crear(user=user,
+        job_id=job_id, filename="x.png", content_type="image/png",
+        storage_path=f"tenant/{tenant.id}/{job_id}", source_bytes=b"source",
+        presupuesto_id=None)
+    job.status = "QUEUED"
+    job.queued_at = datetime.now(timezone.utc) - timedelta(seconds=400)
+    await db_session.commit()
+    sent = []
+    monkeypatch.setattr("app.services.ocr_jobs.celery_app.send_task",
+                        lambda *args, **kwargs: sent.append(kwargs))
+    assert await OCRJobService.reconciliar(db_session) == 1
+    assert sent[0]["args"] == [str(job_id)]
+    await db_session.refresh(job)
+    assert job.status == "QUEUED"
+    assert job.claim_token is None
+    assert job.attempts == 0
+
+
+@pytest.mark.asyncio
+async def test_ocr_expired_unreclaimed_attempt_cannot_complete(db_session, tenant_a_user):
+    tenant, user = tenant_a_user
+    job_id = uuid4()
+    service = OCRJobService(db_session, tenant.id)
+    job, _ = await service.crear(user=user, job_id=job_id, filename="x.png",
+        content_type="image/png", storage_path=f"tenant/{tenant.id}/{job_id}",
+        source_bytes=b"source", presupuesto_id=None)
+    job, token = await service.claim(job_id)
+    job.started_at = datetime.now(timezone.utc) - timedelta(seconds=400)
+    await db_session.commit()
+    assert not await service.completar(job_id, token, empty_ocr(job_id))
+    assert await service.fallar(job_id, token, RuntimeError("late")) == "STALE"
+
+
+@pytest.mark.asyncio
+async def test_ocr_does_not_add_rows_to_budget_approved_in_other_session(db_session, tenant_a_user):
+    from app.engines.ia.ocr_metrados import MetradoExtraido
+    from app.models.presupuesto import Partida
+    from app.core.errors import MegalodonException
+    from sqlalchemy import select
+    tenant, user = tenant_a_user
+    tenant_id = tenant.id
+    exp = _expediente(tenant_id=tenant_id, user_id=user.id, suffix="OCR-APPROVED")
+    db_session.add(exp)
+    await db_session.flush()
+    budget = Presupuesto(tenant_id=tenant_id, expediente_id=exp.id,
+        identificador=f"OA-{uuid4().hex[:8]}", nombre="OCR editable",
+        estado="BORRADOR", factor_indirecto=0, factor_utilidad=0, factor_impuesto=0)
+    db_session.add(budget)
+    await db_session.commit()
+    budget_id = budget.id
+    service = OCRJobService(db_session, tenant_id)
+    job_id = uuid4()
+    job, _ = await service.crear(user=user, job_id=job_id, filename="x.png",
+        content_type="image/png", storage_path=f"tenant/{tenant_id}/{job_id}",
+        source_bytes=b"source", presupuesto_id=budget_id)
+    _, token = await service.claim(job_id)
+    await db_session.commit()
+    async with AsyncSessionLocalTest() as other:
+        current = await other.get(Presupuesto, budget_id)
+        current.estado = "APROBADO"
+        await other.commit()
+    result = empty_ocr(job_id)
+    result.metrados = [MetradoExtraido(concepto="M", descripcion="Muro", unidad="m2",
+        cantidad=10, confianza=90, pagina=1, bbox=(0, 0, 10, 10), texto_original="Muro 10 m2")]
+    result.total_metrados = 1
+    with pytest.raises(MegalodonException):
+        await service.completar(job_id, token, result)
+    # Failure must leave caller's session reusable without a manual rollback.
+    async with AsyncSessionLocalTest() as fresh:
+        assert (await fresh.get(Presupuesto, budget_id)).estado == "APROBADO"
+        assert (await fresh.get(OCRJob, job_id)).status == "RUNNING"
+        assert (await fresh.scalars(select(Partida).where(Partida.presupuesto_id == budget_id))).all() == []
+    assert await service.fallar(job_id, token, RuntimeError("approved")) == "PENDING"
+
+
+@pytest.mark.asyncio
+async def test_ocr_api_keeps_source_after_ambiguous_postcommit_error(db_session, tenant_a_user, monkeypatch):
+    from io import BytesIO
+    from fastapi import UploadFile
+    from unittest.mock import AsyncMock
+    from types import SimpleNamespace
+    from app.api.v1.ocr import extraer_metrados
+    tenant, user = tenant_a_user
+    storage = SimpleNamespace(subir=AsyncMock(), eliminar=AsyncMock())
+    monkeypatch.setattr("app.api.v1.ocr.storage_documentos", lambda: storage)
+    create = OCRJobService.crear
+    async def postcommit_failure(self, **kwargs):
+        await create(self, **kwargs)
+        raise ConnectionError("lost acknowledgement after durable commit")
+    monkeypatch.setattr(OCRJobService, "crear", postcommit_failure)
+    with pytest.raises(ConnectionError, match="lost acknowledgement"):
+        await extraer_metrados(file=UploadFile(file=BytesIO(b"input"), filename="x.png"),
+            presupuesto_id=None, idempotency_key=None, db=db_session,
+            current_user=user, _rate_limit=True)
+    assert storage.subir.await_count == 1
+    storage.eliminar.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_ocr_api_removes_source_when_database_confirms_no_job(db_session, tenant_a_user, monkeypatch):
+    from io import BytesIO
+    from fastapi import UploadFile
+    from unittest.mock import AsyncMock
+    from types import SimpleNamespace
+    from app.api.v1.ocr import extraer_metrados
+    _, user = tenant_a_user
+    storage = SimpleNamespace(subir=AsyncMock(), eliminar=AsyncMock())
+    monkeypatch.setattr("app.api.v1.ocr.storage_documentos", lambda: storage)
+    async def rejected(self, **kwargs):
+        raise ValueError("before commit")
+    monkeypatch.setattr(OCRJobService, "crear", rejected)
+    with pytest.raises(ValueError, match="before commit"):
+        await extraer_metrados(file=UploadFile(file=BytesIO(b"input"), filename="x.png"),
+            presupuesto_id=None, idempotency_key=None, db=db_session,
+            current_user=user, _rate_limit=True)
+    assert storage.eliminar.await_count == 1

@@ -9,13 +9,14 @@ from typing import Optional
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, Form, Header, UploadFile
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.deps import get_current_user, get_db
 from app.core.rate_limit import rate_limit_standard, rate_limit_strict
 from app.integrations.supabase_storage import storage_documentos
-from app.models.ocr_job import OCRJobStatus
+from app.models.ocr_job import OCRJob, OCRJobStatus
 from app.models.user import User
 from app.services.ocr_jobs import OCRJobService
 from app.services.ocr_service import OCRService
@@ -90,10 +91,16 @@ async def extraer_metrados(
             request_hash=request_hash,
         )
     except Exception:
+        # A commit failure can be ambiguous: never delete a durable job's input.
+        # If the database cannot confirm absence, retain the object for recovery.
         try:
+            await db.rollback()
+            persisted = await db.scalar(select(OCRJob.id).where(OCRJob.id == job_id))
+        except Exception:
+            persisted = job_id
+        if persisted is None:
             await storage.eliminar([storage_path])
-        finally:
-            raise
+        raise
 
     if replay:
         # Otra request con la misma key ganó mientras subíamos. Su job tiene

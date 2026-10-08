@@ -5,7 +5,7 @@ from hashlib import sha256
 import json
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import select, or_, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -140,7 +140,6 @@ class OCRJobService:
             if existing is not None:
                 return existing, True
             raise
-        await self.db.refresh(row)
         return row, False
 
     async def publicar(self, job_id: UUID) -> OCRJob:
@@ -249,6 +248,17 @@ class OCRJobService:
         await self.db.refresh(job)
         return job, token
 
+    @staticmethod
+    def _vigente(job: OCRJob | None, token: str) -> bool:
+        if job is None or job.status != OCRJobStatus.RUNNING.value or job.claim_token != token:
+            return False
+        if job.started_at is None:
+            return False
+        started = job.started_at
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=timezone.utc)
+        return started + timedelta(seconds=OCR_HARD_LIMIT_SECONDS + OCR_STALE_GRACE_SECONDS) > datetime.now(timezone.utc)
+
     async def completar(
         self,
         job_id: UUID,
@@ -256,46 +266,46 @@ class OCRJobService:
         resultado: ResultadoOCR,
     ) -> bool:
         """Persiste sugerencias y resultado en la misma transacción."""
-        job = await self.db.scalar(
-            select(OCRJob)
-            .where(
-                OCRJob.id == job_id,
-                OCRJob.tenant_id == self.tenant_id,
+        try:
+            job = await self.db.scalar(
+                select(OCRJob)
+                .where(
+                    OCRJob.id == job_id,
+                    OCRJob.tenant_id == self.tenant_id,
+                )
+                .with_for_update().execution_options(populate_existing=True)
             )
-            .with_for_update().execution_options(populate_existing=True)
-        )
-        if (
-            job is None
-            or job.status != OCRJobStatus.RUNNING.value
-            or job.claim_token != claim_token
-        ):
-            return False
+            if not self._vigente(job, claim_token):
+                return False
 
-        if job.presupuesto_id is not None and resultado.metrados:
-            await OCRService(
-                self.db, tenant_id=job.tenant_id
-            )._crear_partidas_sugeridas(
-                job.presupuesto_id,
-                resultado,
-                auto_commit=False,
-            )
+            if job.presupuesto_id is not None and resultado.metrados:
+                await OCRService(
+                    self.db, tenant_id=job.tenant_id
+                )._crear_partidas_sugeridas(
+                    job.presupuesto_id,
+                    resultado,
+                    auto_commit=False,
+                )
 
-        job.result = {
-            "status": "SUCCESS",
-            "filename": job.filename,
-            "presupuesto_id": str(job.presupuesto_id) if job.presupuesto_id else None,
-            "total_metrados": resultado.total_metrados,
-            "confianza_promedio": resultado.confianza_promedio,
-            "metrados": [m.to_dict() for m in resultado.metrados],
-            "paginas_procesadas": resultado.paginas_procesadas,
-            "errores": resultado.errores,
-        }
-        job.status = OCRJobStatus.SUCCEEDED.value
-        job.progress = 100
-        job.claim_token = None
-        job.finished_at = datetime.now(timezone.utc)
-        await self.db.commit()
-        return True
+            job.result = {
+                "status": "SUCCESS",
+                "filename": job.filename,
+                "presupuesto_id": str(job.presupuesto_id) if job.presupuesto_id else None,
+                "total_metrados": resultado.total_metrados,
+                "confianza_promedio": resultado.confianza_promedio,
+                "metrados": [m.to_dict() for m in resultado.metrados],
+                "paginas_procesadas": resultado.paginas_procesadas,
+                "errores": resultado.errores,
+            }
+            job.status = OCRJobStatus.SUCCEEDED.value
+            job.progress = 100
+            job.claim_token = None
+            job.finished_at = datetime.now(timezone.utc)
+            await self.db.commit()
+            return True
+        except Exception:
+            await self.db.rollback()
+            raise
 
     async def fallar(
         self,
@@ -311,11 +321,7 @@ class OCRJobService:
             )
             .with_for_update().execution_options(populate_existing=True)
         )
-        if (
-            job is None
-            or job.status != OCRJobStatus.RUNNING.value
-            or job.claim_token != claim_token
-        ):
+        if not self._vigente(job, claim_token):
             return "STALE"
 
         job.error_code = getattr(
@@ -344,9 +350,13 @@ class OCRJobService:
             await db.scalars(
                 select(OCRJob)
                 .where(
-                    OCRJob.status == OCRJobStatus.RUNNING.value,
-                    OCRJob.started_at.is_not(None),
-                    OCRJob.started_at < stale_before,
+                    or_(
+                        (OCRJob.status == OCRJobStatus.RUNNING.value) &
+                        (func.coalesce(OCRJob.started_at, OCRJob.updated_at) < stale_before),
+                        (OCRJob.status == OCRJobStatus.QUEUED.value) &
+                        (OCRJob.claim_token.is_(None)) &
+                        (func.coalesce(OCRJob.queued_at, OCRJob.updated_at) < stale_before),
+                    ),
                 )
                 .order_by(OCRJob.started_at)
                 .limit(limit)
@@ -355,6 +365,7 @@ class OCRJobService:
         ).all()
         for job in stale:
             job.claim_token = None
+            job.queued_at = None
             if job.attempts >= OCR_MAX_ATTEMPTS:
                 job.status = OCRJobStatus.FAILED.value
                 job.error_code = "MAX_ATTEMPTS"
