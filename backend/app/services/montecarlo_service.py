@@ -516,17 +516,16 @@ class MonteCarloService:
     ) -> int:
         """Recupera la ventana BD->broker y ejecuciones muertas del dominio."""
         now = datetime.now(timezone.utc)
-        stale_before = now - timedelta(seconds=stale_after_seconds)
 
         stale = (
             await db.scalars(
                 select(MonteCarloRun)
                 .where(
                     MonteCarloRun.estado == EstadoMonteCarlo.EN_PROCESO.value,
-                    MonteCarloRun.started_at.is_not(None),
-                    MonteCarloRun.started_at < stale_before,
+                    MonteCarloRun.lease_expires_at.is_not(None),
+                    MonteCarloRun.lease_expires_at < now,
                 )
-                .order_by(MonteCarloRun.started_at)
+                .order_by(MonteCarloRun.lease_expires_at)
                 .limit(limite)
                 .with_for_update(skip_locked=True)
             )
@@ -535,6 +534,8 @@ class MonteCarloService:
             run.estado = EstadoMonteCarlo.PENDIENTE.value
             run.progreso = 0
             run.started_at = None
+            run.execution_token = None
+            run.lease_expires_at = None
             run.error_codigo = "WORKER_LEASE_EXPIRED"
             run.error_mensaje = (
                 "La ejecución excedió el límite del worker y será republicada."
