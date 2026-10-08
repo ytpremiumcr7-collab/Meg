@@ -231,7 +231,7 @@ test('user creates an obra, resumes an IFC job after restart, approves and expor
     const [earthBudgetResponse] = await Promise.all([
       page.waitForResponse(r=>r.request().method()==='POST' && /\/topografia\/[^/]+\/volumenes\/[^/]+\/generar-presupuesto$/.test(new URL(r.url()).pathname)),
       page.getByRole('button',{name:'Generar presupuesto de movimiento de tierras',exact:true}).click()]);
-    assert.equal(earthBudgetResponse.status(),200);
+    assert.equal(earthBudgetResponse.status(),200,await earthBudgetResponse.text());
     const earthBudget = await earthBudgetResponse.json();
     assert.equal(earthBudget.partidas.length,2);
     assert.ok(earthBudget.partidas.every(p=>p.metadatos.topografia.calculo_id===volume.id));

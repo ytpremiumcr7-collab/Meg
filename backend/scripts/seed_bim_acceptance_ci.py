@@ -3,7 +3,7 @@ import asyncio
 import json
 import os
 import sys
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, timedelta
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -18,6 +18,7 @@ async def main():
     import app.models
     from app.models.base import AsyncSessionLocal, engine
     from app.models.user import Tenant, User, UserRole
+    from app.models.entitlements import Suscripcion, EstadoSuscripcion
     from app.models.catalogo_apu import CatalogoAPU
     from app.models.catalogo_conceptos import CatalogoFuente, ConceptoCatalogo, InsumoCatalogo
     from app.models.indices_costos import SerieIndiceCosto, ObservacionIndiceCosto, VinculoIndiceInsumo
@@ -59,9 +60,17 @@ async def main():
     partial_ifc = Path('/tmp/megalodon-partial-acceptance.ifc')
     document.write(str(partial_ifc))
     async with AsyncSessionLocal() as db:
-        tenant = Tenant(name='BIM acceptance (synthetic)', slug='bim-ci-'+uuid4().hex, plan='ENTERPRISE', is_active=True)
+        ahora = datetime.now(timezone.utc)
+        vencimiento = ahora + timedelta(days=31)
+        tenant = Tenant(name='BIM acceptance (synthetic)', slug='bim-ci-'+uuid4().hex,
+            plan='ENTERPRISE', plan_vencimiento=vencimiento, is_active=True)
+        if EntitlementsService(db).calcular_plan_efectivo(tenant) != 'ENTERPRISE':
+            raise SystemExit('The synthetic acceptance plan must be effective before starting the flow.')
         db.add(tenant)
         await db.flush()
+        db.add(Suscripcion(tenant_id=tenant.id, plan='ENTERPRISE', proveedor='CI_SYNTHETIC',
+            estado=EstadoSuscripcion.ACTIVA.value, fecha_inicio=ahora, fecha_fin=vencimiento,
+            monto=0, moneda='MXN', metadatos={'synthetic':True, 'purpose':'disposable browser acceptance; no payment'}))
         service = AuthService(db)
         users = [User(email=uuid4().hex+'@bim-ci.local', full_name='CI '+role.value,
             role=role, tenant_id=tenant.id, is_active=True, is_verified=True,
