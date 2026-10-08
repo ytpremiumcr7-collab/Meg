@@ -284,12 +284,16 @@ class TopografiaService:
         superficie_existente, puntos_existente = await self._puntos_desde_superficie(superficie_existente_id)
 
         if superficie_proyecto_id:
+            superficie_proyecto, puntos_proyecto = await self._puntos_desde_superficie(superficie_proyecto_id)
             resultado = self.motor_volumenes.calcular_entre_superficies(
-                puntos_existente, (await self._puntos_desde_superficie(superficie_proyecto_id))[1],
+                puntos_existente, puntos_proyecto,
+                caras_existente=superficie_existente.malla_caras,
+                caras_proyecto=superficie_proyecto.malla_caras,
             )
         else:
             resultado = self.motor_volumenes.calcular_contra_elevacion_referencia(
                 puntos_existente, elevacion_referencia,
+                caras_superficie=superficie_existente.malla_caras,
             )
 
         calculo = CalculoVolumen(

@@ -485,11 +485,13 @@ async def test_montecarlo_expired_worker_cannot_write_into_reclaimed_attempt(
         published.append(kwargs["task_id"])
         return SimpleNamespace(id=kwargs["task_id"])
     monkeypatch.setattr("app.workers.celery_app.celery_app.send_task", accept)
-    assert await MonteCarloService.reconciliar_pendientes(db_session) == 1
+    count = await MonteCarloService.reconciliar_pendientes(db_session)
+    assert count == len(published)
     await db_session.refresh(run)
     assert run.estado == EstadoMonteCarlo.ENCOLADO.value
     assert run.execution_token is None
-    assert published == [task_id]
+    # Recovery scans all tenants; previous tests may have independent PENDING runs.
+    assert published.count(task_id) == 1
 
     new_token = await service.marcar_en_proceso(run_id)
     assert new_token is not None and new_token != old_token
