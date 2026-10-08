@@ -60,7 +60,7 @@ class Levantamiento(Base, UUIDMixin, AuditMixin):
     estado: Mapped[str] = mapped_column(String(20), default=EstadoLevantamiento.EN_CAMPO, nullable=False, index=True)
 
     # Sistema de coordenadas
-    crs: Mapped[str] = mapped_column(String(50), default="EPSG:6362")  # ITRF2014 / UTM zone 14N
+    crs: Mapped[str] = mapped_column(String(50), default="EPSG:6362")  # Mexico ITRF92 / LCC
     srid: Mapped[int] = mapped_column(Integer, default=6362)
 
     # Metadatos
@@ -95,7 +95,9 @@ class PuntoTopografico(Base, UUIDMixin):
 
     # Geometría PostGIS
     geom = mapped_column(
-        Geometry("POINTZ", srid=6362, spatial_index=True),
+        # Horizontal position uses the survey SRID; nullable elevation is z.
+        # A missing elevation must not be encoded as a measured zero in geom.
+        Geometry("POINT", srid=-1, spatial_index=True),
         nullable=False,
     )
 

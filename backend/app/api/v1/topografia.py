@@ -64,9 +64,9 @@ class LevantamientoOut(BaseModel):
 
 class PuntoInput(BaseModel):
     identificador: str
-    x: float
-    y: float
-    z: Optional[float] = None
+    x: float = Field(allow_inf_nan=False)
+    y: float = Field(allow_inf_nan=False)
+    z: Optional[float] = Field(default=None, allow_inf_nan=False, description="Elevación en metros; obligatoria para superficies TIN")
     etiqueta: Optional[str] = None
     descripcion: Optional[str] = None
     precision_xy: float = 0.02
@@ -131,7 +131,7 @@ class SuperficieResumenOut(BaseModel):
 class VolumenRequest(BaseModel):
     superficie_existente_id: UUID
     superficie_proyecto_id: Optional[UUID] = None
-    elevacion_referencia: Optional[float] = None
+    elevacion_referencia: Optional[float] = Field(default=None, allow_inf_nan=False)
 
 
 class GenerarPresupuestoMovimientoRequest(BaseModel):

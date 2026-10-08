@@ -13,6 +13,10 @@ como funcionalidad, solo como scaffolding.
 """
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID, uuid4
+import math
+
+from pyproj import CRS
+from pyproj.exceptions import CRSError
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -51,6 +55,40 @@ class TopografiaService:
             raise MegalodonException(ErrorCode.AUTH_ERROR, "Contexto tenant requerido para TopografiaService", status_code=403)
         return self.tenant_id
 
+    @staticmethod
+    def _crs_declarado(referencia: str, codigo: int) -> CRS:
+        try:
+            crs = CRS.from_user_input(referencia)
+            srid = CRS.from_epsg(codigo)
+        except (CRSError, ValueError, TypeError) as exc:
+            raise MegalodonException(ErrorCode.TOPOGRAFIA_ERROR, "CRS o SRID inválido") from exc
+        if not crs.equals(srid):
+            raise MegalodonException(ErrorCode.TOPOGRAFIA_ERROR, "El CRS no corresponde al SRID del levantamiento")
+        return crs
+
+    @classmethod
+    def _crs_metrico(cls, levantamiento: Levantamiento) -> CRS:
+        crs = cls._crs_declarado(levantamiento.crs, levantamiento.srid)
+        if not crs.is_projected or len(crs.axis_info) < 2 or any(
+            not math.isclose(axis.unit_conversion_factor, 1.0, rel_tol=0, abs_tol=1e-12)
+            for axis in crs.axis_info[:2]
+        ):
+            raise MegalodonException(
+                ErrorCode.TOPOGRAFIA_ERROR,
+                "Para medir áreas y volúmenes se requiere un CRS proyectado en metros; transforme las coordenadas primero",
+            )
+        return crs
+
+    async def _marco_superficie(self, superficie: SuperficieTIN) -> CRS:
+        levantamiento = await self.db.scalar(select(Levantamiento).join(
+            ExpedienteObra, ExpedienteObra.id == Levantamiento.expediente_id,
+        ).where(Levantamiento.id == superficie.levantamiento_id,
+                Levantamiento.expediente_id == superficie.expediente_id,
+                ExpedienteObra.tenant_id == self._require_tenant()))
+        if levantamiento is None:
+            raise MegalodonException(ErrorCode.SUPERFICIE_NO_ENCONTRADA, "La superficie no pertenece al levantamiento indicado")
+        return self._crs_metrico(levantamiento)
+
     # ─── Levantamientos y puntos ────────────────────────────────────────
 
     async def crear_levantamiento(
@@ -58,6 +96,7 @@ class TopografiaService:
         crs: str = "EPSG:6362", srid: int = 6362, tipo: str = "POLIGONAL",
         creado_por_id: Optional[UUID] = None,
     ) -> Levantamiento:
+        self._crs_declarado(crs, srid)
         result = await self.db.execute(select(ExpedienteObra).where(ExpedienteObra.id == expediente_id, ExpedienteObra.tenant_id == self._require_tenant()))
         if not result.scalar_one_or_none():
             raise MegalodonException(ErrorCode.DOCUMENTO_NO_ENCONTRADO, f"Expediente {expediente_id} no encontrado")
@@ -116,6 +155,16 @@ class TopografiaService:
         levantamiento = await self.db.scalar(select(Levantamiento).join(ExpedienteObra, ExpedienteObra.id == Levantamiento.expediente_id).where(Levantamiento.id == levantamiento_id, ExpedienteObra.tenant_id == self._require_tenant()))
         if not levantamiento:
             raise MegalodonException(ErrorCode.DOCUMENTO_NO_ENCONTRADO, f"Levantamiento {levantamiento_id} no encontrado")
+        self._crs_declarado(levantamiento.crs, levantamiento.srid)
+
+        for p in puntos:
+            z = p.get("z")
+            try:
+                validos = all(math.isfinite(float(v)) for v in (p["x"], p["y"])) and (z is None or math.isfinite(float(z)))
+            except (ValueError, TypeError, OverflowError) as exc:
+                raise MegalodonException(ErrorCode.TOPOGRAFIA_ERROR, "Coordenadas XYZ inválidas") from exc
+            if not validos:
+                raise MegalodonException(ErrorCode.TOPOGRAFIA_ERROR, "Las coordenadas deben ser finitas")
 
         creados = []
         for p in puntos:
@@ -129,7 +178,7 @@ class TopografiaService:
                 x=p["x"], y=p["y"], z=z,
                 precision_xy=p.get("precision_xy", 0.02),
                 precision_z=p.get("precision_z"),
-                geom=from_shape(Point(p["x"], p["y"], z or 0), srid=levantamiento.srid),
+                geom=from_shape(Point(p["x"], p["y"]), srid=levantamiento.srid),
                 fuente=p.get("fuente"),
             )
             self.db.add(punto)
@@ -221,16 +270,25 @@ class TopografiaService:
             raise MegalodonException(ErrorCode.DOCUMENTO_NO_ENCONTRADO, f"Levantamiento {levantamiento_id} no encontrado")
 
         result = await self.db.execute(
-            select(PuntoTopografico).where(PuntoTopografico.levantamiento_id == levantamiento_id)
+            select(PuntoTopografico.identificador, PuntoTopografico.x, PuntoTopografico.y, PuntoTopografico.z)
+            .where(PuntoTopografico.levantamiento_id == levantamiento_id)
         )
-        puntos_db = list(result.scalars().all())
+        puntos_db = list(result.all())
         if len(puntos_db) < 3:
             raise MegalodonException(
                 ErrorCode.PUNTOS_INSUFICIENTES,
                 f"El levantamiento tiene {len(puntos_db)} puntos; se necesitan al menos 3 para triangular",
             )
 
-        puntos = [(float(p.x), float(p.y), float(p.z or 0)) for p in puntos_db]
+        self._crs_metrico(levantamiento)
+        sin_elevacion = [p.identificador for p in puntos_db if p.z is None]
+        if sin_elevacion:
+            raise MegalodonException(
+                ErrorCode.TOPOGRAFIA_ERROR,
+                "Faltan elevaciones: complete Z en metros antes de triangular; una elevación ausente no es cero",
+                details={"puntos_sin_elevacion": sin_elevacion},
+            )
+        puntos = [(float(p.x), float(p.y), float(p.z)) for p in puntos_db]
         resultado = self.motor_triangulacion.triangular(puntos)
 
         superficie = SuperficieTIN(
@@ -275,16 +333,22 @@ class TopografiaService:
         partida_id: Optional[UUID] = None,
         creado_por_id: Optional[UUID] = None,
     ) -> CalculoVolumen:
-        if not superficie_proyecto_id and elevacion_referencia is None:
+        if (superficie_proyecto_id is None) == (elevacion_referencia is None):
             raise MegalodonException(
                 ErrorCode.TOPOGRAFIA_ERROR,
-                "Se necesita superficie_proyecto_id o elevacion_referencia para calcular volumen",
+                "Seleccione una sola referencia: superficie de proyecto o elevación plana, ambas son excluyentes",
             )
 
         superficie_existente, puntos_existente = await self._puntos_desde_superficie(superficie_existente_id)
+        crs_existente = await self._marco_superficie(superficie_existente)
 
         if superficie_proyecto_id:
             superficie_proyecto, puntos_proyecto = await self._puntos_desde_superficie(superficie_proyecto_id)
+            crs_proyecto = await self._marco_superficie(superficie_proyecto)
+            if not crs_existente.equals(crs_proyecto):
+                raise MegalodonException(ErrorCode.TOPOGRAFIA_ERROR, "Las superficies tienen distintos CRS; transforme al mismo marco de referencia")
+            if superficie_existente.expediente_id != superficie_proyecto.expediente_id:
+                raise MegalodonException(ErrorCode.TOPOGRAFIA_ERROR, "Las superficies deben pertenecer al mismo expediente")
             resultado = self.motor_volumenes.calcular_entre_superficies(
                 puntos_existente, puntos_proyecto,
                 caras_existente=superficie_existente.malla_caras,

@@ -45,10 +45,22 @@ class EstadisticasSuperficie:
 
 
 @dataclass
+class InterpoladorTIN:
+    """Queries stay in survey coordinates; Qhull uses a local XY origin."""
+    origen: np.ndarray
+    lineal: LinearNDInterpolator
+
+    def __call__(self, x, y=None):
+        if y is None:
+            return self.lineal(np.asarray(x) - self.origen)
+        return self.lineal(np.asarray(x) - self.origen[0], np.asarray(y) - self.origen[1])
+
+
+@dataclass
 class ResultadoTriangulacion:
     malla: MallaTIN
     estadisticas: EstadisticasSuperficie
-    interpolador: LinearNDInterpolator = field(repr=False)  # no se serializa; para volúmenes/perfiles/curvas
+    interpolador: InterpoladorTIN = field(repr=False)
 
 
 class MotorTriangulacion:
@@ -62,17 +74,27 @@ class MotorTriangulacion:
                 f"Se necesitan al menos 3 puntos para triangular (se recibieron {len(puntos)})",
             )
 
-        arr = np.array(puntos, dtype=float)
+        try:
+            arr = np.array(puntos, dtype=float)
+        except (ValueError, TypeError) as exc:
+            raise MegalodonException(ErrorCode.TOPOGRAFIA_ERROR, "Coordenadas XYZ inválidas") from exc
+        if arr.ndim != 2 or arr.shape[1] != 3 or not np.isfinite(arr).all():
+            raise MegalodonException(ErrorCode.TOPOGRAFIA_ERROR, "Se requieren coordenadas XYZ finitas, con elevación en cada punto")
+        if len(np.unique(arr[:, :2], axis=0)) != len(arr):
+            raise MegalodonException(ErrorCode.TOPOGRAFIA_ERROR, "Hay coordenadas XY duplicadas; revise los puntos antes de triangular")
         xy = arr[:, :2]
         z = arr[:, 2]
+        origen = xy[0].copy()
 
         try:
-            delaunay = Delaunay(xy)
+            delaunay = Delaunay(xy - origen)
         except Exception as e:
             raise MegalodonException(
                 ErrorCode.TOPOGRAFIA_ERROR,
                 f"No se pudo triangular (¿puntos colineales o duplicados?): {e}",
             )
+        if len(np.unique(delaunay.simplices)) != len(arr):
+            raise MegalodonException(ErrorCode.TOPOGRAFIA_ERROR, "La triangulación omite puntos por degeneración numérica")
 
         vertices_flat: List[float] = []
         for x, y, zi in zip(arr[:, 0], arr[:, 1], z):
@@ -98,7 +120,7 @@ class MotorTriangulacion:
                 pendiente = np.sqrt(normal[0] ** 2 + normal[1] ** 2) / abs(normal[2])
                 pendientes.append(pendiente * 100)
 
-        interpolador = LinearNDInterpolator(xy, z)
+        interpolador = InterpoladorTIN(origen, LinearNDInterpolator(delaunay, z))
 
         stats = EstadisticasSuperficie(
             area_plan=round(area_plan_total, 4),

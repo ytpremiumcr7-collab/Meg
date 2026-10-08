@@ -200,6 +200,47 @@ test('user creates an obra, resumes an IFC job after restart, approves and expor
       assert.equal(await readerPage.getByLabel('Subir archivo IFC').isDisabled(),true);
       await readerPage.screenshot({path:join(evidence,'05-solo-lectura.png'),fullPage:true});
     } finally { await readerContext.close(); }
+    await page.goto(origin+'/?app=topografia');
+    await page.getByRole('button',{name:'Levantamiento',exact:true}).click();
+    await page.getByPlaceholder('Nombre nuevo levantamiento').fill('Aceptación UTM en metros');
+    await page.getByLabel('Sistema de coordenadas').selectOption('32614');
+    const [surveyCreated]=await Promise.all([
+      page.waitForResponse(r=>r.request().method()==='POST' && /\/topografia\/[^/]+\/levantamientos$/.test(new URL(r.url()).pathname)),
+      page.getByRole('button',{name:'Crear levantamiento',exact:true}).click()]);
+    assert.equal(surveyCreated.status(),200);
+    const survey=await surveyCreated.json();
+    assert.equal(survey.crs,'EPSG:32614');
+    const [tinCreated]=await Promise.all([
+      page.waitForResponse(r=>r.request().method()==='POST' && /\/triangular$/.test(new URL(r.url()).pathname)),
+      page.getByLabel('Subir puntos CSV').setInputFiles({name:'terreno.csv',mimeType:'text/csv',
+        buffer:Buffer.from('P1,500000,2200000,1\nP2,500001,2200000,-1\nP3,500000,2200001,-1\n')})]);
+    assert.equal(tinCreated.status(),200);
+    const tin=await tinCreated.json();
+    await page.getByLabel('Superficie existente').selectOption(tin.id);
+    await page.getByLabel('Elevación de referencia').fill('0');
+    const [volumeCreated]=await Promise.all([
+      page.waitForResponse(r=>r.request().method()==='POST' && new URL(r.url()).pathname==='/api/v1/topografia/volumenes'),
+      page.getByRole('button',{name:'Calcular',exact:true}).click()]);
+    assert.equal(volumeCreated.status(),200);
+    const volume=await volumeCreated.json();
+    assert.equal(volume.volumen_corte_m3,.042);
+    assert.equal(volume.volumen_terraplen_m3,.208);
+    await page.getByRole('button',{name:'Generar presupuesto de movimiento de tierras',exact:true}).waitFor();
+    await page.screenshot({path:join(evidence,'10-topografia-utm.png'),fullPage:true});
+    await page.getByLabel('Elevación de referencia').fill('1');
+    assert.equal(await page.getByRole('button',{name:'Generar presupuesto de movimiento de tierras',exact:true}).count(),0);
+    await page.getByPlaceholder('Nombre nuevo levantamiento').fill('Otro levantamiento UTM 15');
+    await page.getByLabel('Sistema de coordenadas').selectOption('32615');
+    const [secondSurveyCreated]=await Promise.all([
+      page.waitForResponse(r=>r.request().method()==='POST' && /\/topografia\/[^/]+\/levantamientos$/.test(new URL(r.url()).pathname)),
+      page.getByRole('button',{name:'Crear levantamiento',exact:true}).click()]);
+    assert.equal(secondSurveyCreated.status(),200);
+    await page.getByRole('button',{name:'Calcular',exact:true}).waitFor({state:'hidden'});
+    assert.equal(await page.getByRole('button',{name:'Calcular',exact:true}).count(),0);
+    await page.getByLabel('Levantamiento activo').selectOption(survey.id);
+    await page.getByLabel('Superficie existente').waitFor();
+    assert.equal(await page.getByLabel('Superficie existente').inputValue(),'');
+    assert.equal(await page.getByRole('button',{name:'Calcular',exact:true}).isDisabled(),true);
     const projects = start('project-fixtures', join(backend,'.venv/bin/python'),
       ['-m','scripts.seed_bim_acceptance_ci','--projects-after',model.expediente_id],backend);
     const [projectsExit]=await once(projects,'exit');

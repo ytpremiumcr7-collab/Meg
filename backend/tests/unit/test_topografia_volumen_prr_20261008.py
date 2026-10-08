@@ -2,6 +2,7 @@
 import pytest
 from app.engines.topografia.volumenes import MotorVolumenes
 from app.core.errors import MegalodonException
+from app.engines.topografia.triangulacion import MotorTriangulacion
 
 
 def test_triangle_crossing_grade_keeps_cut_and_fill_separately():
@@ -81,3 +82,25 @@ def test_invalid_saved_faces_fail_instead_of_retriangulating(faces):
     points = [(0, 0, 1), (1, 0, 0), (0, 1, 0)]
     with pytest.raises(MegalodonException):
         MotorVolumenes().calcular_contra_elevacion_referencia(points, 0, caras_superficie=faces)
+
+
+@pytest.mark.parametrize("points", [
+    [(0, 0, 0), (1, 0, None), (0, 1, 0)],
+    [(0, 0, 0), (1, 0, float('inf')), (0, 1, 0)],
+    [(0, 0, 0), (0, 0, 1), (1, 0, 0), (0, 1, 0)],
+    [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0), (1e-15, 1e-15, 1)],
+])
+def test_saved_tin_generation_never_omits_invalid_elevations(points):
+    with pytest.raises(MegalodonException):
+        MotorTriangulacion().triangular(points)
+
+
+@pytest.mark.parametrize('size', [11, 101])
+def test_dense_utm_grid_preserves_all_points_and_absolute_height_queries(size):
+    for dx, dy in [(0, 0), (500000, 2100000)]:
+        points = [(dx + x / 10, dy + y / 10, (x + y) / 10) for x in range(size) for y in range(size)]
+        tin = MotorTriangulacion().triangular(points)
+        assert tin.estadisticas.num_triangulos == 2 * (size - 1) ** 2
+        assert len(set(tin.malla.caras)) == len(points)
+        assert float(tin.interpolador(dx + .35, dy + .45)) == pytest.approx(.8, abs=1e-8)
+        assert tin.estadisticas.area_plan == pytest.approx(((size - 1) / 10) ** 2)
