@@ -21,6 +21,8 @@ import { useExpedienteStore } from '@/stores/useExpedienteStore';
 import { megalodonClient } from '@/lib/api-client';
 import type { Presupuesto, PropuestaLicitacionData, ValidacionResultado, SolicitudActualizacionPrecio } from '@/lib/megalodon-client';
 import { CatalogoLibroPicker } from './CatalogoLibroPicker';
+import { CatalogoImportadoPicker } from './CatalogoImportadoPicker';
+import { ImportacionesCatalogosPanel } from './ImportacionesCatalogosPanel';
 import { MaterialIndexadoPicker } from './MaterialIndexadoPicker';
 import { FSR_CONST } from './data/legales';
 import { computeComplianceScore, getOverallStatus } from './engines/validador';
@@ -32,6 +34,7 @@ import type { SimulationResult } from './engines/montecarlo';
 type TabId = 'resumen' | 'presupuesto' | 'analisis' | 'validacion' | 'reporte';
 
 interface BudgetLine {
+  catalogoApuId?: string;
   actualizacionPrecio?: SolicitudActualizacionPrecio;
   catalogoLibroId?: string;
   sourceLabel?: string;
@@ -195,6 +198,8 @@ function BudgetGrid() {
   const [search, setSearch] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
   const [showCatalog, setShowCatalog] = useState(false);
+  const [showImportedCatalog, setShowImportedCatalog] = useState(false);
+  const [catalogRevision, setCatalogRevision] = useState(0);
   const [showIndices, setShowIndices] = useState(false);
   const [newLine, setNewLine] = useState({ conceptKey: '', description: '', unit: '', quantity: 0, unitPrice: 0 });
 
@@ -295,6 +300,7 @@ function BudgetGrid() {
         partidas: lines.map((l, i) => ({
           numero: i + 1,
           catalogo_libro_id: l.catalogoLibroId,
+          catalogo_apu_id: l.catalogoApuId,
           descripcion: l.description,
           unidad: l.unit,
           cantidad: l.quantity,
@@ -350,6 +356,7 @@ function BudgetGrid() {
             <Plus className="w-3.5 h-3.5" /> Concepto
           </button>
           <button onClick={() => setShowCatalog(!showCatalog)} className="px-3 py-1.5 border border-[#C9A84C] text-[#C9A84C] text-xs rounded">Catálogo del libro</button>
+          <button onClick={() => setShowImportedCatalog(!showImportedCatalog)} className="px-3 py-1.5 border border-[#C9A84C] text-[#C9A84C] text-xs rounded">Catálogos CMIC / fuentes</button>
           <button onClick={() => setShowIndices(!showIndices)} className="px-3 py-1.5 border border-[#C9A84C] text-[#C9A84C] text-xs rounded">Actualizar material</button>
           <button onClick={exportJSON} className="flex items-center gap-1.5 px-3 py-1.5 border border-[#2A2A3E] text-[#8A8578] text-xs rounded hover:border-[#C9A84C] hover:text-[#C9A84C] transition-colors">
             <FileJson className="w-3.5 h-3.5" /> Exportar JSON
@@ -398,6 +405,16 @@ function BudgetGrid() {
           {mensaje.texto}
         </div>
       )}
+
+      {showImportedCatalog && <div className="max-h-96 overflow-y-auto">
+        <ImportacionesCatalogosPanel onImported={() => setCatalogRevision(value => value + 1)} />
+        <CatalogoImportadoPicker key={catalogRevision} onSelect={(item, quantity) => {
+          setLines(previous => [...previous, {id: crypto.randomUUID(), catalogoApuId: item.id,
+            sourceLabel: `${item.origen?.fuente.titulo} · ${item.vigencia_inicio} · páginas ${item.origen?.paginas.join(', ')}`,
+            conceptKey: item.clave, description: item.descripcion, unit: item.unidad, quantity,
+            unitPrice: item.precio_unitario, amount: Math.round(quantity * item.precio_unitario * 100) / 100, status: 'pending'}]);
+        }} />
+      </div>}
 
       {showCatalog && <CatalogoLibroPicker onSelect={(item, quantity) => {
         const unitPrice = Number(item.precio_unitario);

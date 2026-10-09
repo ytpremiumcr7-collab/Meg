@@ -40,6 +40,7 @@ class CatalogoAPUOut(BaseModel):
     incluye_iva: bool
     vigencia_inicio: Optional[str]
     vigencia_fin: Optional[str]
+    origen: Optional[dict] = None
     created_at: datetime
 
     class Config:

@@ -28,6 +28,7 @@ router = APIRouter(dependencies=[Depends(verificar_expediente_tenant), Depends(m
 
 
 class PartidaCreate(BaseModel):
+    catalogo_apu_id: Optional[UUID] = None
     catalogo_libro_id: Optional[str] = Field(None, min_length=64, max_length=64)
     numero: int
     descripcion: str
@@ -44,7 +45,9 @@ class PartidaCreate(BaseModel):
 
     @model_validator(mode="after")
     def validar_origen_precio(self):
-        if not self.catalogo_libro_id and not self.conceptos and not self.insumos and self.precio_unitario is None:
+        if self.catalogo_apu_id and (self.catalogo_libro_id or self.conceptos or self.insumos):
+            raise ValueError('Seleccione un solo origen de catálogo/APU por partida')
+        if not self.catalogo_apu_id and not self.catalogo_libro_id and not self.conceptos and not self.insumos and self.precio_unitario is None:
             raise ValueError("La partida requiere precio, catálogo o análisis de insumos")
         return self
 
@@ -107,7 +110,7 @@ class PartidaOut(BaseModel):
 
 class AgregarPartidaCatalogoRequest(BaseModel):
     catalogo_apu_id: UUID
-    cantidad: float = Field(..., gt=0)
+    cantidad: Decimal = Field(..., gt=0, max_digits=18, decimal_places=4, allow_inf_nan=False)
 
 
 class ActualizarCantidadPartidaRequest(BaseModel):
@@ -163,6 +166,7 @@ async def crear_presupuesto(
     partidas_data = []
     for p in data.partidas:
         partidas_data.append({
+            "catalogo_apu_id": p.catalogo_apu_id,
             "catalogo_libro_id": p.catalogo_libro_id,
             "numero": p.numero,
             "descripcion": p.descripcion,

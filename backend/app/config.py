@@ -126,6 +126,7 @@ class Settings(BaseSettings):
     BIM_LOCAL_STORAGE_PATH: str = './storage/bim'
     TENDER_SOURCE_MAX_FILE_SIZE_MB: int = Field(default=100, ge=1, le=2048)
     GENERAL_UPLOAD_MAX_FILE_SIZE_MB: int = Field(default=100, ge=1, le=2048)
+    CATALOGO_ORIGINALES_DIR: Optional[str] = None
     CERTIFICATE_MAX_FILE_SIZE_MB: int = Field(default=10, ge=1, le=64)
 
     # ─── Monte Carlo ─────────────────────────────────────────

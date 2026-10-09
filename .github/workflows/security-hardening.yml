@@ -216,6 +216,7 @@ jobs:
       SUPABASE_URL: ""
       SUPABASE_SERVICE_KEY: ""
       BIM_ACCEPTANCE_CREDENTIALS: /tmp/megalodon-bim-acceptance.json
+      CATALOGO_ORIGINALES_DIR: /tmp/megalodon-catalog-originals
       BIM_EVIDENCE_DIR: ${{ github.workspace }}/bim-browser-evidence
       VITE_API_URL: http://127.0.0.1:8000
     steps:

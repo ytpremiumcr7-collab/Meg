@@ -225,7 +225,7 @@ class Insumo(Base, UUIDMixin, TenantMixin):
     descripcion: Mapped[str] = mapped_column(Text, nullable=False)
     tipo: Mapped[TipoInsumo] = mapped_column(String(50), nullable=False)
     unidad: Mapped[str] = mapped_column(String(20), nullable=False)
-    cantidad: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False)
+    cantidad: Mapped[float] = mapped_column(Numeric(18, 6), nullable=False)
     precio_unitario: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
     importe: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
 

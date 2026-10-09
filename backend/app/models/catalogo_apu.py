@@ -9,7 +9,7 @@ Modelos de catálogo de Análisis de Precios Unitarios (APU).
 from enum import Enum
 from uuid import uuid4
 
-from sqlalchemy import UniqueConstraint, String, Numeric, ForeignKey, Index, Text
+from sqlalchemy import UniqueConstraint, String, Numeric, ForeignKey, ForeignKeyConstraint, Index, Text
 from app.db.types import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -17,6 +17,7 @@ from app.models.base import Base, UUIDMixin, TenantMixin, AuditMixin
 
 
 class TipoConceptoAPU(str, Enum):
+    CONCEPTO = "CONCEPTO"
     MATERIAL = "MATERIAL"
     MANO_OBRA = "MANO_OBRA"
     MAQUINARIA = "MAQUINARIA"
@@ -66,6 +67,8 @@ class CatalogoAPU(Base, UUIDMixin, TenantMixin, AuditMixin):
 
     # Desglose del APU (materiales, mano de obra, maquinaria)
     desglose: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    registro_importado_id: Mapped[object | None] = mapped_column(UUID(as_uuid=True), nullable=True, unique=True)
+    origen: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     # Relaciones
     precios_asignados: Mapped[list["PrecioUnitarioAsignado"]] = relationship(
@@ -73,6 +76,7 @@ class CatalogoAPU(Base, UUIDMixin, TenantMixin, AuditMixin):
     )
 
     __table_args__ = (
+        ForeignKeyConstraint(['registro_importado_id', 'tenant_id'], ['catalogo_registros.id', 'catalogo_registros.tenant_id']),
         UniqueConstraint("tenant_id", "clave", "fuente", "zona_economica", name="uq_catalogo_apu_tenant_clave_fuente_zona"),
         Index("ix_catalogo_apu_clave_fuente", "clave", "fuente", "zona_economica"),
     )

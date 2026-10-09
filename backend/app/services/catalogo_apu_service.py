@@ -58,6 +58,8 @@ class CatalogoAPUService:
 
     async def actualizar(self, db: AsyncSession, concepto_id: UUID, data: CatalogoAPUCreate, current_user: User) -> CatalogoAPU:
         c = await self.obtener(db, concepto_id, current_user)
+        if c.registro_importado_id:
+            raise MegalodonException(ErrorCode.CONFLICT, "La edición importada es inmutable; importe una nueva versión con su evidencia", status_code=409)
         c.descripcion=data.descripcion; c.tipo=data.tipo.value; c.unidad=data.unidad.value
         c.precio_unitario=data.precio_unitario; c.fuente=data.fuente
         c.zona_economica=data.zona_economica; c.estado=data.estado
@@ -66,6 +68,8 @@ class CatalogoAPUService:
 
     async def eliminar(self, db: AsyncSession, concepto_id: UUID, current_user: User) -> None:
         c = await self.obtener(db, concepto_id, current_user)
+        if c.registro_importado_id:
+            raise MegalodonException(ErrorCode.CONFLICT, "La edición importada conserva la trazabilidad de los presupuestos", status_code=409)
         await db.delete(c); await db.commit()
 
     async def obtener_precio_con_iva(self, db: AsyncSession, concepto_id: UUID,

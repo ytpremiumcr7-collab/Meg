@@ -329,6 +329,45 @@ print(json.dumps({'xlsx':'verified','pdf':'verified','calculo_id':expected['calc
     await page.getByText('Variación observada: 15.0000% · corte 2020-09-10.',{exact:true}).waitFor();
     await page.getByText('Original: $100.0000 MXN · Estimado: $115.00 MXN/kg sin IVA.',{exact:true}).waitFor();
     await page.screenshot({path:join(evidence,'08-catalogos-indices.png'),fullPage:true});
+    // Synthetic source ZIP crosses the real import API and migrated schema.
+    // The private authentic CMIC/Varela packages are exercised separately.
+    await page.getByRole('button',{name:'Catálogos CMIC / fuentes',exact:true}).click();
+    await page.getByText('Ediciones importadas y revisiones pendientes',{exact:true}).click();
+    const [previewed] = await Promise.all([
+      page.waitForResponse(r=>r.request().method()==='POST' && new URL(r.url()).pathname==='/api/v1/catalogo-apu/importaciones/verificar'),
+      page.getByLabel('Importar paquete de catálogo ZIP').setInputFiles(credentials.catalog_package)]);
+    assert.equal(previewed.status(),200);
+    const [imported] = await Promise.all([
+      page.waitForResponse(r=>r.request().method()==='POST' && new URL(r.url()).pathname==='/api/v1/catalogo-apu/importaciones'),
+      page.getByRole('button',{name:'Importar fuentes seleccionadas',exact:true}).click()]);
+    assert.equal(imported.status(),200);
+    const edition = await imported.json();
+    assert.equal(edition.resumen.proyecciones_costeo,1);
+    await page.getByLabel('Modelo paramétrico',{exact:true}).selectOption({label:'MODEL-TEST · Synthetic parametric model · $4029.74/m2'});
+    await page.getByLabel('Localidad de la obra',{exact:true}).selectOption({label:'Synthetic city · FIC 0.897'});
+    await page.getByLabel('Cantidad m2',{exact:true}).fill('36');
+    await page.getByLabel('Justificación y condiciones del proyecto',{exact:true}).fill('Caso sintético de aceptación del modelo base');
+    const [estimated] = await Promise.all([
+      page.waitForResponse(r=>r.request().method()==='POST' && new URL(r.url()).pathname==='/api/v1/catalogo-apu/estimaciones-parametricas'),
+      page.getByRole('button',{name:'Calcular y guardar antepresupuesto',exact:true}).click()]);
+    assert.equal(estimated.status(),200);
+    const estimate = await estimated.json();
+    assert.equal(Number(estimate.monto),130128.36);
+    assert.equal(estimate.evidencia.apto_aprobacion_contractual,false);
+    await page.getByLabel('Buscar en catálogos importados',{exact:true}).fill('TEST-EXC');
+    await page.getByLabel('Concepto importado',{exact:true}).selectOption({label:'TEST-EXC · Synthetic excavation with six-decimal consumption · 152.43 / m3 · 2026-01-01'});
+    await page.getByLabel('Cantidad medida m3',{exact:true}).fill('2.4');
+    await page.getByRole('button',{name:'Agregar concepto al presupuesto',exact:true}).click();
+    await page.getByPlaceholder('Contrato, convocatoria, análisis...').fill('Caso sintético sin recargos para comprobar precio fuente');
+    const [pricedCatalogue] = await Promise.all([
+      page.waitForResponse(r=>r.request().method()==='POST' && /\/presupuestos\/[^/]+\/presupuestos$/.test(new URL(r.url()).pathname)),
+      page.getByRole('button',{name:'Guardar en backend',exact:true}).click()]);
+    assert.equal(pricedCatalogue.status(),200);
+    const catalogBudget = await pricedCatalogue.json();
+    assert.equal(catalogBudget.monto_total,365.83);
+    assert.equal(catalogBudget.partidas[0].conceptos[0].insumos[0].cantidad,0.227273);
+    assert.equal(catalogBudget.partidas[0].metadatos.catalogo_asignado.origen_importacion.importacion_id,edition.id);
+    await page.screenshot({path:join(evidence,'11-importacion-costeo-catalogo.png'),fullPage:true});
     await page.goto(origin+'/?app=legl-consultor');
     await page.getByText('969 artículos consultables · ver cobertura',{exact:true}).click();
     await page.getByText('Documentos sin artículos consultables: Manual Comité Adquisiciones.',{exact:true}).waitFor();

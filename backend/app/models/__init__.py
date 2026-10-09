@@ -52,6 +52,7 @@ from app.models.bim import ModeloBIM, ElementoBIM, AnalisisClash, ClashResult
 # ─── 8. Costos / APU / Presupuesto ─────────────────────────
 from app.models.presupuesto import Presupuesto, Partida, Concepto, Insumo
 from app.models.catalogo_apu import CatalogoAPU, PrecioUnitarioAsignado, TipoConceptoAPU, UnidadMedida
+from app.models.catalogo_importacion import CatalogoImportacion, CatalogoRegistro, EstimacionParametrica
 from app.models.catalogo_conceptos import (
     CatalogoFuente, ConceptoCatalogo, InsumoCatalogo, TipoCatalogo
 )

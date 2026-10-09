@@ -113,10 +113,21 @@ async def main():
         await EntitlementsService(db).sembrar_planes_default()
         await EntitlementsService(db).sembrar_modulos_default()
         destination = Path(os.environ['BIM_ACCEPTANCE_CREDENTIALS'])
+        from tests.fixtures.catalog_import import make_synthetic_package
+        from zipfile import ZipFile, ZIP_DEFLATED
+        package, originals, _ = make_synthetic_package(Path('/tmp/megalodon-catalog-fixture'))
+        original_target = Path(os.environ['CATALOGO_ORIGINALES_DIR'])
+        original_target.mkdir(parents=True, exist_ok=True)
+        for pdf in originals.glob('*.pdf'):
+            (original_target / pdf.name).write_bytes(pdf.read_bytes())
+        package_zip = Path('/tmp/megalodon-catalog-package.zip')
+        with ZipFile(package_zip, 'w', ZIP_DEFLATED) as archive:
+            for path in package.rglob('*'):
+                if path.is_file(): archive.write(path, path.relative_to(package))
         destination.write_text(json.dumps({'reviewer':users[0].email, 'reader':users[1].email,
             'password':password, 'catalog_description':'Muro de prueba sintética CI',
             'indexed_material':str(vinculo.id),
-            'partial_ifc':str(partial_ifc)}))
+            'partial_ifc':str(partial_ifc), 'catalog_package': str(package_zip)}))
         destination.chmod(0o600)
     await engine.dispose()
 

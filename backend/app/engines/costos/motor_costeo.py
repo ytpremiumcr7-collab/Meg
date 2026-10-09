@@ -292,12 +292,16 @@ class MotorCosteo:
         if any(p.origen_catalogo for p in presupuesto.partidas):
             sources = wb.create_sheet('Fuentes de precio')
             sources.append(['Partida', 'Catálogo ID', 'Clave', 'Descripción', 'Unidad', 'Fuente',
-                'Vigencia inicio', 'Vigencia fin', 'Zona', 'Precio observado MXN', 'Precio aplicado MXN', 'Evidencia SHA256'])
+                'Vigencia inicio', 'Vigencia fin', 'Zona', 'Precio observado MXN', 'Precio aplicado MXN', 'Evidencia SHA256',
+                'PDF original SHA256', 'Páginas PDF', 'Paquete SHA256', 'Fila SHA256', 'Revisión'])
             for p in sorted(presupuesto.partidas, key=lambda p: p.numero):
                 source = p.origen_catalogo
                 if source:
+                    origin = source.get('origen_importacion') or {}
                     sources.append([p.numero, *[source[key] for key in ('catalogo_id', 'clave', 'descripcion', 'unidad',
-                        'fuente', 'vigencia_inicio', 'vigencia_fin', 'zona_economica', 'precio_observado', 'precio_aplicado', 'sha256')]])
+                        'fuente', 'vigencia_inicio', 'vigencia_fin', 'zona_economica', 'precio_observado', 'precio_aplicado', 'sha256')],
+                        (origin.get('fuente') or {}).get('sha256'), ','.join(origin.get('paginas', [])),
+                        origin.get('paquete_sha256'), origin.get('fila_sha256'), origin.get('revision')])
             for row in sources:
                 for cell in row:
                     if isinstance(cell.value, str):
@@ -414,6 +418,11 @@ class MotorCosteo:
                 source = p.origen_catalogo
                 descripcion += '<br/>Fuente: ' + escape(str(source['fuente'])) + ' · ' + escape(str(source['clave']))
                 descripcion += ' · Vigencia: ' + escape(str(source['vigencia_inicio'] or 'sin registrar'))
+                origin = source.get('origen_importacion')
+                if origin:
+                    descripcion += '<br/>PDF: ' + escape(origin['fuente']['archivo_original'])
+                    descripcion += ' · Páginas: ' + escape(','.join(origin['paginas']))
+                    descripcion += '<br/>SHA256 PDF: ' + escape(origin['fuente']['sha256'])
             filas.append([
                 str(p.numero),
                 Paragraph(descripcion, celda_desc_style),

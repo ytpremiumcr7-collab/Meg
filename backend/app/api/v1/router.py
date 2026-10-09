@@ -8,6 +8,7 @@ Router principal API v1.
 Incluye routers existentes + nuevos módulos Fase 2 + Integración ZIP 2 y 3.
 """
 from fastapi import APIRouter
+from app.api.v1 import catalogo_importaciones
 
 from app.api.v1 import (
     auth, users, expedientes, presupuestos, bim, juridico,
@@ -47,6 +48,7 @@ api_router.include_router(topografia.router, prefix="/topografia", tags=["Topogr
 
 # ─── Routers nuevos Fase 1 ─────────────────────────────────
 api_router.include_router(dashboard.router, prefix="/dashboard", tags=["Dashboard"])
+api_router.include_router(catalogo_importaciones.router, prefix="/catalogo-apu", tags=["Importación de catálogos"])
 api_router.include_router(catalogo_apu.router, prefix="/catalogo-apu", tags=["Catálogo APU"])
 api_router.include_router(licitaciones.router, prefix="/licitaciones", tags=["Licitaciones"])
 api_router.include_router(contratos.router, prefix="/contratos", tags=["Contratos"])

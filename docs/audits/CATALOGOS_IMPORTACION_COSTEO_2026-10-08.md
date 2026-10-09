@@ -1,0 +1,125 @@
+# Importación y costeo de catálogos reales — checkpoint de implementación
+
+Megalodon prepara propuestas del licitante. Esta implementación no convierte
+la herramienta en una plataforma convocante ni publica catálogos privados.
+
+## Problema reproducido y cambio
+
+Los paquetes CMIC/CFE y Varela existían y sus 42 PDF originales fueron
+cotejados, pero el verificador no alimentaba el catálogo de costeo. El CSV del
+libro era otro contrato; copiar estos CSV a su ruta no constituía una importación.
+
+Se añadió importación por tenant, edición y selección explícita de fuentes.
+Guarda todas las filas seleccionadas, incluida evidencia de páginas, reglas,
+componentes e incidencias. Identidades, hashes y estados permanecen consultables.
+Solamente las proyecciones habilitadas alimentan `CatalogoAPU`; las pendientes
+conservan sus datos y motivos. No se ejecuta SQL recibido.
+
+Una transacción confirma edición, registros y proyecciones juntos. Un fallo
+revierte todo. La clave única de edición y el bloqueo durante importación del
+tenant protegen reintentos concurrentes. No se sobrescribe una edición anterior.
+Las proyecciones importadas rechazan edición y borrado por API. Antes de costear
+se contrastan con las filas y componentes de la edición persistida.
+
+La ruta de crear presupuesto resuelve identidad, unidad, precio y APU en el
+servidor. La ruta de agregar/asignar concepto usa la misma resolución; mantiene
+la cantidad medida y su evidencia. Cada partida guarda un snapshot verificable.
+Excel/PDF incluyen procedencia y páginas; Excel también guarda hashes de fila y
+paquete. Cambiar otra edición no revaloriza presupuestos históricos.
+
+## Precisión CMIC
+
+Un consumo real de 0.227273 jornadas por unidad se perdía en `Numeric(18,4)`.
+La API de insumos y `insumos.cantidad` ahora conservan seis decimales; las
+cantidades de obra siguen teniendo cuatro. La migración impide un downgrade que
+redondee consumos o elimine ediciones importadas con evidencia histórica.
+
+La importación verifica el importe de cada componente y el cierre del APU.
+Un rendimiento por división solo se normaliza a consumo si los seis decimales
+persistibles reproducen exactamente el centavo publicado. Las fórmulas de costo
+horario se conservan como evidencia de un insumo observado; no se inventa un APU.
+
+## Evidencia con los paquetes auténticos
+
+Ejecución contra API de la aplicación, SQLite de pruebas y Redis real, usando
+los paquetes privados y sus PDF originales. Las identidades de usuarios y el
+expediente de aceptación son sintéticos; los registros de catálogo de este caso
+proceden de los paquetes recuperados, no de un seed de precios de mercado.
+
+| Caso ejecutado | Resultado observado |
+|---|---|
+| CMIC educativa E01.024, cantidad 2.4 m³ | PU 152.43; importe 365.83; consumo 0.227273 persistido |
+| Recarga y dos recálculos por API | Conservan el consumo y el importe |
+| Validación y aprobación por usuario administrador de pruebas | Transiciones aceptadas en ese presupuesto completo |
+| Excel/PDF descargados por API y reabiertos con lectores independientes | Importe, clave y procedencia presentes; hashes cotejados |
+| Reimportar la misma selección | Recupera la edición existente sin duplicarla |
+| Varela casa clase 2 SHF, modelo 01-002, 43 m², Aguascalientes FIC 0.897, ajuste 1 | Antepresupuesto persistido 333486.02 MXN |
+| Varela casa clase 1, modelo 01-001 | Mantiene cuarentena por componentes pendientes; no se habilitó para hacer pasar la prueba |
+| Incidencia CMIC educativa con costos de resumen/análisis distintos | Conserva cuarentena; no genera proyección cotizable |
+
+La prueba auténtica requiere `MEGALODON_CMIC_PACKAGE`,
+`MEGALODON_VARELA_PACKAGE` y `MEGALODON_CATALOG_ORIGINALS`. Sin los archivos
+privados se omite explícitamente; los fixtures públicos se rotulan sintéticos.
+Los datos privados y el informe completo de esa corrida no se añaden a Git.
+
+## Cobertura de importación y pendientes reales
+
+Para evitar sustituir datos recientes por un agregado antiguo se importaron
+las ocho fuentes del paquete CMIC/CFE autorrecuperable y solamente las 34 fuentes
+Varela del agregado cuyo manifiesto fue reparado en sus dos conteos. Ningún CSV,
+precio, flag de revisión o incidencia fue modificado por esa reparación.
+
+| Selección | Registros conservados | Conceptos cotizables | Insumos | Modelos paramétricos | Factores FIC |
+|---|---:|---:|---:|---:|---:|
+| CMIC/CFE | 19151 | 1186 | 373 | 0 | 0 |
+| Varela | 6464 | 0 | 0 | 28 | 167 |
+
+Estos conteos describen registros y proyecciones diferentes; no equivalen a
+25615 APU independientes. No acreditan cobertura total de precios revisados.
+
+CMIC/CFE conserva 3198 partidas en cuarentena: 1332 por tratamiento de IVA sin
+declaración en el paquete CFE, 688 por unidades no interpretables, 545 por tipo
+insumo/concepto ambiguo, 301 por cierre aritmético, 179 por tipo de componente,
+151 por importe no reproducible y dos por otros bloqueos. Los motivos pueden
+superponerse. Son diagnósticos de importabilidad, no una afirmación de que los
+catálogos originales sean inauténticos. Hay que cotejar los registros afectados
+y resolver la extracción con evidencia antes de habilitarlos.
+
+Varela conserva 1366 ensambles sin precio como referencias y no como APU. Sus
+105 modelos no se declararon todos operables: el estado de componentes y unidades
+deja 28 habilitados para estimación. El cálculo paramétrico guarda modelo,
+localidad, FIC, cantidad, ajuste, justificación, actor y hash. Su resultado declara
+`apto_aprobacion_contractual=false`; no se convierte automáticamente en un precio
+contractual. Revisar unidades/componentes pendientes sigue siendo trabajo abierto.
+
+Los precios conservan su fecha original. Este checkpoint no aplica inflación
+uniforme ni acredita nuevas series oficiales; la actualización por insumo,
+ubicación y período requiere su correspondencia y evidencia independientes.
+
+## Operación y verificación
+
+En pantalla: **Presupuesto → Catálogos CMIC / fuentes** ofrece verificación de
+ZIP, selección explícita de fuentes, edición importada, consulta de pendientes,
+selección de conceptos y estimación paramétrica. Los precios enviados por la UI
+son informativos: guardar siempre vuelve a resolverlos desde el catálogo.
+
+`CATALOGO_ORIGINALES_DIR` debe apuntar al directorio privado de PDF originales
+del servidor. Una instalación sin esa configuración responde 503 al importar.
+La importación por CLI exige un usuario existente y fuentes explícitas:
+
+```sh
+python -m scripts.import_catalog_package --package /privado/paquete \
+  --originals /privado/pdf --user-id UUID --source cmic_educativa_2026
+```
+
+Las regresiones públicas ejecutan importación, rollback, reintento, aislamiento,
+permisos, rechazo de manifiesto alterado, costeo desde catálogo y exportaciones.
+La concurrencia exige PostgreSQL y se omite en SQLite; no se acredita con esa
+omisión. CI de navegador incorpora carga/importación/estimación/costeo por la UI
+contra API, PostgreSQL y Redis reales, con paquete sintético explícito.
+
+**NO GO de producción general.** La evidencia auténtica local no demuestra
+Supabase real, todos los precios revisados, los restantes motores ni la operación
+con todos los catálogos, usuarios, modelos grandes y escenarios de recuperación.
+Los resultados definitivos de PostgreSQL/migraciones/navegador del commit deben
+registrarse por ejecución; compilar la interfaz o acumular tests no los sustituye.

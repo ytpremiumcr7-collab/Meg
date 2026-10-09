@@ -133,8 +133,19 @@ class PresupuestoService(BaseService[Presupuesto]):
         # Resolve catalogue prices on the server; client amounts are not evidence.
         from app.services.catalogo_libro import resolver
         referencias = {}
+        referencias_catalogos = {}
         partidas_data = deepcopy(partidas_data)
         for index, data in enumerate(partidas_data, 1):
+            if data.get('catalogo_apu_id'):
+                from app.services.catalogo_costeo import resolve_catalogue
+                if data.get('catalogo_libro_id') or data.get('conceptos') or data.get('insumos'):
+                    raise MegalodonException(ErrorCode.BAD_REQUEST, 'Seleccione un solo origen de catálogo/APU por partida')
+                catalogo, concept, price, snapshot = await resolve_catalogue(self.db, self.tenant_id,
+                    data['catalogo_apu_id'], creado_por_id)
+                data.update(descripcion=catalogo.descripcion, unidad=catalogo.unidad, precio_unitario=price,
+                    conceptos=[{'clave': concept.clave, 'descripcion': concept.descripcion, 'unidad': concept.unidad,
+                        'cantidad': 1, 'insumos': deepcopy(snapshot['desglose'])}] if concept else [])
+                referencias_catalogos[index] = snapshot
             if data.get("catalogo_libro_id"):
                 item = resolver(data["catalogo_libro_id"])
                 if data.get("conceptos") or data.get("insumos"):
@@ -312,6 +323,7 @@ class PresupuestoService(BaseService[Presupuesto]):
                 cantidad=p_costeo.cantidad,
                 precio_unitario=p_costeo.precio_unitario,
                 importe=p_costeo.importe,
+                metadatos={'catalogo_asignado': referencias_catalogos[p_costeo.numero]} if p_costeo.numero in referencias_catalogos else {},
             )
             self.db.add(partida)
 
@@ -781,130 +793,35 @@ class PresupuestoService(BaseService[Presupuesto]):
     # decide una cantidad, y lo agrega.
 
     async def agregar_partida_desde_catalogo(
-        self,
-        presupuesto_id: UUID,
-        expediente_id: UUID,
-        catalogo_apu_id: UUID,
-        cantidad: float,
-        actualizado_por_id: Optional[UUID] = None,
+        self, presupuesto_id: UUID, expediente_id: UUID, catalogo_apu_id: UUID,
+        cantidad: Decimal, actualizado_por_id: Optional[UUID] = None,
     ) -> Presupuesto:
-        """Agrega una partida al presupuesto tomando su precio (y
-        desglose de insumos si el concepto lo trae) del catálogo maestro
-        CatalogoAPU. Si el concepto no tiene `desglose.insumos` (p. ej.
-        viene de un catálogo de investigación de mercado con solo un
-        precio de referencia), la partida se guarda como tipo tabulador
-        con ese precio unitario tal cual, sin inventar un desglose."""
+        """Add and price a line atomically using the same audited assignment seam."""
         presupuesto = await self._reconstruir_partidas_desde_db(presupuesto_id, expediente_id, bloquear=True)
-
-        # BUG: self.db.get(CatalogoAPU, catalogo_apu_id) no validaba tenant
-        # -- cualquier usuario autenticado que supiera o adivinara un
-        # catalogo_apu_id de OTRO tenant se traía su descripción, precio
-        # unitario y desglose completo de insumos hacia su propio
-        # presupuesto. Mismo tipo de fuga que ya se cerró en otros ~10
-        # routers esta sesión; CatalogoAPUService.obtener() ya lo hacía
-        # bien (filtra por tenant_id), este método no.
-        expediente = await self.db.scalar(select(ExpedienteObra).where(ExpedienteObra.id == expediente_id, ExpedienteObra.tenant_id == self.tenant_id))
-        if not expediente:
-            raise MegalodonException(
-                ErrorCode.DOCUMENTO_NO_ENCONTRADO,
-                f"Expediente {expediente_id} no encontrado",
-            )
-        result_apu = await self.db.execute(
-            select(CatalogoAPU).where(
-                CatalogoAPU.id == catalogo_apu_id,
-                CatalogoAPU.tenant_id == self.tenant_id,
-            )
-        )
-        concepto_apu = result_apu.scalar_one_or_none()
-        if not concepto_apu:
-            # Mismo 404 exista o no exista el id, o exista bajo otro
-            # tenant -- no revelar cuál de los tres casos es.
-            raise MegalodonException(
-                ErrorCode.DOCUMENTO_NO_ENCONTRADO,
-                f"Concepto de catálogo {catalogo_apu_id} no encontrado",
-            )
-
-        siguiente_numero = max((p.numero for p in presupuesto.partidas), default=0) + 1
-        insumos_desglose = (concepto_apu.desglose or {}).get("insumos") or []
-
-        if insumos_desglose:
-            concepto_costeo = ConceptoCosteo(
-                clave=concepto_apu.clave,
-                descripcion=concepto_apu.descripcion,
-                unidad=concepto_apu.unidad,
-                cantidad=Decimal("1"),
-                insumos=[
-                    InsumoCosteo(
-                        clave=ins.get("clave", ""),
-                        descripcion=ins.get("descripcion", ""),
-                        tipo=ins.get("tipo", "MATERIAL"),
-                        unidad=ins.get("unidad", ""),
-                        cantidad=Decimal(str(ins.get("cantidad", 0))),
-                        precio_unitario=Decimal(str(ins.get("precio_unitario", 0))),
-                        rendimiento=Decimal(str(ins.get("rendimiento", 1.0))),
-                    )
-                    for ins in insumos_desglose
-                ],
-            )
-            partida_costeo = PartidaCosteo(
-                numero=siguiente_numero, descripcion=concepto_apu.descripcion, unidad=concepto_apu.unidad,
-                cantidad=Decimal(str(cantidad)), conceptos=[concepto_costeo],
-            )
-        else:
-            concepto_costeo = None
-            partida_costeo = PartidaCosteo(
-                numero=siguiente_numero, descripcion=concepto_apu.descripcion, unidad=concepto_apu.unidad,
-                cantidad=Decimal(str(cantidad)), conceptos=[],
-                precio_unitario_manual=Decimal(str(concepto_apu.precio_unitario)),
-            )
-
-        partida = Partida(
-            id=uuid4(),
-            tenant_id=presupuesto.tenant_id,
-            presupuesto_id=presupuesto.id,
-            numero=siguiente_numero,
-            descripcion=concepto_apu.descripcion,
-            unidad=concepto_apu.unidad,
-            cantidad=cantidad,
-            precio_unitario=float(partida_costeo.precio_unitario),
-            importe=float(partida_costeo.importe),
-        )
-        self.db.add(partida)
-        await self.db.flush()  # necesitamos partida.id para los FK de concepto/insumo
-
-        if concepto_costeo is not None:
-            concepto = Concepto(
-                id=uuid4(),
-                tenant_id=presupuesto.tenant_id,
-                partida_id=partida.id,
-                clave=concepto_costeo.clave,
-                descripcion=concepto_costeo.descripcion,
-                unidad=concepto_costeo.unidad,
-                cantidad=float(concepto_costeo.cantidad),
-                costo_directo_unitario=float(concepto_costeo.costo_directo_unitario),
-            )
-            self.db.add(concepto)
+        if presupuesto.estado in (EstadoPresupuesto.VALIDADO.value, EstadoPresupuesto.APROBADO.value):
+            raise MegalodonException(ErrorCode.PRESUPUESTO_ERROR, 'Genere una revisión para cambiar un presupuesto validado o aprobado')
+        if (presupuesto.metadatos or {}).get('bim_cobertura'):
+            raise MegalodonException(ErrorCode.PRESUPUESTO_ERROR, 'Las partidas BIM conservan la cobertura del modelo; genere una nueva versión')
+        q = Decimal(str(cantidad))
+        if not q.is_finite() or q <= 0 or q.quantize(Decimal('.0001')) != q:
+            raise MegalodonException(ErrorCode.PRESUPUESTO_ERROR, 'La cantidad debe ser positiva y persistible con cuatro decimales')
+        catalogo = await self.db.scalar(select(CatalogoAPU).where(
+            CatalogoAPU.id == catalogo_apu_id, CatalogoAPU.tenant_id == self.tenant_id,
+        ).with_for_update(read=True).execution_options(populate_existing=True))
+        if catalogo is None:
+            raise MegalodonException(ErrorCode.DOCUMENTO_NO_ENCONTRADO, 'Concepto de catálogo no encontrado')
+        partida = Partida(id=uuid4(), tenant_id=self.tenant_id, presupuesto_id=presupuesto.id,
+            numero=max((p.numero for p in presupuesto.partidas), default=0) + 1,
+            descripcion=catalogo.descripcion, unidad=catalogo.unidad, cantidad=q,
+            precio_unitario=0, importe=0, metadatos={})
+        try:
+            self.db.add(partida)
             await self.db.flush()
-            for ins_costeo in concepto_costeo.insumos:
-                self.db.add(Insumo(
-                    id=uuid4(),
-                    tenant_id=presupuesto.tenant_id,
-                    concepto_id=concepto.id,
-                    clave=ins_costeo.clave,
-                    descripcion=ins_costeo.descripcion,
-                    tipo=ins_costeo.tipo,
-                    unidad=ins_costeo.unidad,
-                    cantidad=float(ins_costeo.cantidad),
-                    precio_unitario=float(ins_costeo.precio_unitario),
-                    importe=float(ins_costeo.importe),
-                    rendimiento=float(ins_costeo.rendimiento),
-                ))
-
-        await self.db.flush()
-
-        # Recalcula los montos agregados del presupuesto (indirectos,
-        # utilidad, impuesto) sobre TODAS las partidas, incluida ésta.
-        return await self.recalcular(presupuesto_id, expediente_id, actualizado_por_id)
+            return await self.asignar_catalogo_partida(presupuesto_id, expediente_id, partida.id,
+                                                       catalogo_apu_id, actualizado_por_id)
+        except Exception:
+            await self.db.rollback()
+            raise
 
     async def actualizar_cantidad_partida(
         self,
@@ -936,9 +853,7 @@ class PresupuestoService(BaseService[Presupuesto]):
         catalogo_apu_id: UUID, actualizado_por_id: UUID,
     ) -> Presupuesto:
         """Price a measured line without replacing its quantity or source."""
-        from app.schemas.apu_costeo import InsumoCosteoInput
-        from app.engines.topografia.evidencia import huella
-        from pydantic import ValidationError
+        from app.services.catalogo_costeo import resolve_catalogue
         presupuesto = await self._reconstruir_partidas_desde_db(presupuesto_id, expediente_id, bloquear=True)
         self._validar_origen_topografia(presupuesto)
         if presupuesto.estado in (EstadoPresupuesto.VALIDADO.value, EstadoPresupuesto.APROBADO.value):
@@ -946,51 +861,24 @@ class PresupuestoService(BaseService[Presupuesto]):
         partida = next((p for p in presupuesto.partidas if p.id == partida_id), None)
         if partida is None:
             raise MegalodonException(ErrorCode.DOCUMENTO_NO_ENCONTRADO, 'Partida no encontrada en el presupuesto')
-        if not (partida.metadatos or {}).get('topografia'):
-            raise MegalodonException(ErrorCode.PRESUPUESTO_ERROR, 'Esta asignación conserva partidas medidas de topografía')
-        catalogo = await self.db.scalar(select(CatalogoAPU).where(
-            CatalogoAPU.id == catalogo_apu_id, CatalogoAPU.tenant_id == self.tenant_id,
-        ).with_for_update(read=True).execution_options(populate_existing=True))
-        if catalogo is None:
-            raise MegalodonException(ErrorCode.DOCUMENTO_NO_ENCONTRADO, 'Concepto de catálogo no encontrado')
+        catalogo, concepto_costeo, precio, snapshot = await resolve_catalogue(
+            self.db, self.tenant_id, catalogo_apu_id, actualizado_por_id)
         normalizar = lambda unidad: unidad.strip().lower().replace('³', '3').replace('²', '2')
-        if normalizar(catalogo.unidad) != normalizar(partida.unidad) or catalogo.tipo != 'CONCEPTO':
+        if normalizar(catalogo.unidad) != normalizar(partida.unidad):
             raise MegalodonException(ErrorCode.PRESUPUESTO_ERROR, 'Seleccione un concepto cotizable con la misma unidad de la partida')
-        if catalogo.incluye_iva:
-            raise MegalodonException(ErrorCode.PRESUPUESTO_ERROR, 'Se requiere un precio sin IVA; el impuesto se calcula en el presupuesto')
-        try:
-            insumos = [InsumoCosteoInput.model_validate(item) for item in (catalogo.desglose or {}).get('insumos', [])]
-        except ValidationError as exc:
-            raise MegalodonException(ErrorCode.PRESUPUESTO_ERROR, 'El desglose del catálogo requiere revisión') from exc
-        if any(item.actualizacion_precio is not None for item in insumos):
-            raise MegalodonException(ErrorCode.PRESUPUESTO_ERROR, 'Revise la actualización de índices antes de asignar este desglose')
         concepto = None
-        if insumos:
-            concepto_costeo = ConceptoCosteo(clave=catalogo.clave, descripcion=catalogo.descripcion,
-                unidad=partida.unidad, insumos=[InsumoCosteo(**item.model_dump(exclude={'actualizacion_precio'})) for item in insumos])
-            precio = concepto_costeo.costo_directo_unitario
+        if concepto_costeo:
             concepto = Concepto(id=uuid4(), tenant_id=self.tenant_id, clave=catalogo.clave,
                 descripcion=catalogo.descripcion, unidad=partida.unidad, cantidad=1, costo_directo_unitario=precio,
                 insumos=[Insumo(id=uuid4(), tenant_id=self.tenant_id, clave=item.clave, descripcion=item.descripcion,
                     tipo=item.tipo, unidad=item.unidad, cantidad=item.cantidad, precio_unitario=item.precio_unitario,
                     rendimiento=item.rendimiento, importe=item.importe) for item in concepto_costeo.insumos])
-        else:
-            precio = Decimal(str(catalogo.precio_unitario))
-        precio = precio.quantize(Decimal('.01'), rounding=ROUND_HALF_UP)
-        if not precio.is_finite() or precio <= 0:
-            raise MegalodonException(ErrorCode.PRESUPUESTO_ERROR, 'El concepto no tiene un precio positivo verificable')
-        snapshot = {'catalogo_id': str(catalogo.id), 'clave': catalogo.clave, 'descripcion': catalogo.descripcion,
-            'unidad': catalogo.unidad, 'fuente': catalogo.fuente, 'vigencia_inicio': catalogo.vigencia_inicio,
-            'vigencia_fin': catalogo.vigencia_fin, 'zona_economica': catalogo.zona_economica,
-            'precio_observado': str(catalogo.precio_unitario), 'precio_aplicado': str(precio),
-            'desglose': [item.model_dump(mode='json') for item in insumos], 'usuario_id': str(actualizado_por_id)}
-        snapshot['sha256'] = huella(snapshot)
         try:
             partida.conceptos.clear()
             if concepto is not None:
                 partida.conceptos.append(concepto)
             partida.precio_unitario = precio
-            partida.metadatos = {**partida.metadatos, 'catalogo_asignado': snapshot}
+            partida.metadatos = {**(partida.metadatos or {}), 'catalogo_asignado': snapshot}
             await self.db.flush()
             return await self.recalcular(presupuesto_id, expediente_id, actualizado_por_id)
         except Exception:

@@ -613,6 +613,16 @@ export interface CatalogoAPUOut {
   zona_economica?: string;
   estado?: string;
   incluye_iva: boolean;
+  vigencia_inicio?: string | null;
+  origen?: { importacion_id: string; revision: string; fuente: { titulo: string; sha256: string }; paginas: string[] } | null;
+}
+
+export interface CatalogoImportacionOut {
+  id: string; paquete_sha256: string; fuentes: string[];
+  resumen: { registros: number; estados: Record<string, number>; cuarentena_motivos: Record<string, number>; proyecciones_costeo: number };
+}
+export interface CatalogoRegistroOut {
+  id: string; fuente_id: string; entidad_id: string; estado: string; motivos: string[]; original: Record<string, string>; sha256: string;
 }
 
 export interface ClashResult {
@@ -1477,6 +1487,7 @@ export class MegalodonClient {
       nombre: string;
       descripcion?: string;
       partidas: Array<{
+        catalogo_apu_id?: string;
         catalogo_libro_id?: string;
         numero: number;
         descripcion: string;
@@ -2458,6 +2469,25 @@ export class MegalodonClient {
     precioConIVA: async (id: string, tasaIVA: number) => {
       return this.request("GET", `/catalogo-apu/${id}/precio-con-iva?tasa_iva=${tasaIVA}`);
     },
+  };
+
+  catalogoImportaciones = {
+    listar: () => this.request<{total: number; items: CatalogoImportacionOut[]}>('GET', '/catalogo-apu/importaciones'),
+    verificar: (archivo: File) => {
+      const form = new FormData(); form.append('archivo', archivo);
+      return this.request<{ fuentes: Array<{fuente_id: string; titulo: string; fecha_vigencia: string; original_cotejado: boolean}> }>(
+        'POST', '/catalogo-apu/importaciones/verificar', form);
+    },
+    importar: (archivo: File, fuentes: string[]) => {
+      const form = new FormData(); form.append('archivo', archivo); form.append('fuentes', JSON.stringify(fuentes));
+      return this.request<CatalogoImportacionOut & {creada: boolean}>('POST', '/catalogo-apu/importaciones', form);
+    },
+    registros: (id: string, tabla: string, estado?: string, skip = 0) => {
+      const query = new URLSearchParams({tabla, skip: String(skip), limit: '200', ...(estado ? {estado} : {})});
+      return this.request<{total: number; items: CatalogoRegistroOut[]}>('GET', `/catalogo-apu/importaciones/${id}/registros?${query}`);
+    },
+    estimar: (data: {modelo_registro_id: string; factor_registro_id: string; cantidad: string; ajuste_proyecto: string; justificacion: string}) =>
+      this.request<{id: string; monto: string; evidencia: Record<string, unknown>}>('POST', '/catalogo-apu/estimaciones-parametricas', data),
   };
 
   // ═══════════════════════════════════════════════════════════════════════
