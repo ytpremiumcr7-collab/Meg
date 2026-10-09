@@ -120,7 +120,10 @@ def seed(engine):
             insert("conceptos", id=concepto, partida_id=partida, clave="CI-CONCEPT", descripcion="CI concept",
                    unidad="m3", cantidad=D("2.0000"), costo_directo_unitario=D("617.28"))
             insert("insumos", id=insumo, concepto_id=concepto, clave="CI-RESOURCE", descripcion="CI resource",
-                   tipo="MATERIAL", unidad="m3", cantidad=D("2.0000"), precio_unitario=D("617.28"),
+                   tipo="MATERIAL", unidad="m3",
+                   # The second tenant exercises the full historical integer
+                   # range, independently of the costing workflow fixture.
+                   cantidad=D("2.0000") if number == 1 else D("99999999999999.9999"), precio_unitario=D("617.28"),
                    importe=D("1234.56"), rendimiento=D("1.0000"))
             insert("programas_obra", id=programa, expediente_id=expediente, identificador="SHARED-SCHEDULE",
                    nombre="CI schedule", fecha_inicio_plan=INSTANT, duracion_plan_dias=2, estado="BORRADOR")
@@ -162,6 +165,9 @@ def verify_upgrade(before, after, graph):
             if name == "insumos":
                 # Historical costs have no fabricated index provenance.
                 row["actualizacion_precio"] = None
+                # Widening preserves the value, appending exactly two zero
+                # decimals; compare PostgreSQL's exact text representation.
+                row['cantidad'] = format(Decimal(row['cantidad']), '.6f')
     for row in expected["users"]:
         row["auth_version"] = 0
     for row in expected["catalog_terms"]:
@@ -250,6 +256,15 @@ def main():
                 require(all(columns[field]["type"].timezone for field in fields),
                         "Historical Tez UTC timestamps were not migrated to timezone-aware types")
         checks.append("Populated historical upgrade preserves decimal costs, UTC instants, authors and ownership")
+        with engine.begin() as conn:
+            conn.execute(sa.text('UPDATE insumos SET cantidad=0.227273 WHERE id=:id'), {'id': graph[0]['insumos']})
+        precision_snapshot, precision_schema = snapshot(engine), schema_signature(engine)
+        migrate('20261008_topografia_evidencia', expected_failure='seis decimales', downgrade=True)
+        require(snapshot(engine) == precision_snapshot and schema_signature(engine) == precision_schema,
+                'Rejected catalogue downgrade changed consumption or schema')
+        with engine.begin() as conn:
+            conn.execute(sa.text('UPDATE insumos SET cantidad=2.000000 WHERE id=:id'), {'id': graph[0]['insumos']})
+        checks.append('Six-decimal consumption rejects a lossy downgrade without changing data or schema')
         verify_constraints(engine, graph)
         checks.append("PostgreSQL rejects cross-tenant writes across all six budget/schedule tables")
         with engine.begin() as conn:

@@ -123,3 +123,22 @@ Supabase real, todos los precios revisados, los restantes motores ni la operaci�
 con todos los catálogos, usuarios, modelos grandes y escenarios de recuperación.
 Los resultados definitivos de PostgreSQL/migraciones/navegador del commit deben
 registrarse por ejecución; compilar la interfaz o acumular tests no los sustituye.
+
+## Seguimiento de ejecución — 9 de octubre
+
+La ejecución 156 sobre `7563d81` terminó con integración core/API/Procurement,
+frontend, auditoría Python y análisis estático aprobados. Dos jobs fallaron:
+el generador del catálogo sintético no creaba un directorio padre inexistente,
+y el ensayo de recuperación histórica no incluía las tres tablas nuevas en su
+inventario esperado. El recorrido BIM de esa ejecución **no llegó a ejecutarse**.
+
+Se corrigió el generador con una regresión que verifica el paquete desde un
+directorio nuevo. El ensayo histórico exige las tablas nuevas vacías, compara
+todos los valores históricos y rechaza decimales adicionales inventados antes
+de normalizar la representación textual. El consumo se migra a `numeric(20,6)`:
+conserva los 14 dígitos enteros anteriores, además de los seis decimales. La
+prueba PostgreSQL incluye el máximo histórico `99999999999999.9999` y exige que
+un downgrade con consumo `0.227273` falle sin cambiar datos ni esquema.
+
+Los PDF, CSV y paquetes auténticos utilizados permanecen privados. El repositorio
+contiene código, fixtures sintéticas explícitas y el alcance de las comprobaciones.

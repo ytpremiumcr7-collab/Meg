@@ -133,6 +133,11 @@ def projection_query(table, columns, migrated=False, source_transforms=False, hi
             # Widening appends decimal zeros; compare the original column's
             # exact scale without changing or rounding any historical value.
             expression = sql.SQL('{}::numeric(18,8)').format(expression)
+        if migrated and table == 'insumos' and original == 'cantidad' and kind == 'numeric(18,4)':
+            # The catalogue migration appends zero decimals to historical
+            # consumption. The post-upgrade guard below rejects any invented
+            # extra fractional digits before this canonical comparison.
+            expression = sql.SQL('{}::numeric(18,4)').format(expression)
         if source_transforms and table == "jurisdiction_profiles" and original == "templates":
             expression = expected_templates_expression()
         legacy_jobs = {'modelos_bim':('BIM_IFC','estado_procesamiento','error_procesamiento'),
@@ -244,12 +249,17 @@ def run_rehearsal(backup, uri, env):
         indices_tables = {'series_indices_costos', 'observaciones_indices_costos',
                          'vinculos_indices_insumos', 'retiros_indices_costos', 'cargas_indices_costos'}
         durable_tables = {'trabajos_proceso', 'ocr_jobs'}
-        expected_tables |= indices_tables | durable_tables
+        catalogue_tables = {'catalogo_importaciones', 'catalogo_registros', 'estimaciones_parametricas'}
+        expected_tables |= indices_tables | durable_tables | catalogue_tables
         require(target == HEAD and set(current) == expected_tables, "Unexpected revision or historical table changes")
-        for table in (indices_tables | durable_tables) - set(tables):
+        for table in (indices_tables | durable_tables | catalogue_tables) - set(tables):
             with conn.cursor() as cursor:
                 cursor.execute(sql.SQL('SELECT count(*) FROM {}').format(sql.Identifier('public', table)))
                 require(cursor.fetchone()[0] == 0, 'Historical upgrade must not invent observations, mappings or durable jobs')
+        if ('cantidad', 'numeric(18,4)') in tables.get('insumos', []):
+            with conn.cursor() as cursor:
+                cursor.execute('SELECT count(*) FROM insumos WHERE cantidad <> round(cantidad, 4)')
+                require(cursor.fetchone()[0] == 0, 'Historical upgrade invented extra consumption decimals')
         after = fingerprints(conn, tables, migrated=revision != HEAD,
                              historical_profile_ids=profile_ids if revision == HISTORICAL else None)
         compare(expected, after)

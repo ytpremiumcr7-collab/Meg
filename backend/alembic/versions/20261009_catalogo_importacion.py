@@ -53,7 +53,9 @@ def upgrade():
     op.create_unique_constraint('uq_catalogos_apu_registro_importado', 'catalogos_apu', ['registro_importado_id'])
     op.create_foreign_key('fk_catalogo_apu_registro_tenant', 'catalogos_apu', 'catalogo_registros',
                           ['registro_importado_id', 'tenant_id'], ['id', 'tenant_id'])
-    op.alter_column('insumos', 'cantidad', existing_type=sa.Numeric(18, 4), type_=sa.Numeric(18, 6), existing_nullable=False)
+    # Preserve the historical 14 integer digits while adding two fractional
+    # digits. Numeric(18,6) would narrow the range and reject valid old rows.
+    op.alter_column('insumos', 'cantidad', existing_type=sa.Numeric(18, 4), type_=sa.Numeric(20, 6), existing_nullable=False)
 
 
 def downgrade():
@@ -64,7 +66,7 @@ def downgrade():
         raise RuntimeError('Exporte y migre las ediciones importadas antes de revertir esta migración')
     if conn.execute(sa.text('SELECT 1 FROM insumos WHERE cantidad <> round(cantidad, 4) LIMIT 1')).first():
         raise RuntimeError('Hay consumos APU con seis decimales; el downgrade perdería evidencia')
-    op.alter_column('insumos', 'cantidad', existing_type=sa.Numeric(18, 6), type_=sa.Numeric(18, 4), existing_nullable=False)
+    op.alter_column('insumos', 'cantidad', existing_type=sa.Numeric(20, 6), type_=sa.Numeric(18, 4), existing_nullable=False)
     op.drop_constraint('fk_catalogo_apu_registro_tenant', 'catalogos_apu', type_='foreignkey')
     op.drop_constraint('uq_catalogos_apu_registro_importado', 'catalogos_apu', type_='unique')
     op.drop_column('catalogos_apu', 'origen')

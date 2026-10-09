@@ -25,6 +25,14 @@ def write_package(root, rows):
     (root / 'manifest.json').write_text(json.dumps(manifest))
 
 
+def test_browser_fixture_builds_and_verifies_in_a_missing_parent_directory(tmp_path):
+    from tests.fixtures.catalog_import import make_synthetic_package
+    package, originals, rows = make_synthetic_package(tmp_path / 'new' / 'nested')
+    verified = verify_package(package, originals)
+    assert verified.records['fuente'][0]['fuente_id'] == 'SYNTHETIC'
+    assert verified.records['partida_catalogo'] == rows['partida_catalogo']
+
+
 @pytest.fixture
 def package(tmp_path):
     originals = tmp_path / 'originals'

@@ -6,7 +6,7 @@ from tests.unit.test_catalogo_package import write_package
 
 def make_synthetic_package(tmp_path):
     originals = tmp_path / 'originals'
-    originals.mkdir()
+    originals.mkdir(parents=True, exist_ok=True)
     pdf = originals / 'synthetic.pdf'
     from reportlab.pdfgen.canvas import Canvas
     canvas = Canvas(str(pdf)); canvas.drawString(40, 700, 'Synthetic catalogue fixture; no incluye IVA.'); canvas.save()
