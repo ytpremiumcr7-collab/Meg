@@ -17,14 +17,14 @@ from zipfile import ZipFile
 from openpyxl import load_workbook
 from pypdf import PdfReader
 import pytest
-from sqlalchemy import event, func, select
+from sqlalchemy import event, func, select, update
 
 from app.core.errors import MegalodonException
 from app.models.catalogo_apu import CatalogoAPU
 from app.models.catalogo_importacion import CatalogoImportacion, CatalogoRegistro, EstimacionParametrica
 from app.models.presupuesto import Partida
-from app.models.user import UserRole
-from app.services.catalogo_importacion import fingerprint, import_package, prepare
+from app.models.user import Tenant, User, UserRole
+from app.services.catalogo_importacion import estimate, fingerprint, import_package, prepare
 from app.services.catalogo_package import SCHEMA, digest, verify_package
 from tests.conftest import AsyncSessionLocalTest, _login
 from tests.integration.test_closure_two_tenants import make_expediente
@@ -51,6 +51,42 @@ async def test_atomic_import_retry_and_tenant_separation(db_session, tenant_a_us
         CatalogoAPU.tenant_id == tenant_a_user[0].id)) == 1
     other, created = await import_package(db_session, tenant_b_user[1], package, originals, {'SYNTHETIC'})
     assert created and other.id != batch.id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('operation', ['import', 'estimate'])
+@pytest.mark.parametrize('revocation', ['role', 'disabled', 'session'])
+async def test_revoked_actor_cannot_write_using_a_previously_loaded_identity(
+        db_session, tenant_a_user, synthetic_package, operation, revocation):
+    package, originals, _ = synthetic_package
+    tenant, actor = tenant_a_user
+    tenant_id, actor_id = tenant.id, actor.id
+    if operation == 'estimate':
+        batch, _ = await import_package(db_session, actor, package, originals, {'SYNTHETIC'})
+        model = await db_session.scalar(select(CatalogoRegistro.id).where(
+            CatalogoRegistro.importacion_id == batch.id, CatalogoRegistro.estado == 'PARAMETRICO'))
+        factor = await db_session.scalar(select(CatalogoRegistro.id).where(
+            CatalogoRegistro.importacion_id == batch.id, CatalogoRegistro.estado == 'FACTOR'))
+    await db_session.commit()
+    # The request already loaded an authorized identity. An independent
+    # administration transaction revokes it before the business write.
+    values = {'role': UserRole.LECTOR} if revocation == 'role' else (
+        {'is_active': False} if revocation == 'disabled' else {'auth_version': actor.auth_version + 1})
+    async with AsyncSessionLocalTest() as administration:
+        await administration.execute(update(User).where(User.id == actor_id).values(**values))
+        await administration.commit()
+    assert actor.is_active and actor.role != UserRole.LECTOR
+    with pytest.raises(MegalodonException) as rejected:
+        if operation == 'import':
+            await import_package(db_session, actor, package, originals, {'SYNTHETIC'})
+        else:
+            await estimate(db_session, actor, model, factor, Decimal('36'), Decimal('1'), 'Controlled revocation regression')
+    assert rejected.value.status_code == 403
+    assert await db_session.scalar(select(func.count()).select_from(EstimacionParametrica).where(
+        EstimacionParametrica.tenant_id == tenant_id)) == 0
+    if operation == 'import':
+        assert await db_session.scalar(select(func.count()).select_from(CatalogoImportacion).where(
+            CatalogoImportacion.tenant_id == tenant_id)) == 0
 
 
 @pytest.mark.asyncio
@@ -83,6 +119,57 @@ async def test_concurrent_retries_are_one_edition(db_session, tenant_a_user, syn
     results = await asyncio.gather(run(), run())
     assert results[0][0].id == results[1][0].id
     assert sorted(created for _, created in results) == [False, True]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('operation', ['import', 'estimate'])
+async def test_revocation_while_catalogue_writer_waits_for_tenant_lock(
+        db_session, tenant_a_user, synthetic_package, monkeypatch, operation):
+    if db_session.get_bind().dialect.name != 'postgresql':
+        pytest.skip('Revocation during a row-lock wait requires PostgreSQL')
+    import app.services.catalogo_importacion as service
+    package, originals, _ = synthetic_package
+    tenant, actor = tenant_a_user
+    tenant_id, actor_id, version = tenant.id, actor.id, actor.auth_version
+    if operation == 'estimate':
+        batch, _ = await import_package(db_session, actor, package, originals, {'SYNTHETIC'})
+        model = await db_session.scalar(select(CatalogoRegistro.id).where(
+            CatalogoRegistro.importacion_id == batch.id, CatalogoRegistro.estado == 'PARAMETRICO'))
+        factor = await db_session.scalar(select(CatalogoRegistro.id).where(
+            CatalogoRegistro.importacion_id == batch.id, CatalogoRegistro.estado == 'FACTOR'))
+    await db_session.commit()
+    entered = asyncio.Event()
+    original_lock = service._lock_writer
+    async def observe_lock(db, user):
+        entered.set()
+        return await original_lock(db, user)
+    monkeypatch.setattr(service, '_lock_writer', observe_lock)
+    async def write():
+        async with AsyncSessionLocalTest() as writer:
+            if operation == 'import':
+                return await import_package(writer, actor, package, originals, {'SYNTHETIC'})
+            return await estimate(writer, actor, model, factor, Decimal('36'), Decimal('1'), 'Concurrent revocation regression')
+    async with AsyncSessionLocalTest() as administration:
+        await administration.scalar(select(Tenant.id).where(Tenant.id == tenant_id).with_for_update())
+        pending = asyncio.create_task(write())
+        try:
+            await asyncio.wait_for(entered.wait(), timeout=5)
+            assert not pending.done()
+            await administration.execute(update(User).where(User.id == actor_id).values(auth_version=version + 1))
+            await administration.commit()
+            with pytest.raises(MegalodonException) as rejected:
+                await asyncio.wait_for(pending, timeout=10)
+            assert rejected.value.status_code == 403
+        finally:
+            await administration.rollback()
+            if not pending.done():
+                pending.cancel()
+                await asyncio.gather(pending, return_exceptions=True)
+    assert await db_session.scalar(select(func.count()).select_from(EstimacionParametrica).where(
+        EstimacionParametrica.tenant_id == tenant_id)) == 0
+    if operation == 'import':
+        assert await db_session.scalar(select(func.count()).select_from(CatalogoImportacion).where(
+            CatalogoImportacion.tenant_id == tenant_id)) == 0
 
 
 @pytest.mark.parametrize('damage', ['missing_pdf', 'pending_child', 'arithmetic', 'tax', 'ambiguous_unit'])

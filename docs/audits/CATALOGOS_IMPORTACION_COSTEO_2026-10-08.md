@@ -153,3 +153,19 @@ paneles abiertos y clics normales, sin `force`. La rejilla muestra hasta cuatro
 decimales de cantidad; el recorrido añade `0.0420` y exige que se vea `0.042`,
 se persista y produzca 6.40 MXN al aplicar PU 152.43. El resultado de ese nuevo
 recorrido debe registrarse después de ejecutarlo.
+
+La ejecución 158 sobre `ef34a4a` confirmó que el solapamiento estaba corregido:
+el navegador abrió el panel, verificó el ZIP e importó la edición. Después
+falló al localizar el selector de modelo por su nombre accesible. Los selectores
+anidados en labels incorporaban el texto de sus opciones a ese nombre; ahora
+declaran explícitamente el mismo nombre que su etiqueta visible. No se sustituyen
+los controles por llamadas API en la aceptación.
+
+Una regresión adicional reprodujo una escritura con la identidad previamente
+cargada después de revocarle el rol en otra sesión. Importar y estimar ahora
+bloquean organización → usuario, vuelven a leer actividad, rol y versión de
+sesión y mantienen esos locks hasta confirmar o revertir. El orden coincide
+con administración de identidades. Las regresiones cubren rol, desactivación,
+revocación de sesión y, en PostgreSQL, revocación mientras ambas operaciones
+esperan el lock de la organización. Los rechazos deben dejar cero nuevas
+ediciones/estimaciones; la validación también revierte la transacción.

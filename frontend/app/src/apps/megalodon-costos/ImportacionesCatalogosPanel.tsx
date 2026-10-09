@@ -64,10 +64,10 @@ function Edition({batch, canWrite}: {batch: CatalogoImportacionOut; canWrite: bo
     {models.length > 0 && <fieldset disabled={!canWrite || busy} className="space-y-2 border rounded p-3">
       <legend>Antepresupuesto paramétrico Varela</legend>
       <p>Conserva el precio base, aplica el FIC de la localidad y documenta el ajuste del proyecto. Requiere un análisis específico antes de formar una propuesta contractual.</p>
-      <label>Modelo paramétrico<select className={className} value={modelId} onChange={e => { setModelId(e.target.value); setResult(null); }}>
+      <label>Modelo paramétrico<select aria-label="Modelo paramétrico" className={className} value={modelId} onChange={e => { setModelId(e.target.value); setResult(null); }}>
         <option value="">Elige el tipo de obra</option>{models.map(m => <option key={m.id} value={m.id}>{m.original.codigo} · {m.original.nombre} · ${m.original.costo_por_unidad}/{m.original.unidad_medida_base}</option>)}
       </select></label>
-      <label>Localidad de la obra<select className={className} value={factorId} onChange={e => { setFactorId(e.target.value); setResult(null); }}>
+      <label>Localidad de la obra<select aria-label="Localidad de la obra" className={className} value={factorId} onChange={e => { setFactorId(e.target.value); setResult(null); }}>
         <option value="">Elige la localidad</option>{factors.map(f => <option key={f.id} value={f.id}>{f.original.localidad_base} · FIC {f.original.valor}</option>)}
       </select></label>
       <label>Cantidad {model?.original.unidad_medida_base}<input className={className} type="number" step="0.0001" min="0.0001" value={quantity} onChange={e => { setQuantity(e.target.value); setResult(null); }} /></label>
@@ -129,7 +129,7 @@ export function ImportacionesCatalogosPanel({onImported}: {onImported: () => voi
     </div>}
     {busy && <p role="status">Verificando y guardando la edición…</p>}
     {notice && <p role="status">{notice}</p>}
-    <label>Edición para consultar<select className={className} value={selectedId} onChange={e => setSelectedId(e.target.value)}>
+    <label>Edición para consultar<select aria-label="Edición para consultar" className={className} value={selectedId} onChange={e => setSelectedId(e.target.value)}>
       <option value="">Elige una edición ({batches.length})</option>{batches.map(b => <option key={b.id} value={b.id}>{b.fuentes.join(', ')} · {b.resumen.proyecciones_costeo} precios habilitados</option>)}
     </select></label>
     {batch && <Edition key={batch.id} batch={batch} canWrite={canWrite} />}

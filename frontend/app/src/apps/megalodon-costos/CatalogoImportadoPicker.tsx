@@ -28,7 +28,7 @@ export function CatalogoImportadoPicker({ onSelect }: {onSelect: (item: Catalogo
       <input className="block w-full p-2 rounded bg-[#12121A]" value={q} onChange={e => setQ(e.target.value)} placeholder="Clave, descripción o fuente" />
     </label>
     <label>Concepto importado
-      <select className="block w-full p-2 rounded bg-[#12121A]" value={selected} disabled={loading} onChange={e => setSelected(e.target.value)}>
+      <select aria-label="Concepto importado" className="block w-full p-2 rounded bg-[#12121A]" value={selected} disabled={loading} onChange={e => setSelected(e.target.value)}>
         <option value="">{loading ? 'Buscando…' : 'Elige un concepto'}</option>
         {items.map(item => <option key={item.id} value={item.id}>{item.clave} · {item.descripcion} · {item.precio_unitario} / {item.unidad} · {item.vigencia_inicio}</option>)}
       </select>

@@ -40,6 +40,19 @@ def fingerprint(value) -> str:
                                      allow_nan=False).encode()).hexdigest()
 
 
+async def _lock_writer(db, user):
+    actor_id, tenant_id, version = user.id, user.tenant_id, user.auth_version
+    # Administration locks tenant then user too. Recheck after acquiring that
+    # order, including when source verification or another import took time.
+    active = await db.scalar(select(Tenant.is_active).where(Tenant.id == tenant_id).with_for_update())
+    actor = await db.scalar(select(User).where(User.id == actor_id, User.tenant_id == tenant_id)
+        .with_for_update().execution_options(populate_existing=True))
+    if (not active or actor is None or not actor.is_active or actor.auth_version != version
+            or actor.role not in {'superadmin', 'admin', 'tecnico', 'revisor'}):
+        raise MegalodonException(ErrorCode.PERMISO_DENEGADO,
+            'Sus permisos cambiaron antes de guardar el catálogo o la estimación', status_code=403)
+
+
 def unit(value: str, *, component=False) -> str:
     result = ALIASES.get(value.strip().lower(), value.strip().lower())
     if result not in UNITS and not (component and result in {'%mo', '%eq', '%ma', '%mat', '%mdo'}):
@@ -200,7 +213,7 @@ async def import_package(db: AsyncSession, user: User, package: Path, originals:
     try:
         # Serialize this tenant's imports. The unique edition key remains a
         # database constraint, so retries cannot create duplicate catalogues.
-        await db.scalar(select(Tenant.id).where(Tenant.id == tenant_id).with_for_update())
+        await _lock_writer(db, user)
         existing = await db.scalar(select(CatalogoImportacion).where(
             CatalogoImportacion.tenant_id == tenant_id,
             CatalogoImportacion.paquete_sha256 == verified.package_sha256,
@@ -241,36 +254,37 @@ async def estimate(db, user, modelo_id: UUID, factor_id: UUID, cantidad: Decimal
                    ajuste: Decimal, justificacion: str):
     if user.role not in {'superadmin', 'admin', 'tecnico', 'revisor'} or not user.is_active:
         raise MegalodonException(ErrorCode.PERMISO_DENEGADO, 'Su perfil no permite guardar estimaciones', status_code=403)
-    model = await db.scalar(select(CatalogoRegistro).where(CatalogoRegistro.id == modelo_id,
-                                                         CatalogoRegistro.tenant_id == user.tenant_id))
-    factor = await db.scalar(select(CatalogoRegistro).where(CatalogoRegistro.id == factor_id,
-                                                          CatalogoRegistro.tenant_id == user.tenant_id))
-    if model is None or factor is None:
-        raise MegalodonException(ErrorCode.NOT_FOUND, 'Modelo o factor no encontrado', status_code=404)
-    if (model.tabla != 'modelo_parametrico' or model.estado != 'PARAMETRICO'
-            or factor.tabla != 'factor_geografico' or factor.estado != 'FACTOR'
-            or model.importacion_id != factor.importacion_id):
-        raise MegalodonException(ErrorCode.BAD_REQUEST, 'Seleccione un modelo y FIC habilitados de la misma edición')
-    if fingerprint(model.original) != model.sha256 or fingerprint(factor.original) != factor.sha256:
-        raise MegalodonException(ErrorCode.CONFLICT, 'La evidencia fuente fue alterada')
-    if not cantidad.is_finite() or cantidad <= 0 or not ajuste.is_finite() or ajuste <= 0 or not justificacion.strip():
-        raise MegalodonException(ErrorCode.BAD_REQUEST, 'Indique cantidad, ajuste positivo y justificación del proyecto')
-    base = model.original
-    fic = Decimal(factor.original['valor'])
-    pu = Decimal(base['costo_por_unidad'])
-    amount = (cantidad * pu * fic * ajuste).quantize(CENT, rounding=ROUND_HALF_UP)
-    if amount >= Decimal('10000000000000000'):
-        raise MegalodonException(ErrorCode.BAD_REQUEST, 'La estimación excede el límite persistible')
-    evidence = {'tipo': 'ANTEPRESUPUESTO_PARAMETRICO', 'apto_aprobacion_contractual': False,
-        'importacion_id': str(model.importacion_id), 'modelo': base, 'modelo_sha256': model.sha256,
-        'factor': factor.original, 'factor_sha256': factor.sha256,
-        'cantidad': str(cantidad), 'precio_base': str(pu), 'fic': str(fic), 'ajuste_proyecto': str(ajuste),
-        'justificacion': justificacion.strip(), 'monto': str(amount), 'usuario_id': str(user.id),
-        'fecha_base': 'FUENTE_ORIGINAL; SIN ACTUALIZACION POR INFLACION'}
-    evidence['sha256'] = fingerprint(evidence)
-    result = EstimacionParametrica(tenant_id=user.tenant_id, creado_por_id=user.id,
-        modelo_registro_id=model.id, factor_registro_id=factor.id, cantidad=cantidad, monto=amount, evidencia=evidence)
     try:
+        await _lock_writer(db, user)
+        model = await db.scalar(select(CatalogoRegistro).where(CatalogoRegistro.id == modelo_id,
+                                                             CatalogoRegistro.tenant_id == user.tenant_id))
+        factor = await db.scalar(select(CatalogoRegistro).where(CatalogoRegistro.id == factor_id,
+                                                              CatalogoRegistro.tenant_id == user.tenant_id))
+        if model is None or factor is None:
+            raise MegalodonException(ErrorCode.NOT_FOUND, 'Modelo o factor no encontrado', status_code=404)
+        if (model.tabla != 'modelo_parametrico' or model.estado != 'PARAMETRICO'
+                or factor.tabla != 'factor_geografico' or factor.estado != 'FACTOR'
+                or model.importacion_id != factor.importacion_id):
+            raise MegalodonException(ErrorCode.BAD_REQUEST, 'Seleccione un modelo y FIC habilitados de la misma edición')
+        if fingerprint(model.original) != model.sha256 or fingerprint(factor.original) != factor.sha256:
+            raise MegalodonException(ErrorCode.CONFLICT, 'La evidencia fuente fue alterada')
+        if not cantidad.is_finite() or cantidad <= 0 or not ajuste.is_finite() or ajuste <= 0 or not justificacion.strip():
+            raise MegalodonException(ErrorCode.BAD_REQUEST, 'Indique cantidad, ajuste positivo y justificación del proyecto')
+        base = model.original
+        fic = Decimal(factor.original['valor'])
+        pu = Decimal(base['costo_por_unidad'])
+        amount = (cantidad * pu * fic * ajuste).quantize(CENT, rounding=ROUND_HALF_UP)
+        if amount >= Decimal('10000000000000000'):
+            raise MegalodonException(ErrorCode.BAD_REQUEST, 'La estimación excede el límite persistible')
+        evidence = {'tipo': 'ANTEPRESUPUESTO_PARAMETRICO', 'apto_aprobacion_contractual': False,
+            'importacion_id': str(model.importacion_id), 'modelo': base, 'modelo_sha256': model.sha256,
+            'factor': factor.original, 'factor_sha256': factor.sha256,
+            'cantidad': str(cantidad), 'precio_base': str(pu), 'fic': str(fic), 'ajuste_proyecto': str(ajuste),
+            'justificacion': justificacion.strip(), 'monto': str(amount), 'usuario_id': str(user.id),
+            'fecha_base': 'FUENTE_ORIGINAL; SIN ACTUALIZACION POR INFLACION'}
+        evidence['sha256'] = fingerprint(evidence)
+        result = EstimacionParametrica(tenant_id=user.tenant_id, creado_por_id=user.id,
+            modelo_registro_id=model.id, factor_registro_id=factor.id, cantidad=cantidad, monto=amount, evidencia=evidence)
         db.add(result)
         await db.commit()
         await db.refresh(result)
