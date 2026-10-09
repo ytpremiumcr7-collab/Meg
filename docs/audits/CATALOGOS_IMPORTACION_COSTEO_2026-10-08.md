@@ -169,3 +169,14 @@ con administración de identidades. Las regresiones cubren rol, desactivación,
 revocación de sesión y, en PostgreSQL, revocación mientras ambas operaciones
 esperan el lock de la organización. Los rechazos deben dejar cero nuevas
 ediciones/estimaciones; la validación también revierte la transacción.
+
+La ejecución 159 sobre `2a8a33e` aprobó las ocho regresiones de permisos en
+PostgreSQL y la reimportación concurrente. El navegador importó, estimó y
+seleccionó ambos consumos; guardar encontró otro defecto real: GET y POST del
+mismo path compartían contador Redis, aunque tenían políticas de 100/min y
+10/min respectivamente. La traza registra 14 consultas y un primer POST
+rechazado con 429, sin escrituras anteriores en ese endpoint. La clave ahora
+incluye el método HTTP. Una API de regresión usa el limiter y Redis reales:
+permite 100 lecturas y diez escrituras independientes y rechaza la siguiente
+de cada clase con 429 y `Retry-After: 60`. No aumenta cuotas, cambia políticas
+de fallo ni deshabilita la protección para pasar el navegador.
