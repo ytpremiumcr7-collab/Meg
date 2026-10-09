@@ -142,3 +142,14 @@ un downgrade con consumo `0.227273` falle sin cambiar datos ni esquema.
 
 Los PDF, CSV y paquetes auténticos utilizados permanecen privados. El repositorio
 contiene código, fixtures sintéticas explícitas y el alcance de las comprobaciones.
+
+La ejecución 157 sobre `b252d09` aprobó recuperación histórica, integración
+core/API/Procurement y auditorías. El navegador reprodujo un defecto de diseño:
+el panel de importación se contraía dentro de una columna flex al coexistir
+con el panel de índices, y otros controles interceptaban sus clics. Se cambió
+el presupuesto a un flujo de contenido con desplazamiento vertical y altura
+reservada para las barras de navegación. Se mantiene la regresión con ambos
+paneles abiertos y clics normales, sin `force`. La rejilla muestra hasta cuatro
+decimales de cantidad; el recorrido añade `0.0420` y exige que se vea `0.042`,
+se persista y produzca 6.40 MXN al aplicar PU 152.43. El resultado de ese nuevo
+recorrido debe registrarse después de ejecutarlo.

@@ -358,13 +358,18 @@ print(json.dumps({'xlsx':'verified','pdf':'verified','calculo_id':expected['calc
     await page.getByLabel('Concepto importado',{exact:true}).selectOption({label:'TEST-EXC · Synthetic excavation with six-decimal consumption · 152.43 / m3 · 2026-01-01'});
     await page.getByLabel('Cantidad medida m3',{exact:true}).fill('2.4');
     await page.getByRole('button',{name:'Agregar concepto al presupuesto',exact:true}).click();
+    await page.getByLabel('Cantidad medida m3',{exact:true}).fill('0.0420');
+    await page.getByRole('button',{name:'Agregar concepto al presupuesto',exact:true}).click();
+    await page.getByRole('cell',{name:'0.042',exact:true}).waitFor();
     await page.getByPlaceholder('Contrato, convocatoria, análisis...').fill('Caso sintético sin recargos para comprobar precio fuente');
     const [pricedCatalogue] = await Promise.all([
       page.waitForResponse(r=>r.request().method()==='POST' && /\/presupuestos\/[^/]+\/presupuestos$/.test(new URL(r.url()).pathname)),
       page.getByRole('button',{name:'Guardar en backend',exact:true}).click()]);
     assert.equal(pricedCatalogue.status(),200);
     const catalogBudget = await pricedCatalogue.json();
-    assert.equal(catalogBudget.monto_total,365.83);
+    assert.equal(catalogBudget.monto_total,372.23);
+    assert.equal(catalogBudget.partidas[1].cantidad,0.042);
+    assert.equal(catalogBudget.partidas[1].importe,6.40);
     assert.equal(catalogBudget.partidas[0].conceptos[0].insumos[0].cantidad,0.227273);
     assert.equal(catalogBudget.partidas[0].metadatos.catalogo_asignado.origen_importacion.importacion_id,edition.id);
     await page.screenshot({path:join(evidence,'11-importacion-costeo-catalogo.png'),fullPage:true});
