@@ -131,7 +131,31 @@ un navegador completo específicamente con los cuatro originales privados.
 
 **NO GO general permanece.** Falta la edición de julio, revisión visual/ingeniería
 de todos los registros, restricciones de aplicación a un proyecto real,
-concurrencia/aceptación PostgreSQL del nuevo SHA y servicios de preproducción
+aceptación privada en pantalla, carga integral y servicios de preproducción
 con Supabase real. El caso portuario y los cambios de calendario/fuentes del
 informe diario siguen pendientes; no se registran como casos operativos probados.
 El número de filas, modelos o tests no sustituye esas operaciones.
+
+## Evidencia del checkpoint
+
+Runtime publicado: `9a13da16ebc12a261ca0b8990df67b8305772983`.
+Batería completa local: 564 aprobadas, 18 omitidas, cero fallos/errores, 94.61 s.
+El XML confirma que los casos auténticos CMIC/Varela y SICT se ejecutaron y no
+fueron omitidos. Build frontend aprobado; revisión de nombres/imports Ruff (F)
+aprobada. Las omisiones no acreditan PostgreSQL.
+
+La primera corrida ampliada falló al perder el Redis externo y encontrar SQLite
+en sólo lectura. Se repitió con Redis y SQLite aislados dentro de la misma
+ejecución. Esa corrida encontró una aserción de la nueva prueba que contaba
+estimaciones de otros casos: se restringió al modelo probado, conservando la
+exigencia de cero escrituras por rechazo. La corrida completa final fue exitosa.
+
+[CI 162](https://github.com/ytpremiumcr7-collab/Meg/actions/runs/38042275760)
+terminó con los ocho jobs aprobados sobre ese runtime, incluidos migraciones,
+core/API/Procurement y navegador. API ejecutó 135 pruebas aprobadas y seis
+omitidas; las nuevas regresiones SICT sintéticas pasaron en PostgreSQL. El
+navegador recorrió BIM, recuperación, topografía y el catálogo sintético importado
+por pantalla hasta guardar el presupuesto. No certifica una sesión de navegador
+con los cuatro PDF privados ni los proyectos del informe diario. Las entradas privadas no se subieron a GitHub y
+se omiten explícitamente en CI público. El ZIP normalizado privado se comprobó
+con CRC y SHA-256 `7b92b5384dde749d4a459594ee09ef8ced13a1d53739964c6765ff0d65f79730`.
