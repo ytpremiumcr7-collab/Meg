@@ -14,6 +14,18 @@ const reasons: Record<string, string> = {
   TIPO_AMBIGUO_REQUIERE_REVISION: 'Hay que distinguir si es insumo o concepto', NO_USAR_PARA_COSTEAR: 'Referencia sin precio habilitado',
 };
 
+async function loadRecords(batchId: string, table: string, state: string) {
+  const items: CatalogoRegistroOut[] = [];
+  let total = 0;
+  do {
+    const page = await megalodonClient.catalogoImportaciones.registros(batchId, table, state, items.length, 500);
+    total = page.total;
+    if (!page.items.length && items.length < total) throw new Error('No se pudo completar la consulta del catálogo');
+    items.push(...page.items);
+  } while (items.length < total);
+  return items;
+}
+
 function Edition({batch, canWrite}: {batch: CatalogoImportacionOut; canWrite: boolean}) {
   const [models, setModels] = useState<CatalogoRegistroOut[]>([]);
   const [factors, setFactors] = useState<CatalogoRegistroOut[]>([]);
@@ -31,9 +43,9 @@ function Edition({batch, canWrite}: {batch: CatalogoImportacionOut; canWrite: bo
     let active = true;
     setError('');
     void Promise.all([
-      megalodonClient.catalogoImportaciones.registros(batch.id, 'modelo_parametrico', 'PARAMETRICO'),
-      megalodonClient.catalogoImportaciones.registros(batch.id, 'factor_geografico', 'FACTOR'),
-    ]).then(([m, f]) => { if (active) { setModels(m.items); setFactors(f.items); } })
+      loadRecords(batch.id, 'modelo_parametrico', 'PARAMETRICO'),
+      loadRecords(batch.id, 'factor_geografico', 'FACTOR'),
+    ]).then(([m, f]) => { if (active) { setModels(m); setFactors(f); } })
       .catch(e => { if (active) setError(message(e)); });
     return () => { active = false; };
   }, [batch.id]);
@@ -44,6 +56,9 @@ function Edition({batch, canWrite}: {batch: CatalogoImportacionOut; canWrite: bo
     return () => { active = false; };
   }, [batch.id, skip]);
   const model = models.find(m => m.id === modelId);
+  const scope = model ? (JSON.parse(model.original.aplicabilidad || '{}') as {fic_especialidad?: string}).fic_especialidad : undefined;
+  const compatibleFactors = factors.filter(f => !scope || (f.fuente_id === model?.fuente_id &&
+    (JSON.parse(f.original.instrucciones || '{}') as {fic_especialidad?: string}).fic_especialidad === scope));
   async function estimate() {
     setBusy(true); setResult(null); setError('');
     try { setResult(await megalodonClient.catalogoImportaciones.estimar({modelo_registro_id: modelId,
@@ -62,13 +77,13 @@ function Edition({batch, canWrite}: {batch: CatalogoImportacionOut; canWrite: bo
       <button disabled={skip + 200 >= pending.total} onClick={() => setSkip(s => s + 200)}>Siguientes</button>
     </details>
     {models.length > 0 && <fieldset disabled={!canWrite || busy} className="space-y-2 border rounded p-3">
-      <legend>Antepresupuesto paramétrico Varela</legend>
+      <legend>Antepresupuesto paramétrico de la fuente</legend>
       <p>Conserva el precio base, aplica el FIC de la localidad y documenta el ajuste del proyecto. Requiere un análisis específico antes de formar una propuesta contractual.</p>
-      <label>Modelo paramétrico<select aria-label="Modelo paramétrico" className={className} value={modelId} onChange={e => { setModelId(e.target.value); setResult(null); }}>
+      <label>Modelo paramétrico<select aria-label="Modelo paramétrico" className={className} value={modelId} onChange={e => { setModelId(e.target.value); setFactorId(''); setResult(null); }}>
         <option value="">Elige el tipo de obra</option>{models.map(m => <option key={m.id} value={m.id}>{m.original.codigo} · {m.original.nombre} · ${m.original.costo_por_unidad}/{m.original.unidad_medida_base}</option>)}
       </select></label>
       <label>Localidad de la obra<select aria-label="Localidad de la obra" className={className} value={factorId} onChange={e => { setFactorId(e.target.value); setResult(null); }}>
-        <option value="">Elige la localidad</option>{factors.map(f => <option key={f.id} value={f.id}>{f.original.localidad_base} · FIC {f.original.valor}</option>)}
+        <option value="">Elige la localidad</option>{compatibleFactors.map(f => <option key={f.id} value={f.id}>{f.original.localidad_base} · FIC {f.original.valor}</option>)}
       </select></label>
       <label>Cantidad {model?.original.unidad_medida_base}<input className={className} type="number" step="0.0001" min="0.0001" value={quantity} onChange={e => { setQuantity(e.target.value); setResult(null); }} /></label>
       <label>Factor de ajuste del proyecto<input className={className} type="number" step="0.000001" min="0.000001" max="100" value={adjustment} onChange={e => { setAdjustment(e.target.value); setResult(null); }} /></label>
@@ -76,6 +91,7 @@ function Edition({batch, canWrite}: {batch: CatalogoImportacionOut; canWrite: bo
       <button className="rounded border p-2 disabled:opacity-40" disabled={busy || !modelId || !factorId || Number(quantity) <= 0 || Number(adjustment) <= 0 || reference.trim().length < 10} onClick={() => void estimate()}>Calcular y guardar antepresupuesto</button>
     </fieldset>}
     {result && <p role="status">Estimación guardada: {Number(result.monto).toLocaleString('es-MX', {style: 'currency', currency: 'MXN'})}. Base original; no incluye actualización por inflación.</p>}
+    {scope && <p>FIC de {scope.replaceAll('_', ' ').toLowerCase()}. Conserva el alcance de la fuente, incluidos sus acarreos; no es un índice de inflación.</p>}
     {error && <p role="alert" className="text-[#F08080]">{error}</p>}
   </div>;
 }

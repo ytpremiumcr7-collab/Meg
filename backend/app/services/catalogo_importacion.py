@@ -28,9 +28,11 @@ from app.services.catalogo_package import KEYS, PARENT, VerifiedPackage, strict_
 CENT = Decimal('.01')
 SIX = Decimal('.000001')
 UNITS = {'m', 'm2', 'm3', 'm3/km', 'm3/est', 'kg', 't', 't/km', 'km', 'l', 'pza', 'jgo',
-         'h', 'dia', 'jornada', 'mes', 'lote', 'viaje', 'tiro', 'junta', 'uso', 'pt', 'millar', 'caja', 'cubeta'}
+         'ha', 'hm', 'dm2', 'dm3', 'm3/hm', 'km-carril', 'sondeo', 'plaza', 'sitio', 'analisis',
+         'nucleo', 'prueba', 'informe', 'reporte', 'muestra', 'muestreo', 'h', 'dia', 'jornada', 'mes', 'lote', 'viaje', 'tiro', 'junta', 'uso', 'pt', 'millar', 'caja', 'cubeta'}
 ALIASES = {'m²': 'm2', 'm³': 'm3', 'm³/km': 'm3/km', 'm³/est': 'm3/est', 'pz': 'pza', 'pieza': 'pza',
-           'hr': 'h', 'hora': 'h', 'juego': 'jgo', 'ml': 'm', 'mt': 'm', 'ton': 't', 'día': 'dia'}
+           'hr': 'h', 'hora': 'h', 'juego': 'jgo', 'ml': 'm', 'mt': 'm', 'ton': 't', 'día': 'dia', 'dm³': 'dm3', 'dm²': 'dm2', 'm³/hm': 'm3/hm', 'jornal': 'jornada',
+           'análisis': 'analisis', 'núcleo': 'nucleo'}
 COMPONENT_TYPES = {'MATERIALES': 'MATERIAL', 'MANO DE OBRA': 'MANO_OBRA', 'DE OBRA': 'MANO_OBRA',
                    'EQUIPO Y HERRAMIENTA': 'EQUIPO', 'Y HERRAMIENTA': 'EQUIPO', 'BASICOS': 'AUXILIAR'}
 
@@ -115,6 +117,24 @@ def source_without_vat(records, sid):
         if match:
             return {'pagina_pdf': row['pagina_pdf'], 'texto_sha256': row['texto_sha256'],
                     'declaracion': match.group(0)}
+    source = next(r for r in records['fuente'] if r['fuente_id'] == sid)
+    metadata = strict_json(source['metadatos'])
+    if (source['familia'] != 'SICT_DGST_2026' or source['tipo_fuente'] != 'TABULADOR_COSTO_DIRECTO'
+            or not isinstance(metadata, dict) or metadata.get('perfil') not in {'construccion', 'maquinaria'}):
+        return None
+    pages = [r for r in records['pagina_fuente'] if r['fuente_id'] == sid]
+    direct = next((r for r in pages if re.search(r'a\s+costo\s+directo', r['texto_bruto'], re.I)), None)
+    for row in pages:
+        match = re.search(r'En\s+general\s+a\s+todos\s+los\s+precios\s+cotizados\s+que\s+incluyen\s+el\s+IVA,\s*'
+                          r'se\s+les\s+deduce\s+el\s+16%\s+por\s+concepto\s+de\s+este\s+impuesto', row['texto_bruto'], re.I)
+        if direct and match:
+            # The published direct cost already uses the source's tax basis.
+            # Preserve its exceptions (fuel/IEPS, exempt assets); never divide
+            # the final price by 1.16 a second time or recompute its components.
+            return {'pagina_pdf': row['pagina_pdf'], 'texto_sha256': row['texto_sha256'],
+                    'declaracion': match.group(0), 'metodo': 'SICT_PRECIO_DIRECTO_PUBLICADO',
+                    'pagina_costo_directo': direct['pagina_pdf'], 'texto_costo_directo_sha256': direct['texto_sha256'],
+                    'condiciones': 'Se conserva la metodología y excepciones fiscales del PDF; no se modifica el precio publicado'}
     return None
 
 
@@ -270,6 +290,24 @@ async def estimate(db, user, modelo_id: UUID, factor_id: UUID, cantidad: Decimal
             raise MegalodonException(ErrorCode.CONFLICT, 'La evidencia fuente fue alterada')
         if not cantidad.is_finite() or cantidad <= 0 or not ajuste.is_finite() or ajuste <= 0 or not justificacion.strip():
             raise MegalodonException(ErrorCode.BAD_REQUEST, 'Indique cantidad, ajuste positivo y justificación del proyecto')
+        # Same batch is not enough: it may contain unrelated publishers or
+        # SICT columns for different kinds of work. Never silently use General.
+        sources = (await db.scalars(select(CatalogoRegistro).where(
+            CatalogoRegistro.importacion_id == model.importacion_id,
+            CatalogoRegistro.tenant_id == user.tenant_id, CatalogoRegistro.tabla == 'fuente',
+            CatalogoRegistro.entidad_id.in_([model.fuente_id, factor.fuente_id])))).all()
+        by_source = {r.entidad_id: r for r in sources}
+        if (len(by_source) != len({model.fuente_id, factor.fuente_id})
+                or any(fingerprint(r.original) != r.sha256 for r in sources)):
+            raise MegalodonException(ErrorCode.CONFLICT, 'La procedencia del modelo o factor fue alterada')
+        family = by_source[model.fuente_id].original['familia']
+        if family != by_source[factor.fuente_id].original['familia']:
+            raise MegalodonException(ErrorCode.BAD_REQUEST, 'Modelo y factor pertenecen a familias de fuentes diferentes')
+        if family == 'SICT_DGST_2026':
+            scope = strict_json(model.original['aplicabilidad']).get('fic_especialidad')
+            actual_scope = strict_json(factor.original['instrucciones']).get('fic_especialidad')
+            if (model.fuente_id != factor.fuente_id or not scope or scope == 'GENERAL' or scope != actual_scope):
+                raise MegalodonException(ErrorCode.BAD_REQUEST, 'El FIC SICT debe corresponder a la especialidad y fuente del modelo')
         base = model.original
         fic = Decimal(factor.original['valor'])
         pu = Decimal(base['costo_por_unidad'])

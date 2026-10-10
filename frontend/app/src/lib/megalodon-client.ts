@@ -2482,8 +2482,8 @@ export class MegalodonClient {
       const form = new FormData(); form.append('archivo', archivo); form.append('fuentes', JSON.stringify(fuentes));
       return this.request<CatalogoImportacionOut & {creada: boolean}>('POST', '/catalogo-apu/importaciones', form);
     },
-    registros: (id: string, tabla: string, estado?: string, skip = 0) => {
-      const query = new URLSearchParams({tabla, skip: String(skip), limit: '200', ...(estado ? {estado} : {})});
+    registros: (id: string, tabla: string, estado?: string, skip = 0, limit = 200) => {
+      const query = new URLSearchParams({tabla, skip: String(skip), limit: String(limit), ...(estado ? {estado} : {})});
       return this.request<{total: number; items: CatalogoRegistroOut[]}>('GET', `/catalogo-apu/importaciones/${id}/registros?${query}`);
     },
     estimar: (data: {modelo_registro_id: string; factor_registro_id: string; cantidad: string; ajuste_proyecto: string; justificacion: string}) =>
