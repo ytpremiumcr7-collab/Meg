@@ -180,3 +180,30 @@ incluye el método HTTP. Una API de regresión usa el limiter y Redis reales:
 permite 100 lecturas y diez escrituras independientes y rechaza la siguiente
 de cada clase con 429 y `Retry-After: 60`. No aumenta cuotas, cambia políticas
 de fallo ni deshabilita la protección para pasar el navegador.
+
+## Checkpoint confirmado — 10 de octubre
+
+Runtime: `44cfccd93133d0eea40686514d621e0102a6e323`. La
+[ejecución 160](https://github.com/ytpremiumcr7-collab/Meg/actions/runs/37884794571)
+terminó con los ocho jobs aprobados, incluido el navegador contra API,
+PostgreSQL, Redis y workers reales. El recorrido importa la edición por pantalla,
+persiste la estimación paramétrica de 130128.36 MXN como no contractual, selecciona
+el concepto importado y guarda cantidades 2.4 y 0.0420: importes 365.83 y 6.40,
+total 372.23 MXN. También ejecuta el flujo BIM, recuperación de workers, bloqueo
+de cobertura incompleta, aprobación, lectura de Excel/PDF, 4D y topografía
+descritos en la aceptación. Los datos de esta ejecución pública son sintéticos
+y están identificados como tales; no son los catálogos privados.
+
+La batería local final terminó con 553 aprobadas, 18 omitidas y cero fallos
+en 99.10 s. Las regresiones de PostgreSQL prueban importación concurrente,
+revocación de permisos y revocación mientras se espera el lock. Las pruebas
+privadas de CMIC/Varela se ejecutaron por separado con los PDF originales y
+sus registros: el costeo contractual CMIC de 365.83 MXN llegó a aprobación y
+exportaciones leídas; Varela conservó 333486.02 MXN como antepresupuesto, sin
+autorizar aprobación contractual. No se subieron esas fuentes a GitHub.
+
+Este checkpoint cierra las rutas y defectos enumerados en este informe.
+**NO GO general permanece** por los límites registrados: Supabase real, escala,
+cobertura de los restantes motores y fuentes aún pendientes de revisión.
+Los cuatro tabuladores SICT del informe diario constituyen trabajo siguiente,
+no se declaran importados ni certificados por esta ejecución.
