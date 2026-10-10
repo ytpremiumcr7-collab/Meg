@@ -143,6 +143,12 @@ class Partida(Base, UUIDMixin, TenantMixin):
     precio_unitario: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
     importe: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
 
+    # Proveniencia de cuantificación/importación (OCR, BIM, manual, etc.).
+    # Antes OCRService ya intentaba persistir este campo, pero el modelo y
+    # la migración no lo tenían: cualquier OCR con presupuesto tronaba al
+    # construir Partida antes de llegar siquiera al commit.
+    metadatos: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+
     # BIM
     elemento_tipo: Mapped[str | None] = mapped_column(String(100), nullable=True)
     elemento_ifc_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -219,7 +225,7 @@ class Insumo(Base, UUIDMixin, TenantMixin):
     descripcion: Mapped[str] = mapped_column(Text, nullable=False)
     tipo: Mapped[TipoInsumo] = mapped_column(String(50), nullable=False)
     unidad: Mapped[str] = mapped_column(String(20), nullable=False)
-    cantidad: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False)
+    cantidad: Mapped[float] = mapped_column(Numeric(20, 6), nullable=False)
     precio_unitario: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
     importe: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
 

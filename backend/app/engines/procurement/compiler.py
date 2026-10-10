@@ -9,6 +9,7 @@ from typing import Any
 
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment
+from openpyxl.writer.excel import ExcelWriter
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 
@@ -57,6 +58,23 @@ class ProcurementArtifactCompiler:
         return float(value or 0)
 
     @staticmethod
+    def _save_xlsx(workbook: Workbook) -> bytes:
+        # Workbook.save() replaces modified with the current time. The writer
+        # preserves the declared revision properties; ZIP timestamps are normalized.
+        fixed_date = (2000, 1, 1, 0, 0, 0)
+        raw = io.BytesIO()
+        with zipfile.ZipFile(raw, "w", zipfile.ZIP_DEFLATED) as archive:
+            ExcelWriter(workbook, archive).save()
+        out = io.BytesIO()
+        with zipfile.ZipFile(raw) as source, zipfile.ZipFile(out, "w") as target:
+            for name in sorted(source.namelist()):
+                entry = zipfile.ZipInfo(name, date_time=fixed_date)
+                entry.compress_type = zipfile.ZIP_DEFLATED
+                entry.external_attr = 0o600 << 16
+                target.writestr(entry, source.read(name))
+        return out.getvalue()
+
+    @staticmethod
     def _xlsx_from_rows(
         title: str,
         headers: list[str],
@@ -86,9 +104,7 @@ class ProcurementArtifactCompiler:
         for column, width in (widths or {}).items():
             ws.column_dimensions[column].width = width
         ws.freeze_panes = "A2"
-        out = io.BytesIO()
-        wb.save(out)
-        return out.getvalue()
+        return ProcurementArtifactCompiler._save_xlsx(wb)
 
     def compile_proposal_letter_xlsx(self, model: dict[str, Any]) -> bytes:
         facts=model.get("facts", {})
@@ -123,9 +139,7 @@ class ProcurementArtifactCompiler:
         ws.append(["", "", "", "", "TOTAL", self._money(economic.get("budget_total"))])
         for col, width in {"A": 8, "B": 60, "C": 14, "D": 16, "E": 16, "F": 18}.items():
             ws.column_dimensions[col].width = width
-        out = io.BytesIO()
-        wb.save(out)
-        return out.getvalue()
+        return self._save_xlsx(wb)
 
     def compile_apu_xlsx(self, model: dict[str, Any]) -> bytes:
         partidas = model.get("economic", {}).get("partidas", [])
@@ -157,7 +171,7 @@ class ProcurementArtifactCompiler:
         ws.column_dimensions["D"].width = 14
         ws.column_dimensions["E"].width = 16
         ws.column_dimensions["F"].width = 24
-        out = io.BytesIO(); wb.save(out); return out.getvalue()
+        return self._save_xlsx(wb)
 
 
     def compile_lump_sum_xlsx(self, model: dict[str, Any]) -> bytes:
@@ -218,7 +232,7 @@ class ProcurementArtifactCompiler:
         ws.append(["", "", "DURACIÓN TOTAL", self._money(schedule.get("duration_days")), "", ""])
         for col, width in {"A": 18, "B": 18, "C": 58, "D": 18, "E": 18, "F": 30}.items():
             ws.column_dimensions[col].width = width
-        out = io.BytesIO(); wb.save(out); return out.getvalue()
+        return self._save_xlsx(wb)
 
     def compile_summary_pdf(self, model: dict[str, Any], findings: list[dict[str, Any]]) -> bytes:
         if not model.get("identifier"):

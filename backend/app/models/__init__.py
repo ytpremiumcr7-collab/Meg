@@ -52,6 +52,7 @@ from app.models.bim import ModeloBIM, ElementoBIM, AnalisisClash, ClashResult
 # ─── 8. Costos / APU / Presupuesto ─────────────────────────
 from app.models.presupuesto import Presupuesto, Partida, Concepto, Insumo
 from app.models.catalogo_apu import CatalogoAPU, PrecioUnitarioAsignado, TipoConceptoAPU, UnidadMedida
+from app.models.catalogo_importacion import CatalogoImportacion, CatalogoRegistro, EstimacionParametrica
 from app.models.catalogo_conceptos import (
     CatalogoFuente, ConceptoCatalogo, InsumoCatalogo, TipoCatalogo
 )
@@ -73,6 +74,7 @@ from app.models.notifications import NotificationLog
 
 # ─── 13. Entitlements (planes, límites, uso, suscripciones) ─
 from app.models.montecarlo import MonteCarloRun, EstadoMonteCarlo
+from app.models.ocr_job import OCRJob, OCRJobStatus
 
 from app.models.procurement import (
     TenderPackage, TenderRevision, TenderDocument, TenderDocumentRevision, TenderLicitacionBridge, JurisdictionProfile, JurisdictionInheritance, ProcedureThreshold, LegalSource, LegalRule, TenderRuleDefinition,

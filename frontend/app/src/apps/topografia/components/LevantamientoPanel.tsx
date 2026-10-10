@@ -9,6 +9,7 @@ import * as THREE from 'three';
 import { Upload, Loader2, AlertCircle, Layers3, Calculator, FileSpreadsheet, Plus } from 'lucide-react';
 import { megalodonClient } from '@/lib/api-client';
 import type { Levantamiento, SuperficieTIN, CalculoVolumen } from '@/lib/megalodon-client';
+import PresupuestoPanel from '@/apps/bim-calculator/PresupuestoPanel';
 
 function rampaColor(t: number): [number, number, number] {
   const c = t < 0.5
@@ -110,6 +111,7 @@ export default function LevantamientoPanel({
   const [levantamientos, setLevantamientos] = useState<Levantamiento[]>([]);
   const [activo, setActivo] = useState<Levantamiento | null>(null);
   const [nombreNuevo, setNombreNuevo] = useState('');
+  const [sridNuevo, setSridNuevo] = useState('6362');
   const [superficies, setSuperficies] = useState<SuperficieTIN[]>([]);
   const [superficieVista, setSuperficieVista] = useState<SuperficieTIN | null>(null);
   const [subiendo, setSubiendo] = useState(false);
@@ -121,32 +123,63 @@ export default function LevantamientoPanel({
   const [calculando, setCalculando] = useState(false);
   const [resultadoVolumen, setResultadoVolumen] = useState<CalculoVolumen | null>(null);
   const [mensajePresupuesto, setMensajePresupuesto] = useState('');
+  const [generandoPresupuesto, setGenerandoPresupuesto] = useState(false);
+  const [presupuestoCreadoId, setPresupuestoCreadoId] = useState('');
   const [factorIndirecto, setFactorIndirecto] = useState(0);
   const [factorUtilidad, setFactorUtilidad] = useState(0);
   const [factorImpuesto, setFactorImpuesto] = useState(0);
   const [referenciaParametros, setReferenciaParametros] = useState('');
+  const contextoVolumen = JSON.stringify([expedienteId, activo?.id, superficieA, superficieB, elevacionRef]);
+  const contextoActual = useRef(contextoVolumen);
+  contextoActual.current = contextoVolumen;
+  const marcoCarga = JSON.stringify([expedienteId, activo?.id]);
+  const marcoActual = useRef(marcoCarga);
+  marcoActual.current = marcoCarga;
+  const expedienteActual = useRef(expedienteId);
+  expedienteActual.current = expedienteId;
+  const activoActual = useRef(activo);
+  activoActual.current = activo;
+  const solicitudLevantamientos = useRef(0);
+  const solicitudSuperficies = useRef(0);
 
   const cargarLevantamientos = useCallback(async () => {
+    const solicitud = ++solicitudLevantamientos.current;
     try {
       const lista = await megalodonClient.topografia.listarLevantamientos(expedienteId);
+      if (expedienteActual.current !== expedienteId || solicitud !== solicitudLevantamientos.current) return;
+      const seleccionado = activoActual.current;
+      if (seleccionado?.expediente_id === expedienteId && !lista.some((l) => l.id === seleccionado.id)) lista.push(seleccionado);
       setLevantamientos(lista);
-      setActivo((prev) => prev || lista[0] || null);
+      setActivo((prev) => lista.find((l) => l.id === prev?.id) || lista[0] || null);
     } catch (e) { setError((e as Error).message); }
   }, [expedienteId]);
 
   useEffect(() => { void cargarLevantamientos(); }, [cargarLevantamientos]);
 
   const cargarSuperficies = useCallback(async () => {
-    if (!activo) return;
+    if (!activo || activo.expediente_id !== expedienteId) return;
+    const solicitud = ++solicitudSuperficies.current;
+    const marco = JSON.stringify([expedienteId, activo.id]);
     try {
       const ligeras = await megalodonClient.topografia.listarSuperficies(activo.id);
       const completas = await Promise.all(ligeras.map((s) => megalodonClient.topografia.obtenerSuperficie(s.id)));
+      if (marcoActual.current !== marco || solicitud !== solicitudSuperficies.current) return;
       setSuperficies(completas);
-      setSuperficieVista((v) => v || completas[0] || null);
+      setSuperficieVista((v) => completas.find((s) => s.id === v?.id) || completas[0] || null);
     } catch (e) { setError((e as Error).message); }
-  }, [activo]);
+  }, [activo?.id, expedienteId]);
 
-  useEffect(() => { void cargarSuperficies(); }, [cargarSuperficies]);
+  useEffect(() => {
+    setSuperficies([]); setSuperficieVista(null);
+    setSuperficieA(''); setSuperficieB(''); setElevacionRef('');
+    void cargarSuperficies();
+  }, [cargarSuperficies]);
+
+  useEffect(() => {
+    setResultadoVolumen(null);
+    setMensajePresupuesto('');
+    setPresupuestoCreadoId('');
+  }, [superficieA, superficieB, elevacionRef, activo?.id, expedienteId]);
 
   useEffect(() => { onLevantamientoChange?.(activo); }, [activo, onLevantamientoChange]);
   useEffect(() => { onSuperficiesChange?.(superficies); }, [superficies, onSuperficiesChange]);
@@ -154,7 +187,10 @@ export default function LevantamientoPanel({
   const crearLevantamiento = async () => {
     if (!nombreNuevo.trim()) return;
     try {
-      const l = await megalodonClient.topografia.crearLevantamiento(expedienteId, { nombre: nombreNuevo.trim() });
+      const l = await megalodonClient.topografia.crearLevantamiento(expedienteId, {
+        nombre: nombreNuevo.trim(), crs: `EPSG:${sridNuevo}`, srid: Number(sridNuevo),
+      });
+      if (expedienteActual.current !== expedienteId) return;
       setNombreNuevo('');
       setActivo(l);
       await cargarLevantamientos();
@@ -167,31 +203,35 @@ export default function LevantamientoPanel({
     try {
       await megalodonClient.topografia.importarCSV(activo.id, file, 'penzd');
       const superficie = await megalodonClient.topografia.triangular(activo.id, `${activo.nombre} · terreno existente`, 'EXISTENTE');
+      if (marcoActual.current !== marcoCarga) return;
       setSuperficieVista(superficie);
       await cargarSuperficies();
     } catch (e) { setError(e instanceof Error ? e.message : 'No se pudo importar/triangular el CSV'); } finally { setSubiendo(false); }
   };
 
   const calcularVolumen = async () => {
-    if (!superficieA || (!superficieB && !elevacionRef)) return;
+    if (!superficies.some((s) => s.id === superficieA && s.levantamiento_id === activo?.id)
+      || (superficieB && !superficies.some((s) => s.id === superficieB && s.levantamiento_id === activo?.id))
+      || (!superficieB && !elevacionRef)) return;
     setCalculando(true); setError(''); setResultadoVolumen(null);
     try {
       const resultado = await megalodonClient.topografia.calcularVolumen({
         superficie_existente_id: superficieA,
         superficie_proyecto_id: superficieB || undefined,
-        elevacion_referencia: elevacionRef ? Number(elevacionRef) : undefined,
+        elevacion_referencia: !superficieB && elevacionRef ? Number(elevacionRef) : undefined,
       });
-      setResultadoVolumen(resultado);
+      if (contextoActual.current === contextoVolumen) setResultadoVolumen(resultado);
     } catch (e) { setError(e instanceof Error ? e.message : 'No se pudo calcular el volumen'); } finally { setCalculando(false); }
   };
 
   const generarPresupuesto = async () => {
-    if (!resultadoVolumen) return;
+    if (!resultadoVolumen || generandoPresupuesto) return;
     if (!referenciaParametros.trim()) {
       setMensajePresupuesto('Indica la referencia o fuente de los parámetros de costeo.');
       return;
     }
     setMensajePresupuesto('');
+    setGenerandoPresupuesto(true);
     try {
       const presupuesto = await megalodonClient.topografia.generarPresupuestoMovimientoTierras(
         resultadoVolumen.id,
@@ -207,8 +247,13 @@ export default function LevantamientoPanel({
           },
         },
       );
-      setMensajePresupuesto(`Presupuesto ${presupuesto.identificador} creado (solo cantidades — falta capturar precios unitarios).`);
-    } catch (e) { setMensajePresupuesto(e instanceof Error ? e.message : 'No se pudo generar el presupuesto'); }
+      if (contextoActual.current === contextoVolumen) {
+        setPresupuestoCreadoId(presupuesto.id);
+        setMensajePresupuesto(`Presupuesto ${presupuesto.identificador} creado con origen de cada cantidad. Falta capturar precios unitarios.${resultadoVolumen.evidencia?.cobertura.completa === false ? ' La cobertura pendiente bloquea la aprobación.' : ''}`);
+      }
+    } catch (e) {
+      if (contextoActual.current === contextoVolumen) setMensajePresupuesto(e instanceof Error ? e.message : 'No se pudo generar el presupuesto');
+    } finally { setGenerandoPresupuesto(false); }
   };
 
   return (
@@ -237,6 +282,7 @@ export default function LevantamientoPanel({
         <div>
           <p className="text-[11px] font-semibold mb-1.5" style={{ color: 'var(--text-muted)' }}>LEVANTAMIENTO</p>
           <select
+            aria-label="Levantamiento activo"
             value={activo?.id || ''}
             onChange={(e) => setActivo(levantamientos.find((l) => l.id === e.target.value) || null)}
             className="w-full h-8 rounded px-2 text-xs outline-hidden mb-2"
@@ -247,17 +293,26 @@ export default function LevantamientoPanel({
           </select>
           <div className="flex gap-1.5">
             <input value={nombreNuevo} onChange={(e) => setNombreNuevo(e.target.value)} placeholder="Nombre nuevo levantamiento" className="flex-1 h-8 rounded px-2 text-xs outline-hidden" style={{ background: 'var(--surface-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }} />
-            <button onClick={() => void crearLevantamiento()} disabled={!nombreNuevo.trim()} className="h-8 w-8 flex items-center justify-center rounded disabled:opacity-40" style={{ background: 'var(--accent-gold)', color: 'var(--void)' }}><Plus size={14} /></button>
+            <button aria-label="Crear levantamiento" onClick={() => void crearLevantamiento()} disabled={!nombreNuevo.trim()} className="h-8 w-8 flex items-center justify-center rounded disabled:opacity-40" style={{ background: 'var(--accent-gold)', color: 'var(--void)' }}><Plus size={14} /></button>
           </div>
+          <label className="block mt-2 text-[11px]" style={{ color: 'var(--text-muted)' }}>
+            Coordenadas del nuevo levantamiento
+            <select aria-label="Sistema de coordenadas" value={sridNuevo} onChange={(e) => setSridNuevo(e.target.value)} className="w-full h-8 rounded px-2 text-xs mt-1" style={{ background: 'var(--surface-elevated)', color: 'var(--text-primary)' }}>
+              <option value="6362">México ITRF92 / LCC · EPSG:6362</option>
+              {[11, 12, 13, 14, 15, 16].map((zone) => <option key={zone} value={32600 + zone}>WGS84 / UTM {zone}N · EPSG:{32600 + zone}</option>)}
+            </select>
+          </label>
+          {activo && <p className="mt-1 text-[11px]" style={{ color: 'var(--text-muted)' }}>{activo.crs} · elevaciones Z en metros</p>}
         </div>
 
         {activo && (
           <div>
             <p className="text-[11px] font-semibold mb-1.5" style={{ color: 'var(--text-muted)' }}>PUNTOS (CSV)</p>
+            <p className="text-[11px] mb-2" style={{ color: 'var(--text-muted)' }}>El CRS debe coincidir con tu archivo. Todos los puntos necesitan elevación Z; no se sustituye por cero.</p>
             <label className="flex items-center justify-center gap-2 h-9 rounded-md text-xs font-medium cursor-pointer" style={{ background: 'var(--surface-elevated)', border: '1px dashed var(--border-active)', color: 'var(--text-secondary)' }}>
               {subiendo ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
               {subiendo ? 'Triangulando…' : 'Subir CSV (PENZD)'}
-              <input type="file" accept=".csv" className="hidden" disabled={subiendo} onChange={(e) => e.target.files?.[0] && void subirCSV(e.target.files[0])} />
+              <input aria-label="Subir puntos CSV" type="file" accept=".csv" className="hidden" disabled={subiendo} onChange={(e) => e.target.files?.[0] && void subirCSV(e.target.files[0])} />
             </label>
           </div>
         )}
@@ -278,16 +333,16 @@ export default function LevantamientoPanel({
         {superficies.length > 0 && (
           <div>
             <p className="text-[11px] font-semibold mb-1.5 flex items-center gap-1.5" style={{ color: 'var(--text-muted)' }}><Calculator size={11} /> VOLUMEN CORTE/RELLENO</p>
-            <select value={superficieA} onChange={(e) => setSuperficieA(e.target.value)} className="w-full h-8 rounded px-2 text-xs outline-hidden mb-1.5" style={{ background: 'var(--surface-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}>
+            <select aria-label="Superficie existente" value={superficieA} onChange={(e) => setSuperficieA(e.target.value)} className="w-full h-8 rounded px-2 text-xs outline-hidden mb-1.5" style={{ background: 'var(--surface-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}>
               <option value="">Superficie existente</option>
               {superficies.map((s) => <option key={s.id} value={s.id}>{s.nombre}</option>)}
             </select>
-            <select value={superficieB} onChange={(e) => setSuperficieB(e.target.value)} className="w-full h-8 rounded px-2 text-xs outline-hidden mb-1.5" style={{ background: 'var(--surface-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}>
+            <select aria-label="Superficie de proyecto" value={superficieB} onChange={(e) => setSuperficieB(e.target.value)} className="w-full h-8 rounded px-2 text-xs outline-hidden mb-1.5" style={{ background: 'var(--surface-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}>
               <option value="">Superficie de proyecto (opcional)</option>
               {superficies.map((s) => <option key={s.id} value={s.id}>{s.nombre}</option>)}
             </select>
             {!superficieB && (
-              <input value={elevacionRef} onChange={(e) => setElevacionRef(e.target.value)} type="number" placeholder="o elevación de referencia (m)" className="w-full h-8 rounded px-2 text-xs outline-hidden mb-1.5" style={{ background: 'var(--surface-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }} />
+              <input aria-label="Elevación de referencia" value={elevacionRef} onChange={(e) => setElevacionRef(e.target.value)} type="number" placeholder="o elevación de referencia (m)" className="w-full h-8 rounded px-2 text-xs outline-hidden mb-1.5" style={{ background: 'var(--surface-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }} />
             )}
             <button onClick={() => void calcularVolumen()} disabled={calculando || !superficieA || (!superficieB && !elevacionRef)} className="w-full h-8 rounded text-xs font-medium flex items-center justify-center gap-1.5 disabled:opacity-40" style={{ background: 'var(--accent-gold)', color: 'var(--void)' }}>
               {calculando ? <Loader2 size={12} className="animate-spin" /> : <Calculator size={12} />} Calcular
@@ -297,6 +352,10 @@ export default function LevantamientoPanel({
                 <div className="flex justify-between"><span style={{ color: 'var(--text-muted)' }}>Corte</span><span style={{ color: 'var(--danger)' }}>{resultadoVolumen.volumen_corte_m3.toLocaleString('es-MX')} m³</span></div>
                 <div className="flex justify-between"><span style={{ color: 'var(--text-muted)' }}>Relleno</span><span style={{ color: 'var(--success)' }}>{resultadoVolumen.volumen_terraplen_m3.toLocaleString('es-MX')} m³</span></div>
                 <div className="flex justify-between font-semibold"><span style={{ color: 'var(--text-muted)' }}>Neto</span><span>{resultadoVolumen.volumen_neto_m3.toLocaleString('es-MX')} m³</span></div>
+                {resultadoVolumen.evidencia && <p role="status" style={{ color: resultadoVolumen.evidencia.cobertura.completa ? 'var(--text-muted)' : 'var(--warning)' }}>
+                  {resultadoVolumen.evidencia.cobertura.completa ? 'Cobertura completa' : 'Medición parcial'} · Área común: {resultadoVolumen.evidencia.cobertura.area_comun_m2.toLocaleString('es-MX')} m².
+                  {!resultadoVolumen.evidencia.cobertura.completa && <> Pendiente: {resultadoVolumen.evidencia.cobertura.area_existente_pendiente_m2.toLocaleString('es-MX')} m² en terreno y {resultadoVolumen.evidencia.cobertura.area_proyecto_pendiente_m2.toLocaleString('es-MX')} m² en proyecto. Puedes costear lo medido; la aprobación requiere completar la cobertura.</>}
+                </p>}
                 <div className="grid grid-cols-3 gap-1 pt-1.5">
                   <label className="space-y-0.5">
                     <span style={{ color: 'var(--text-muted)' }}>Indirectos %</span>
@@ -311,9 +370,10 @@ export default function LevantamientoPanel({
                     <input type="number" min="0" max="100" step="0.01" value={factorImpuesto * 100} onChange={(e) => setFactorImpuesto(Number(e.target.value) / 100)} className="w-full h-7 rounded px-1.5 outline-hidden" style={{ background: 'var(--surface-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }} />
                   </label>
                 </div>
-                <input value={referenciaParametros} onChange={(e) => setReferenciaParametros(e.target.value)} placeholder="Fuente o referencia de los parámetros" className="w-full h-7 rounded px-2 outline-hidden" style={{ background: 'var(--surface-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }} />
-                <button onClick={() => void generarPresupuesto()} disabled={!referenciaParametros.trim()} className="w-full mt-1.5 h-7 rounded text-[11px] disabled:opacity-40" style={{ border: '1px solid var(--border-active)', color: 'var(--text-secondary)' }}>Generar presupuesto de movimiento de tierras</button>
+                <input aria-label="Referencia de parámetros topográficos" value={referenciaParametros} onChange={(e) => setReferenciaParametros(e.target.value)} placeholder="Fuente o referencia de los parámetros" className="w-full h-7 rounded px-2 outline-hidden" style={{ background: 'var(--surface-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }} />
+                <button onClick={() => void generarPresupuesto()} disabled={generandoPresupuesto || !referenciaParametros.trim()} className="w-full mt-1.5 h-7 rounded text-[11px] disabled:opacity-40" style={{ border: '1px solid var(--border-active)', color: 'var(--text-secondary)' }}>{generandoPresupuesto ? 'Guardando presupuesto…' : 'Generar presupuesto de movimiento de tierras'}</button>
                 {mensajePresupuesto && <p style={{ color: 'var(--text-muted)' }}>{mensajePresupuesto}</p>}
+                {presupuestoCreadoId && <PresupuestoPanel key={expedienteId} expedienteId={expedienteId} nuevoId={presupuestoCreadoId} />}
               </div>
             )}
           </div>

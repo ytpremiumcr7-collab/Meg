@@ -21,6 +21,8 @@ import { useExpedienteStore } from '@/stores/useExpedienteStore';
 import { megalodonClient } from '@/lib/api-client';
 import type { Presupuesto, PropuestaLicitacionData, ValidacionResultado, SolicitudActualizacionPrecio } from '@/lib/megalodon-client';
 import { CatalogoLibroPicker } from './CatalogoLibroPicker';
+import { CatalogoImportadoPicker } from './CatalogoImportadoPicker';
+import { ImportacionesCatalogosPanel } from './ImportacionesCatalogosPanel';
 import { MaterialIndexadoPicker } from './MaterialIndexadoPicker';
 import { FSR_CONST } from './data/legales';
 import { computeComplianceScore, getOverallStatus } from './engines/validador';
@@ -32,6 +34,7 @@ import type { SimulationResult } from './engines/montecarlo';
 type TabId = 'resumen' | 'presupuesto' | 'analisis' | 'validacion' | 'reporte';
 
 interface BudgetLine {
+  catalogoApuId?: string;
   actualizacionPrecio?: SolicitudActualizacionPrecio;
   catalogoLibroId?: string;
   sourceLabel?: string;
@@ -195,6 +198,8 @@ function BudgetGrid() {
   const [search, setSearch] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
   const [showCatalog, setShowCatalog] = useState(false);
+  const [showImportedCatalog, setShowImportedCatalog] = useState(false);
+  const [catalogRevision, setCatalogRevision] = useState(0);
   const [showIndices, setShowIndices] = useState(false);
   const [newLine, setNewLine] = useState({ conceptKey: '', description: '', unit: '', quantity: 0, unitPrice: 0 });
 
@@ -295,6 +300,7 @@ function BudgetGrid() {
         partidas: lines.map((l, i) => ({
           numero: i + 1,
           catalogo_libro_id: l.catalogoLibroId,
+          catalogo_apu_id: l.catalogoApuId,
           descripcion: l.description,
           unidad: l.unit,
           cantidad: l.quantity,
@@ -331,7 +337,7 @@ function BudgetGrid() {
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="h-full overflow-y-auto">
       {/* Barra de expediente + presupuestos guardados */}
       <div className="flex items-center justify-between px-3 py-1.5 bg-[#12121A] border-b border-[#2A2A3E] text-[10px] text-[#8A8578]">
         <span className="flex items-center gap-1.5">
@@ -344,12 +350,13 @@ function BudgetGrid() {
       </div>
 
       {/* Toolbar */}
-      <div className="flex items-center justify-between p-3 bg-[#0A0A0F] border-b border-[#2A2A3E]">
-        <div className="flex items-center gap-2">
+      <div className="flex flex-wrap gap-2 items-center justify-between p-3 bg-[#0A0A0F] border-b border-[#2A2A3E]">
+        <div className="flex flex-wrap items-center gap-2">
           <button onClick={() => setShowAddForm(!showAddForm)} className="flex items-center gap-1.5 px-3 py-1.5 bg-[#C9A84C] text-[#030305] text-xs font-semibold rounded hover:bg-[#D4B85A] transition-colors">
             <Plus className="w-3.5 h-3.5" /> Concepto
           </button>
           <button onClick={() => setShowCatalog(!showCatalog)} className="px-3 py-1.5 border border-[#C9A84C] text-[#C9A84C] text-xs rounded">Catálogo del libro</button>
+          <button onClick={() => setShowImportedCatalog(!showImportedCatalog)} className="px-3 py-1.5 border border-[#C9A84C] text-[#C9A84C] text-xs rounded">Catálogos CMIC / fuentes</button>
           <button onClick={() => setShowIndices(!showIndices)} className="px-3 py-1.5 border border-[#C9A84C] text-[#C9A84C] text-xs rounded">Actualizar material</button>
           <button onClick={exportJSON} className="flex items-center gap-1.5 px-3 py-1.5 border border-[#2A2A3E] text-[#8A8578] text-xs rounded hover:border-[#C9A84C] hover:text-[#C9A84C] transition-colors">
             <FileJson className="w-3.5 h-3.5" /> Exportar JSON
@@ -398,6 +405,16 @@ function BudgetGrid() {
           {mensaje.texto}
         </div>
       )}
+
+      {showImportedCatalog && <div className="border-b border-[#2A2A3E]">
+        <ImportacionesCatalogosPanel onImported={() => setCatalogRevision(value => value + 1)} />
+        <CatalogoImportadoPicker key={catalogRevision} onSelect={(item, quantity) => {
+          setLines(previous => [...previous, {id: crypto.randomUUID(), catalogoApuId: item.id,
+            sourceLabel: `${item.origen?.fuente.titulo} · ${item.vigencia_inicio} · páginas ${item.origen?.paginas.join(', ')}`,
+            conceptKey: item.clave, description: item.descripcion, unit: item.unidad, quantity,
+            unitPrice: item.precio_unitario, amount: Math.round(quantity * item.precio_unitario * 100) / 100, status: 'pending'}]);
+        }} />
+      </div>}
 
       {showCatalog && <CatalogoLibroPicker onSelect={(item, quantity) => {
         const unitPrice = Number(item.precio_unitario);
@@ -457,7 +474,7 @@ function BudgetGrid() {
                 <td className="p-2 font-mono text-[#C9A84C]">{line.conceptKey}</td>
                 <td className="p-2 text-[#E8E4DC]">{line.description}{line.sourceLabel && <div className="text-[10px] text-[#8A8578]">{line.sourceLabel}</div>}</td>
                 <td className="p-2 text-[#8A8578]">{line.unit}</td>
-                <td className="p-2 text-right font-mono text-[#E8E4DC]">{line.quantity.toLocaleString('es-MX', { maximumFractionDigits: 2 })}</td>
+                <td className="p-2 text-right font-mono text-[#E8E4DC]">{line.quantity.toLocaleString('es-MX', { maximumFractionDigits: 4 })}</td>
                 <td className="p-2 text-right font-mono text-[#8A8578]">{formatMXN(line.unitPrice)}</td>
                 <td className="p-2 text-right font-mono text-[#C9A84C] font-medium">{formatMXN(line.amount)}</td>
                 <td className="p-2">
@@ -1402,7 +1419,7 @@ export default function MegalodonCostos() {
   return (
     <div className="w-full h-full bg-[#12121A] text-[#E8E4DC] flex flex-col font-sans">
       {/* Menu bar */}
-      <div className="h-7 bg-[#0A0A0F] border-b border-[#2A2A3E] flex items-center px-3 gap-4 text-[11px] text-[#8A8578]">
+      <div className="h-7 shrink-0 bg-[#0A0A0F] border-b border-[#2A2A3E] flex items-center px-3 gap-4 text-[11px] text-[#8A8578]">
         {['Archivo', 'Proyecto', 'Catálogos', 'Análisis', 'Reportes', 'Herramientas', 'Ayuda'].map((m) => (
           <button key={m} className="hover:text-[#E8E4DC] hover:bg-[#222235] px-2 py-0.5 rounded transition-colors">
             {m}
@@ -1411,7 +1428,7 @@ export default function MegalodonCostos() {
       </div>
 
       {/* Tab bar */}
-      <div className="flex items-center gap-0 bg-[#0A0A0F] border-b border-[#2A2A3E] px-2">
+      <div className="flex shrink-0 items-center gap-0 bg-[#0A0A0F] border-b border-[#2A2A3E] px-2">
         {TABS.map((tab) => (
           <button
             key={tab.id}
@@ -1428,7 +1445,7 @@ export default function MegalodonCostos() {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-hidden">
+      <div className="flex-1 min-h-0 overflow-hidden">
         {activeTab === 'resumen' && <ResumenTab />}
         {activeTab === 'presupuesto' && <BudgetGrid key={expedienteActivo?.id} />}
         {activeTab === 'analisis' && <AnalysisPanel />}
@@ -1437,7 +1454,7 @@ export default function MegalodonCostos() {
       </div>
 
       {/* Status bar */}
-      <div className="h-6 bg-[#0A0A0F] border-t border-[#2A2A3E] flex items-center justify-between px-3 text-[10px] font-mono text-[#8A8578]">
+      <div className="h-6 shrink-0 bg-[#0A0A0F] border-t border-[#2A2A3E] flex items-center justify-between px-3 text-[10px] font-mono text-[#8A8578]">
         <div className="flex items-center gap-1.5">
           <div className={`w-1.5 h-1.5 rounded-full ${resumenPresupuesto ? 'bg-[#5A9E6F]' : 'bg-[#D4953A]'}`} />
           <span>{resumenPresupuesto ? 'Presupuesto confirmado por backend' : 'Sin presupuesto confirmado'}</span>

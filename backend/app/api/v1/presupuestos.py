@@ -28,6 +28,7 @@ router = APIRouter(dependencies=[Depends(verificar_expediente_tenant), Depends(m
 
 
 class PartidaCreate(BaseModel):
+    catalogo_apu_id: Optional[UUID] = None
     catalogo_libro_id: Optional[str] = Field(None, min_length=64, max_length=64)
     numero: int
     descripcion: str
@@ -44,7 +45,9 @@ class PartidaCreate(BaseModel):
 
     @model_validator(mode="after")
     def validar_origen_precio(self):
-        if not self.catalogo_libro_id and not self.conceptos and not self.insumos and self.precio_unitario is None:
+        if self.catalogo_apu_id and (self.catalogo_libro_id or self.conceptos or self.insumos):
+            raise ValueError('Seleccione un solo origen de catálogo/APU por partida')
+        if not self.catalogo_apu_id and not self.catalogo_libro_id and not self.conceptos and not self.insumos and self.precio_unitario is None:
             raise ValueError("La partida requiere precio, catálogo o análisis de insumos")
         return self
 
@@ -98,6 +101,7 @@ class PartidaOut(BaseModel):
     cantidad: float
     precio_unitario: float
     importe: float
+    metadatos: dict = Field(default_factory=dict)
     conceptos: List[ConceptoOut] = Field(default_factory=list)
 
     class Config:
@@ -106,11 +110,15 @@ class PartidaOut(BaseModel):
 
 class AgregarPartidaCatalogoRequest(BaseModel):
     catalogo_apu_id: UUID
-    cantidad: float = Field(..., gt=0)
+    cantidad: Decimal = Field(..., gt=0, max_digits=18, decimal_places=4, allow_inf_nan=False)
 
 
 class ActualizarCantidadPartidaRequest(BaseModel):
     cantidad: float = Field(..., gt=0)
+
+
+class AsignarCatalogoPartidaRequest(BaseModel):
+    catalogo_apu_id: UUID
 
 
 class PresupuestoOut(BaseModel):
@@ -158,6 +166,7 @@ async def crear_presupuesto(
     partidas_data = []
     for p in data.partidas:
         partidas_data.append({
+            "catalogo_apu_id": p.catalogo_apu_id,
             "catalogo_libro_id": p.catalogo_libro_id,
             "numero": p.numero,
             "descripcion": p.descripcion,
@@ -277,6 +286,16 @@ async def eliminar_partida(
         presupuesto_id, expediente_id=expediente_id, partida_id=partida_id,
         actualizado_por_id=current_user.id,
     )
+
+
+@router.put('/{expediente_id}/presupuestos/{presupuesto_id}/partidas/{partida_id}/catalogo', response_model=PresupuestoOut)
+async def asignar_catalogo_partida(
+    expediente_id: UUID, presupuesto_id: UUID, partida_id: UUID, data: AsignarCatalogoPartidaRequest,
+    db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
+    _rate_limit: bool = Depends(rate_limit_strict),
+):
+    return await PresupuestoService(db, current_user.tenant_id).asignar_catalogo_partida(
+        presupuesto_id, expediente_id, partida_id, data.catalogo_apu_id, current_user.id)
 
 
 @router.post("/{expediente_id}/presupuestos/{presupuesto_id}/recalcular", response_model=PresupuestoOut)

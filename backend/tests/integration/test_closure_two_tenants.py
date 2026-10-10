@@ -129,4 +129,4 @@ async def test_service_layer_isolation_bim_budget_schedule_topography_montecarlo
     run_b = MonteCarloRun(tenant_id=tenant_b.id, task_id=f"task-{uuid4().hex}", request_hash=uuid4().hex, estado=EstadoMonteCarlo.PENDIENTE.value, progreso=0, iteraciones=10, seed=1, presupuesto_base=1, presupuesto_maximo=2, variables=[], configuracion={})
     db_session.add(run_b); await db_session.commit()
     assert await MonteCarloService(db_session, tenant_a.id).esta_cancelada(run_b.task_id) is False
-    assert await MonteCarloService(db_session, tenant_a.id).marcar_en_proceso(str(run_b.id)) is False
+    assert await MonteCarloService(db_session, tenant_a.id).marcar_en_proceso(str(run_b.id)) is None

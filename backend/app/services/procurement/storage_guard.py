@@ -5,6 +5,7 @@ from hashlib import sha256
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from app.config import get_settings
 from app.models.base import AsyncSessionLocal
@@ -13,19 +14,20 @@ from app.integrations.supabase_storage import storage_documentos, storage_export
 
 
 class ProcurementStorageGuard:
+    def __init__(self, *, session_factory=None):
+        self.session_factory = session_factory or AsyncSessionLocal
+
     async def _prepare(self, *, tenant_id: UUID, job_id: UUID | None, bucket: str, path: str, content_hash: str, content_type: str, size_bytes: int, entity_type: str) -> UUID:
-        async with AsyncSessionLocal() as db:
+        async with self.session_factory() as db:
             existing = await db.scalar(select(ProcurementStorageIntent).where(
                 ProcurementStorageIntent.tenant_id == tenant_id,
                 ProcurementStorageIntent.bucket == bucket,
                 ProcurementStorageIntent.storage_path == path,
                 ProcurementStorageIntent.content_hash == content_hash,
-            ))
+            ).with_for_update().execution_options(populate_existing=True))
             if existing is not None:
-                if existing.state == "VERIFIED":
-                    return existing.id
-                if existing.state in {"PENDING", "UPLOADING"}:
-                    return existing.id
+                # ERROR/STALE are retryable observations, not a new identity.
+                return existing.id
             row = ProcurementStorageIntent(
                 tenant_id=tenant_id,
                 job_id=job_id,
@@ -38,12 +40,23 @@ class ProcurementStorageGuard:
                 entity_type=entity_type,
             )
             db.add(row)
-            await db.commit()
-            await db.refresh(row)
+            try:
+                await db.commit()
+            except IntegrityError:
+                await db.rollback()
+                existing = await db.scalar(select(ProcurementStorageIntent).where(
+                    ProcurementStorageIntent.tenant_id == tenant_id,
+                    ProcurementStorageIntent.bucket == bucket,
+                    ProcurementStorageIntent.storage_path == path,
+                    ProcurementStorageIntent.content_hash == content_hash,
+                ))
+                if existing is None:
+                    raise
+                return existing.id
             return row.id
 
     async def _set_state(self, intent_id: UUID, state: str, *, tenant_id: UUID, verified: bool = False, entity_id: UUID | None = None, error: str | None = None) -> None:
-        async with AsyncSessionLocal() as db:
+        async with self.session_factory() as db:
             row = await db.scalar(select(ProcurementStorageIntent).where(ProcurementStorageIntent.id == intent_id, ProcurementStorageIntent.tenant_id == tenant_id))
             if row is None:
                 return
@@ -79,7 +92,7 @@ class ProcurementStorageGuard:
             raise
 
     async def reconcile(self, *, tenant_id: UUID | None = None, max_rows: int = 100) -> dict:
-        async with AsyncSessionLocal() as db:
+        async with self.session_factory() as db:
             query = select(ProcurementStorageIntent).where(ProcurementStorageIntent.state.in_(["PENDING", "UPLOADING", "VERIFIED"]))
             if tenant_id is not None:
                 query = query.where(ProcurementStorageIntent.tenant_id == tenant_id)

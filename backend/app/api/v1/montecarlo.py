@@ -86,44 +86,35 @@ async def simular_riesgo(
         idempotency_key=idempotency_key,
     )
 
-    if existing:
-        return {
-            "run_id": str(run.id),
-            "task_id": run.task_id,
-            "status": run.estado,
-            "progreso": run.progreso,
-            "idempotent_replay": True,
-        }
-
-    payload_for_worker = dict(payload)
-    payload_for_worker["presupuesto_base"] = float(run.presupuesto_base)
-    payload_for_worker["seed"] = run.seed
-    payload_for_worker["_run_id"] = str(run.id)
-    payload_for_worker["_tenant_id"] = str(current_user.tenant_id)
-
     try:
-        celery_app.send_task(
-            "app.workers.montecarlo_tasks.ejecutar_simulacion",
-            args=[run.task_id, str(run.id), payload_for_worker],
-            task_id=run.task_id,
-        )
-        await service.marcar_encolado(run.id, current_user.tenant_id)
+        if run.estado == EstadoMonteCarlo.PENDIENTE.value:
+            await service.publicar_pendiente(run)
     except Exception as exc:
-        await service.fallar(run.task_id, exc, tenant_id=current_user.tenant_id)
-        await service.revertir_reserva_por_fallo_enqueue(current_user.tenant_id)
+        # La intención ya quedó durable en MonteCarloRun. Un fallo del
+        # broker no la convierte en ERROR ni libera el uso reservado: el
+        # reconciliador del propio dominio la republicará con el mismo task_id.
         raise MegalodonException(
             ErrorCode.MONTECARLO_ERROR,
-            "No se pudo encolar la simulación.",
+            "La simulación quedó pendiente y será republicada automáticamente.",
             status_code=503,
             details={"run_id": str(run.id), "task_id": run.task_id},
         ) from exc
 
+    await db.refresh(run)
     return {
         "run_id": str(run.id),
         "task_id": run.task_id,
-        "status": EstadoMonteCarlo.ENCOLADO.value,
-        "progreso": 0,
-        "message": "Simulación encolada para procesamiento.",
+        "status": run.estado,
+        "progreso": run.progreso,
+        "idempotent_replay": existing,
+        "message": (
+            "Simulación registrada para procesamiento."
+            if run.estado in {
+                EstadoMonteCarlo.PENDIENTE.value,
+                EstadoMonteCarlo.ENCOLADO.value,
+            }
+            else "Simulación recuperada."
+        ),
     }
 
 

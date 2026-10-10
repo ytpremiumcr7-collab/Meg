@@ -12,7 +12,7 @@ class InsumoCosteoInput(BaseModel):
     descripcion: str = ''
     tipo: str = Field('MATERIAL', max_length=50)
     unidad: str = Field('', max_length=20)
-    cantidad: Decimal = Field(gt=0, max_digits=18, decimal_places=4, allow_inf_nan=False)
+    cantidad: Decimal = Field(gt=0, max_digits=20, decimal_places=6, allow_inf_nan=False)
     precio_unitario: Decimal | None = Field(None, ge=0, max_digits=18, decimal_places=2, allow_inf_nan=False)
     rendimiento: Decimal = Field(Decimal('1'), gt=0, max_digits=8, decimal_places=4, allow_inf_nan=False)
     actualizacion_precio: ActualizacionPrecioInput | None = None

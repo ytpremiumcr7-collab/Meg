@@ -86,6 +86,7 @@ class PartidaCosteo:
     cantidad: Decimal
     conceptos: List[ConceptoCosteo] = field(default_factory=list)
     precio_unitario_manual: Optional[Decimal] = None
+    origen_catalogo: Optional[dict] = None
 
     @property
     def precio_unitario(self) -> Decimal:
@@ -116,6 +117,7 @@ class PresupuestoCosteo:
     parametros: ParametrosCosteoSnapshot
     partidas: List[PartidaCosteo] = field(default_factory=list)
     cobertura_bim: Optional[dict] = None
+    evidencia_topografia: Optional[dict] = None
 
     @property
     def factor_indirecto(self) -> Decimal:
@@ -287,6 +289,25 @@ class MotorCosteo:
 
         actualizaciones = [i for p in presupuesto.partidas for c in p.conceptos
                            for i in c.insumos if i.actualizacion_precio]
+        if any(p.origen_catalogo for p in presupuesto.partidas):
+            sources = wb.create_sheet('Fuentes de precio')
+            sources.append(['Partida', 'Catálogo ID', 'Clave', 'Descripción', 'Unidad', 'Fuente',
+                'Vigencia inicio', 'Vigencia fin', 'Zona', 'Precio observado MXN', 'Precio aplicado MXN', 'Evidencia SHA256',
+                'PDF original SHA256', 'Páginas PDF', 'Paquete SHA256', 'Fila SHA256', 'Revisión'])
+            for p in sorted(presupuesto.partidas, key=lambda p: p.numero):
+                source = p.origen_catalogo
+                if source:
+                    origin = source.get('origen_importacion') or {}
+                    sources.append([p.numero, *[source[key] for key in ('catalogo_id', 'clave', 'descripcion', 'unidad',
+                        'fuente', 'vigencia_inicio', 'vigencia_fin', 'zona_economica', 'precio_observado', 'precio_aplicado', 'sha256')],
+                        (origin.get('fuente') or {}).get('sha256'), ','.join(origin.get('paginas', [])),
+                        origin.get('paquete_sha256'), origin.get('fila_sha256'), origin.get('revision')])
+            for row in sources:
+                for cell in row:
+                    if isinstance(cell.value, str):
+                        cell.data_type = 's'
+            sources.column_dimensions['D'].width = 55
+            sources.column_dimensions['F'].width = 35
         if actualizaciones:
             evidencia = wb.create_sheet('Actualizacion materiales')
             evidencia.append(['Insumo', 'Serie', 'Mes base', 'Mes destino', 'Precio original MXN',
@@ -321,6 +342,31 @@ class MotorCosteo:
             evidence.column_dimensions['A'].width = 65
             evidence.column_dimensions['D'].width = 60
             wb.active = 0
+        if presupuesto.evidencia_topografia is not None:
+            source = presupuesto.evidencia_topografia
+            coverage = source['cobertura']
+            evidence = wb.create_sheet('Topografía', 0)
+            evidence.append(['MEDICIONES COMPLETAS' if coverage['completa'] else 'PRESUPUESTO PARCIAL: falta cobertura topográfica'])
+            evidence.append(['Cálculo', source['calculo_id'], 'Algoritmo', source['algoritmo']])
+            evidence.append(['Huella de evidencia', source['sha256']])
+            evidence.append(['Área común (m2)', coverage['area_comun_m2']])
+            evidence.append(['Terreno sin analizar (m2)', coverage['area_existente_pendiente_m2']])
+            evidence.append(['Proyecto sin analizar (m2)', coverage['area_proyecto_pendiente_m2']])
+            evidence.append(['Corte medido (m3)', source['resultados']['volumen_corte_m3']])
+            evidence.append(['Relleno medido (m3)', source['resultados']['volumen_terraplen_m3']])
+            evidence.append(['Elevación de referencia (m)', source['elevacion_referencia']])
+            evidence.append(['Fuente', 'Superficie', 'Levantamiento', 'CRS', 'Huella de malla'])
+            for key in ('existente', 'proyecto'):
+                surface = source[key]
+                if surface:
+                    evidence.append([key, surface['superficie_id'], surface['levantamiento_id'], surface['crs'], surface['malla_sha256']])
+            for row in evidence:
+                for cell in row:
+                    if isinstance(cell.value, str):
+                        cell.data_type = 's'
+            evidence.column_dimensions['A'].width = 50
+            evidence.column_dimensions['B'].width = 70
+            wb.active = 0
         wb.save(buffer)
         return buffer.getvalue()
 
@@ -339,6 +385,7 @@ class MotorCosteo:
         from reportlab.lib.units import cm
         from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from xml.sax.saxutils import escape
 
         buffer = _io.BytesIO()
         doc = SimpleDocTemplate(
@@ -354,16 +401,33 @@ class MotorCosteo:
         elementos = []
         elementos.append(Paragraph(presupuesto.nombre, titulo_style))
         elementos.append(Paragraph(f"Identificador: {presupuesto.identificador}", subtitulo_style))
+        if presupuesto.evidencia_topografia is not None:
+            source = presupuesto.evidencia_topografia
+            coverage = source['cobertura']
+            elementos.append(Paragraph(
+                f"Topografía: cálculo {source['calculo_id']}. Área común: {coverage['area_comun_m2']:.3f} m². "
+                f"Pendiente en terreno: {coverage['area_existente_pendiente_m2']:.3f} m²; "
+                f"en proyecto: {coverage['area_proyecto_pendiente_m2']:.3f} m².", subtitulo_style))
         elementos.append(Spacer(1, 0.5 * cm))
 
         header = ["No.", "Descripción", "Unidad", "Cantidad", "P.U.", "Importe"]
         filas = [header]
         for p in presupuesto.partidas:
+            descripcion = escape(p.descripcion)
+            if p.origen_catalogo:
+                source = p.origen_catalogo
+                descripcion += '<br/>Fuente: ' + escape(str(source['fuente'])) + ' · ' + escape(str(source['clave']))
+                descripcion += ' · Vigencia: ' + escape(str(source['vigencia_inicio'] or 'sin registrar'))
+                origin = source.get('origen_importacion')
+                if origin:
+                    descripcion += '<br/>PDF: ' + escape(origin['fuente']['archivo_original'])
+                    descripcion += ' · Páginas: ' + escape(','.join(origin['paginas']))
+                    descripcion += '<br/>SHA256 PDF: ' + escape(origin['fuente']['sha256'])
             filas.append([
                 str(p.numero),
-                Paragraph(p.descripcion, celda_desc_style),
+                Paragraph(descripcion, celda_desc_style),
                 p.unidad,
-                f"{p.cantidad:,.2f}",
+                f"{p.cantidad:,.4f}",
                 f"${p.precio_unitario:,.2f}",
                 f"${p.importe:,.2f}",
             ])

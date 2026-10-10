@@ -3,7 +3,7 @@ import asyncio
 import json
 import os
 import sys
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, timedelta
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -18,6 +18,7 @@ async def main():
     import app.models
     from app.models.base import AsyncSessionLocal, engine
     from app.models.user import Tenant, User, UserRole
+    from app.models.entitlements import Suscripcion, EstadoSuscripcion
     from app.models.catalogo_apu import CatalogoAPU
     from app.models.catalogo_conceptos import CatalogoFuente, ConceptoCatalogo, InsumoCatalogo
     from app.models.indices_costos import SerieIndiceCosto, ObservacionIndiceCosto, VinculoIndiceInsumo
@@ -59,9 +60,17 @@ async def main():
     partial_ifc = Path('/tmp/megalodon-partial-acceptance.ifc')
     document.write(str(partial_ifc))
     async with AsyncSessionLocal() as db:
-        tenant = Tenant(name='BIM acceptance (synthetic)', slug='bim-ci-'+uuid4().hex, plan='ENTERPRISE', is_active=True)
+        ahora = datetime.now(timezone.utc)
+        vencimiento = ahora + timedelta(days=31)
+        tenant = Tenant(name='BIM acceptance (synthetic)', slug='bim-ci-'+uuid4().hex,
+            plan='ENTERPRISE', plan_vencimiento=vencimiento, is_active=True)
+        if EntitlementsService(db).calcular_plan_efectivo(tenant) != 'ENTERPRISE':
+            raise SystemExit('The synthetic acceptance plan must be effective before starting the flow.')
         db.add(tenant)
         await db.flush()
+        db.add(Suscripcion(tenant_id=tenant.id, plan='ENTERPRISE', proveedor='CI_SYNTHETIC',
+            estado=EstadoSuscripcion.ACTIVA.value, fecha_inicio=ahora, fecha_fin=vencimiento,
+            monto=0, moneda='MXN', metadatos={'synthetic':True, 'purpose':'disposable browser acceptance; no payment'}))
         service = AuthService(db)
         users = [User(email=uuid4().hex+'@bim-ci.local', full_name='CI '+role.value,
             role=role, tenant_id=tenant.id, is_active=True, is_verified=True,
@@ -70,6 +79,9 @@ async def main():
         db.add(CatalogoAPU(tenant_id=tenant.id, clave='CI-WALL-ONLY',
             descripcion='Muro de prueba sintética CI', tipo='CONCEPTO', unidad='m3',
             precio_unitario=125, fuente='CI_SYNTHETIC_NOT_MARKET_PRICE'))
+        db.add(CatalogoAPU(tenant_id=tenant.id, clave='CI-EARTHWORK',
+            descripcion='Movimiento de tierras sintético CI', tipo='CONCEPTO', unidad='m3',
+            precio_unitario=100, fuente='CI_SYNTHETIC_NOT_MARKET_PRICE'))
         fuente = CatalogoFuente(nombre='CI sintético: catálogo de aceptación', tipo='CUSTOM',
             vigencia_inicio='2020-01-01', vigencia_fin='2020-12-31', moneda='MXN', activo=True)
         db.add(fuente); await db.flush()
@@ -101,10 +113,21 @@ async def main():
         await EntitlementsService(db).sembrar_planes_default()
         await EntitlementsService(db).sembrar_modulos_default()
         destination = Path(os.environ['BIM_ACCEPTANCE_CREDENTIALS'])
+        from tests.fixtures.catalog_import import make_synthetic_package
+        from zipfile import ZipFile, ZIP_DEFLATED
+        package, originals, _ = make_synthetic_package(Path('/tmp/megalodon-catalog-fixture'))
+        original_target = Path(os.environ['CATALOGO_ORIGINALES_DIR'])
+        original_target.mkdir(parents=True, exist_ok=True)
+        for pdf in originals.glob('*.pdf'):
+            (original_target / pdf.name).write_bytes(pdf.read_bytes())
+        package_zip = Path('/tmp/megalodon-catalog-package.zip')
+        with ZipFile(package_zip, 'w', ZIP_DEFLATED) as archive:
+            for path in package.rglob('*'):
+                if path.is_file(): archive.write(path, path.relative_to(package))
         destination.write_text(json.dumps({'reviewer':users[0].email, 'reader':users[1].email,
             'password':password, 'catalog_description':'Muro de prueba sintética CI',
             'indexed_material':str(vinculo.id),
-            'partial_ifc':str(partial_ifc)}))
+            'partial_ifc':str(partial_ifc), 'catalog_package': str(package_zip)}))
         destination.chmod(0o600)
     await engine.dispose()
 

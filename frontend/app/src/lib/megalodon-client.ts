@@ -613,6 +613,16 @@ export interface CatalogoAPUOut {
   zona_economica?: string;
   estado?: string;
   incluye_iva: boolean;
+  vigencia_inicio?: string | null;
+  origen?: { importacion_id: string; revision: string; fuente: { titulo: string; sha256: string }; paginas: string[] } | null;
+}
+
+export interface CatalogoImportacionOut {
+  id: string; paquete_sha256: string; fuentes: string[];
+  resumen: { registros: number; estados: Record<string, number>; cuarentena_motivos: Record<string, number>; proyecciones_costeo: number };
+}
+export interface CatalogoRegistroOut {
+  id: string; fuente_id: string; entidad_id: string; estado: string; motivos: string[]; original: Record<string, string>; sha256: string;
 }
 
 export interface ClashResult {
@@ -751,6 +761,24 @@ export interface SuperficieTIN {
   creado_por_id?: string;
 }
 
+export interface CoberturaTopografia {
+  completa: boolean;
+  area_existente_m2: number;
+  area_proyecto_m2: number;
+  area_comun_m2: number;
+  area_existente_pendiente_m2: number;
+  area_proyecto_pendiente_m2: number;
+}
+
+export interface EvidenciaTopografia {
+  version: number;
+  calculo_id: string;
+  sha256: string;
+  cobertura: CoberturaTopografia;
+  existente: { superficie_id: string; levantamiento_id: string; crs: string; malla_sha256: string };
+  proyecto: EvidenciaTopografia['existente'] | null;
+}
+
 export interface CalculoVolumen {
   id: string;
   /** Denormalizado, mismo motivo que en SuperficieTIN. */
@@ -762,6 +790,7 @@ export interface CalculoVolumen {
   volumen_terraplen_m3: number;
   volumen_neto_m3: number;
   area_analizada_m2: number;
+  evidencia?: EvidenciaTopografia | null;
   creado_por_id?: string;
 }
 
@@ -993,6 +1022,11 @@ export interface Partida {
   cantidad: number;
   precio_unitario: number;
   importe: number;
+  metadatos?: {
+    catalogo_asignado?: { catalogo_id: string; descripcion: string; fuente: string;
+      vigencia_inicio: string | null; precio_observado: string; precio_aplicado: string };
+    [key: string]: unknown;
+  };
   conceptos: ConceptoPresupuesto[];
 }
 
@@ -1018,6 +1052,8 @@ export interface Presupuesto {
   factor_riesgo?: number | null;
   metadatos?: {
     parametros_costeo?: ParametrosCosteoSnapshot;
+    topografia_cobertura?: CoberturaTopografia;
+    topografia_evidencia?: EvidenciaTopografia;
     bim_cobertura?: { completa: boolean; elementos_totales: number; elementos_medidos: number;
       elementos_pendientes: string[]; capturas: Array<{ elemento_id: string; unidad: string;
         cantidad: number; referencia: string; usuario_id: string; capturado_en: string }> };
@@ -1451,6 +1487,7 @@ export class MegalodonClient {
       nombre: string;
       descripcion?: string;
       partidas: Array<{
+        catalogo_apu_id?: string;
         catalogo_libro_id?: string;
         numero: number;
         descripcion: string;
@@ -1493,6 +1530,10 @@ export class MegalodonClient {
 
     recalcular: async (expedienteId: string, presupuestoId: string): Promise<Presupuesto> => {
       return this.request<Presupuesto>("POST", `/presupuestos/${expedienteId}/presupuestos/${presupuestoId}/recalcular`);
+    },
+    asignarCatalogoPartida: async (expedienteId: string, presupuestoId: string, partidaId: string, catalogoId: string): Promise<Presupuesto> => {
+      return this.request<Presupuesto>('PUT', `/presupuestos/${expedienteId}/presupuestos/${presupuestoId}/partidas/${partidaId}/catalogo`,
+        { catalogo_apu_id: catalogoId });
     },
 
     actualizarParametrosCosteo: async (
@@ -2428,6 +2469,25 @@ export class MegalodonClient {
     precioConIVA: async (id: string, tasaIVA: number) => {
       return this.request("GET", `/catalogo-apu/${id}/precio-con-iva?tasa_iva=${tasaIVA}`);
     },
+  };
+
+  catalogoImportaciones = {
+    listar: () => this.request<{total: number; items: CatalogoImportacionOut[]}>('GET', '/catalogo-apu/importaciones'),
+    verificar: (archivo: File) => {
+      const form = new FormData(); form.append('archivo', archivo);
+      return this.request<{ fuentes: Array<{fuente_id: string; titulo: string; fecha_vigencia: string; original_cotejado: boolean}> }>(
+        'POST', '/catalogo-apu/importaciones/verificar', form);
+    },
+    importar: (archivo: File, fuentes: string[]) => {
+      const form = new FormData(); form.append('archivo', archivo); form.append('fuentes', JSON.stringify(fuentes));
+      return this.request<CatalogoImportacionOut & {creada: boolean}>('POST', '/catalogo-apu/importaciones', form);
+    },
+    registros: (id: string, tabla: string, estado?: string, skip = 0, limit = 200) => {
+      const query = new URLSearchParams({tabla, skip: String(skip), limit: String(limit), ...(estado ? {estado} : {})});
+      return this.request<{total: number; items: CatalogoRegistroOut[]}>('GET', `/catalogo-apu/importaciones/${id}/registros?${query}`);
+    },
+    estimar: (data: {modelo_registro_id: string; factor_registro_id: string; cantidad: string; ajuste_proyecto: string; justificacion: string}) =>
+      this.request<{id: string; monto: string; evidencia: Record<string, unknown>}>('POST', '/catalogo-apu/estimaciones-parametricas', data),
   };
 
   // ═══════════════════════════════════════════════════════════════════════

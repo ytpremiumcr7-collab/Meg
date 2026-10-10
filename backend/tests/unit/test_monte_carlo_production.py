@@ -149,9 +149,24 @@ def test_correlation_matrix_is_part_of_api_contract():
 
 def test_worker_uses_persisted_seed_not_a_hidden_default():
     from pathlib import Path
+    from types import SimpleNamespace
+
+    from app.services.montecarlo_service import MonteCarloService
+
     worker = Path(__file__).parents[1] / ".." / "app" / "workers" / "montecarlo_tasks.py"
-    api = Path(__file__).parents[1] / ".." / "app" / "api" / "v1" / "montecarlo.py"
     w = worker.resolve().read_text(encoding="utf-8")
-    a = api.resolve().read_text(encoding="utf-8")
+
+    run = SimpleNamespace(
+        id="00000000-0000-0000-0000-000000000001",
+        tenant_id="00000000-0000-0000-0000-000000000002",
+        configuracion={"seed": 999, "iteraciones": 1000},
+        presupuesto_base=1000,
+        seed=123456,
+        plazo_base_dias=None,
+        plazo_maximo_dias=None,
+    )
+    payload = MonteCarloService.payload_worker(run)
+
     assert 'seed=int(data["seed"])' in w
-    assert 'payload_for_worker["seed"] = run.seed' in a
+    assert payload["seed"] == 123456
+    assert payload["seed"] != run.configuracion["seed"]

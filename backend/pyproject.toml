@@ -146,7 +146,7 @@ dependencies = [
     "pynacl>=1.6.2",
     "python-whois==0.8.0",
     "shodan==1.31.0",
-    "websockets==12.0",
+    "websockets>=13,<16",
     "twilio>=9.0.0",
     "starlette>=0.40.0",
 ]

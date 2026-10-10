@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID as UUIDType
 
-from sqlalchemy import Boolean, ForeignKey, ForeignKeyConstraint, Index, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import CheckConstraint, DateTime, Boolean, ForeignKey, ForeignKeyConstraint, Index, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.types import UUID
@@ -20,16 +20,21 @@ class ProcurementJob(Base, UUIDMixin, TenantMixin, AuditMixin):
     idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
     request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     progress: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    claim_token: Mapped[UUIDType | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     result: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
-    started_at: Mapped[datetime | None] = mapped_column(nullable=True)
-    finished_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         UniqueConstraint("tenant_id", "id", name="uq_procurement_jobs_tenant_id"),
         UniqueConstraint("tenant_id", "tender_id", "kind", "idempotency_key", name="uq_procurement_job_idempotency"),
         Index("idx_procurement_job_tenant_status", "tenant_id", "status"),
+        Index("ix_procurement_job_claims", "status", "lease_expires_at"),
+        CheckConstraint("attempt >= 0", name="ck_procurement_job_nonnegative_attempt"),
         ForeignKeyConstraint(["tenant_id", "tender_id"], ["tender_packages.tenant_id", "tender_packages.id"], ondelete="CASCADE"),
     )
 

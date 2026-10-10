@@ -98,7 +98,10 @@ async def rate_limit_dependency(
 
     client_ip = request.client.host if request.client else "unknown"
     endpoint = request.url.path
-    key = f"rate_limit:{client_ip}:{endpoint}"
+    # The same path may use a 100/min read policy and a 10/min write policy.
+    # Reads must not exhaust the write quota before its first operation.
+    method = request.method.upper()
+    key = f"rate_limit:{client_ip}:{method}:{endpoint}"
 
     allowed = await limiter.is_allowed(key, max_requests, window_seconds)
     if allowed is None:

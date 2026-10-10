@@ -1,7 +1,7 @@
 // Real browser/API/PostGIS/Redis/worker/filesystem flow. No intercepted routes.
 import assert from 'node:assert/strict';
 import { before, after, test } from 'node:test';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import { createWriteStream } from 'node:fs';
 import { readFile, mkdir } from 'node:fs/promises';
@@ -200,6 +200,120 @@ test('user creates an obra, resumes an IFC job after restart, approves and expor
       assert.equal(await readerPage.getByLabel('Subir archivo IFC').isDisabled(),true);
       await readerPage.screenshot({path:join(evidence,'05-solo-lectura.png'),fullPage:true});
     } finally { await readerContext.close(); }
+    await page.goto(origin+'/?app=topografia');
+    await page.getByRole('button',{name:'Levantamiento',exact:true}).click();
+    await page.getByPlaceholder('Nombre nuevo levantamiento').fill('Aceptación UTM en metros');
+    await page.getByLabel('Sistema de coordenadas').selectOption('32614');
+    const [surveyCreated]=await Promise.all([
+      page.waitForResponse(r=>r.request().method()==='POST' && /\/topografia\/[^/]+\/levantamientos$/.test(new URL(r.url()).pathname)),
+      page.getByRole('button',{name:'Crear levantamiento',exact:true}).click()]);
+    assert.equal(surveyCreated.status(),200);
+    const survey=await surveyCreated.json();
+    assert.equal(survey.crs,'EPSG:32614');
+    const [tinCreated]=await Promise.all([
+      page.waitForResponse(r=>r.request().method()==='POST' && /\/triangular$/.test(new URL(r.url()).pathname)),
+      page.getByLabel('Subir puntos CSV').setInputFiles({name:'terreno.csv',mimeType:'text/csv',
+        buffer:Buffer.from('P1,500000,2200000,1\nP2,500001,2200000,-1\nP3,500000,2200001,-1\n')})]);
+    assert.equal(tinCreated.status(),200);
+    const tin=await tinCreated.json();
+    await page.getByLabel('Superficie existente').selectOption(tin.id);
+    await page.getByLabel('Elevación de referencia').fill('0');
+    const [volumeCreated]=await Promise.all([
+      page.waitForResponse(r=>r.request().method()==='POST' && new URL(r.url()).pathname==='/api/v1/topografia/volumenes'),
+      page.getByRole('button',{name:'Calcular',exact:true}).click()]);
+    assert.equal(volumeCreated.status(),200);
+    const volume=await volumeCreated.json();
+    assert.equal(volume.volumen_corte_m3,.042);
+    assert.equal(volume.volumen_terraplen_m3,.208);
+    assert.equal(volume.evidencia.cobertura.completa,true);
+    await page.getByRole('button',{name:'Generar presupuesto de movimiento de tierras',exact:true}).waitFor();
+    await page.getByLabel('Referencia de parámetros topográficos').fill('CI: revisión sintética del terreno');
+    const [earthBudgetResponse] = await Promise.all([
+      page.waitForResponse(r=>r.request().method()==='POST' && /\/topografia\/[^/]+\/volumenes\/[^/]+\/generar-presupuesto$/.test(new URL(r.url()).pathname)),
+      page.getByRole('button',{name:'Generar presupuesto de movimiento de tierras',exact:true}).click()]);
+    assert.equal(earthBudgetResponse.status(),200,await earthBudgetResponse.text());
+    const earthBudget = await earthBudgetResponse.json();
+    assert.equal(earthBudget.partidas.length,2);
+    assert.ok(earthBudget.partidas.every(p=>p.metadatos.topografia.calculo_id===volume.id));
+    const earthReview=page.getByRole('region',{name:'Revisión del presupuesto'});
+    let pricedEarthBudget;
+    for (const number of [1,2]) {
+      await earthReview.getByLabel(`Buscar concepto para partida ${number}`).fill('CI-EARTHWORK');
+      const select=earthReview.getByLabel(`Concepto para partida ${number}`,{exact:true});
+      await select.locator('option').filter({hasText:'Movimiento de tierras sintético CI'}).waitFor({state:'attached'});
+      const option=await select.locator('option').filter({hasText:'Movimiento de tierras sintético CI'}).getAttribute('value');
+      await select.selectOption(option);
+      const [priced] = await Promise.all([
+        page.waitForResponse(r=>r.request().method()==='PUT' && /\/partidas\/[^/]+\/catalogo$/.test(new URL(r.url()).pathname)),
+        earthReview.getByRole('button',{name:`Asignar concepto a partida ${number}`,exact:true}).click()]);
+      assert.equal(priced.status(),200);
+      const result=await priced.json();
+      assert.ok(result.partidas.every(p=>p.metadatos.topografia.calculo_id===volume.id));
+      pricedEarthBudget=result;
+    }
+    await earthReview.getByRole('status').filter({hasText:'Estado: CALCULADO'}).waitFor();
+    await earthReview.getByRole('button',{name:'Validar presupuesto',exact:true}).click();
+    await earthReview.getByRole('status').filter({hasText:'Estado: VALIDADO'}).waitFor();
+    await earthReview.getByRole('button',{name:'Aprobar presupuesto',exact:true}).click();
+    await earthReview.getByRole('status').filter({hasText:'Estado: APROBADO'}).waitFor();
+    for (const format of ['Excel','PDF']) {
+      const [download]=await Promise.all([page.waitForEvent('download'),
+        earthReview.getByRole('button',{name:`Descargar ${format}`,exact:true}).click()]);
+      await download.saveAs(join(evidence,format==='Excel'?'earthwork-budget.xlsx':'earthwork-budget.pdf'));
+    }
+    // Reopen the files actually downloaded through the UI and check their contents.
+    const exported=execFileSync(join(backend,'.venv/bin/python'),['-c',`
+import json, sys, zipfile
+from openpyxl import load_workbook
+from pypdf import PdfReader
+expected=json.loads(sys.argv[3])
+with zipfile.ZipFile(sys.argv[1]) as archive:
+    assert archive.testzip() is None
+workbook=load_workbook(sys.argv[1], data_only=True)
+assert workbook['Topografía']['B2'].value == expected['calculo_id']
+assert workbook['Topografía']['B3'].value == expected['sha256']
+rows={row[0]:row for row in list(workbook['Presupuesto'].values)[1:] if isinstance(row[0],int)}
+source_rows=list(workbook['Fuentes de precio'].values)[1:]
+sources={row[0]:row for row in source_rows}
+assert len(rows) == len(source_rows) == len(sources) == 2
+assert set(rows) == set(sources) == {line['numero'] for line in expected['partidas']}
+for line in expected['partidas']:
+    row, source = rows[line['numero']], sources[line['numero']]
+    assert row[0] == source[0] == line['numero']
+    assert row[2] == 'm3' and row[3] == line['cantidad']
+    assert row[4] == line['precio_unitario'] and row[5] == round(line['cantidad']*line['precio_unitario'],2)
+    assert source[1] == line['catalogo_id'] and source[2] == 'CI-EARTHWORK'
+    assert source[5] == 'CI_SYNTHETIC_NOT_MARKET_PRICE' and source[11] == line['sha256']
+text=''.join(page.extract_text() for page in PdfReader(sys.argv[2]).pages)
+assert 'CI-EARTHWORK' in text and 'CI_SYNTHETIC_NOT_MARKET_PRICE' in text
+compact=''.join(text.split())
+assert expected['calculo_id'] in compact
+for line in expected['partidas']:
+    visible=f"m3{line['cantidad']:,.4f}$"+f"{line['precio_unitario']:,.2f}$"+f"{line['cantidad']*line['precio_unitario']:,.2f}"
+    assert visible in compact, (visible, text)
+print(json.dumps({'xlsx':'verified','pdf':'verified','calculo_id':expected['calculo_id']}))
+`,join(evidence,'earthwork-budget.xlsx'),join(evidence,'earthwork-budget.pdf'),JSON.stringify({
+      calculo_id:volume.id,sha256:volume.evidencia.sha256,
+      partidas:[...pricedEarthBudget.partidas].sort((a,b)=>a.numero-b.numero).map(p=>({
+        numero:p.numero,cantidad:p.cantidad,precio_unitario:p.precio_unitario,
+        catalogo_id:p.metadatos.catalogo_asignado.catalogo_id,sha256:p.metadatos.catalogo_asignado.sha256}))
+    })],{cwd:backend,env,encoding:'utf8',timeout:20000});
+    assert.equal(JSON.parse(exported).xlsx,'verified');
+    await page.screenshot({path:join(evidence,'10-topografia-utm.png'),fullPage:true});
+    await page.getByLabel('Elevación de referencia').fill('1');
+    assert.equal(await page.getByRole('button',{name:'Generar presupuesto de movimiento de tierras',exact:true}).count(),0);
+    await page.getByPlaceholder('Nombre nuevo levantamiento').fill('Otro levantamiento UTM 15');
+    await page.getByLabel('Sistema de coordenadas').selectOption('32615');
+    const [secondSurveyCreated]=await Promise.all([
+      page.waitForResponse(r=>r.request().method()==='POST' && /\/topografia\/[^/]+\/levantamientos$/.test(new URL(r.url()).pathname)),
+      page.getByRole('button',{name:'Crear levantamiento',exact:true}).click()]);
+    assert.equal(secondSurveyCreated.status(),200);
+    await page.getByRole('button',{name:'Calcular',exact:true}).waitFor({state:'hidden'});
+    assert.equal(await page.getByRole('button',{name:'Calcular',exact:true}).count(),0);
+    await page.getByLabel('Levantamiento activo').selectOption(survey.id);
+    await page.getByLabel('Superficie existente').waitFor();
+    assert.equal(await page.getByLabel('Superficie existente').inputValue(),'');
+    assert.equal(await page.getByRole('button',{name:'Calcular',exact:true}).isDisabled(),true);
     const projects = start('project-fixtures', join(backend,'.venv/bin/python'),
       ['-m','scripts.seed_bim_acceptance_ci','--projects-after',model.expediente_id],backend);
     const [projectsExit]=await once(projects,'exit');
@@ -215,6 +329,50 @@ test('user creates an obra, resumes an IFC job after restart, approves and expor
     await page.getByText('Variación observada: 15.0000% · corte 2020-09-10.',{exact:true}).waitFor();
     await page.getByText('Original: $100.0000 MXN · Estimado: $115.00 MXN/kg sin IVA.',{exact:true}).waitFor();
     await page.screenshot({path:join(evidence,'08-catalogos-indices.png'),fullPage:true});
+    // Synthetic source ZIP crosses the real import API and migrated schema.
+    // The private authentic CMIC/Varela packages are exercised separately.
+    await page.getByRole('button',{name:'Catálogos CMIC / fuentes',exact:true}).click();
+    await page.getByText('Ediciones importadas y revisiones pendientes',{exact:true}).click();
+    const [previewed] = await Promise.all([
+      page.waitForResponse(r=>r.request().method()==='POST' && new URL(r.url()).pathname==='/api/v1/catalogo-apu/importaciones/verificar'),
+      page.getByLabel('Importar paquete de catálogo ZIP').setInputFiles(credentials.catalog_package)]);
+    assert.equal(previewed.status(),200);
+    const [imported] = await Promise.all([
+      page.waitForResponse(r=>r.request().method()==='POST' && new URL(r.url()).pathname==='/api/v1/catalogo-apu/importaciones'),
+      page.getByRole('button',{name:'Importar fuentes seleccionadas',exact:true}).click()]);
+    assert.equal(imported.status(),200);
+    const edition = await imported.json();
+    assert.equal(edition.resumen.proyecciones_costeo,1);
+    await page.getByLabel('Modelo paramétrico',{exact:true}).selectOption({label:'MODEL-TEST · Synthetic parametric model · $4029.74/m2'});
+    await page.getByLabel('Localidad de la obra',{exact:true}).selectOption({label:'Synthetic city · FIC 0.897'});
+    await page.getByLabel('Cantidad m2',{exact:true}).fill('36');
+    await page.getByLabel('Justificación y condiciones del proyecto',{exact:true}).fill('Caso sintético de aceptación del modelo base');
+    const [estimated] = await Promise.all([
+      page.waitForResponse(r=>r.request().method()==='POST' && new URL(r.url()).pathname==='/api/v1/catalogo-apu/estimaciones-parametricas'),
+      page.getByRole('button',{name:'Calcular y guardar antepresupuesto',exact:true}).click()]);
+    assert.equal(estimated.status(),200);
+    const estimate = await estimated.json();
+    assert.equal(Number(estimate.monto),130128.36);
+    assert.equal(estimate.evidencia.apto_aprobacion_contractual,false);
+    await page.getByLabel('Buscar en catálogos importados',{exact:true}).fill('TEST-EXC');
+    await page.getByLabel('Concepto importado',{exact:true}).selectOption({label:'TEST-EXC · Synthetic excavation with six-decimal consumption · 152.43 / m3 · 2026-01-01'});
+    await page.getByLabel('Cantidad medida m3',{exact:true}).fill('2.4');
+    await page.getByRole('button',{name:'Agregar concepto al presupuesto',exact:true}).click();
+    await page.getByLabel('Cantidad medida m3',{exact:true}).fill('0.0420');
+    await page.getByRole('button',{name:'Agregar concepto al presupuesto',exact:true}).click();
+    await page.getByRole('cell',{name:'0.042',exact:true}).waitFor();
+    await page.getByPlaceholder('Contrato, convocatoria, análisis...').fill('Caso sintético sin recargos para comprobar precio fuente');
+    const [pricedCatalogue] = await Promise.all([
+      page.waitForResponse(r=>r.request().method()==='POST' && /\/presupuestos\/[^/]+\/presupuestos$/.test(new URL(r.url()).pathname)),
+      page.getByRole('button',{name:'Guardar en backend',exact:true}).click()]);
+    assert.equal(pricedCatalogue.status(),200);
+    const catalogBudget = await pricedCatalogue.json();
+    assert.equal(catalogBudget.monto_total,372.23);
+    assert.equal(catalogBudget.partidas[1].cantidad,0.042);
+    assert.equal(catalogBudget.partidas[1].importe,6.40);
+    assert.equal(catalogBudget.partidas[0].conceptos[0].insumos[0].cantidad,0.227273);
+    assert.equal(catalogBudget.partidas[0].metadatos.catalogo_asignado.origen_importacion.importacion_id,edition.id);
+    await page.screenshot({path:join(evidence,'11-importacion-costeo-catalogo.png'),fullPage:true});
     await page.goto(origin+'/?app=legl-consultor');
     await page.getByText('969 artículos consultables · ver cobertura',{exact:true}).click();
     await page.getByText('Documentos sin artículos consultables: Manual Comité Adquisiciones.',{exact:true}).waitFor();
